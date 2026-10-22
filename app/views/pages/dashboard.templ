@@ -1,14 +1,14 @@
 package pages
 
 import (
-	"dbplatform/app/internal/authn"
 	"dbplatform/app/domain"
+	"dbplatform/app/internal/authn"
 	"dbplatform/app/views/components"
 	"dbplatform/app/views/layouts"
 )
 
-templ Dashboard(user *authn.AuthLayoutUser, activeDBID string, tables []domain.TableSummary, selectedData domain.TableDataResult) {
-	@layouts.Dashboard("Database Viewer", user, activeDBID, "viewer") {
+templ Dashboard(user *authn.AuthLayoutUser, activeDBID string, tables []domain.TableSummary, selectedData domain.TableDataResult, csrfToken string) {
+	@layouts.Dashboard("Database Viewer", user, activeDBID, "viewer", csrfToken) {
 		<div class="flex gap-6 h-full" x-data="{ selectedTable: 'users' }">
 			<!-- Sidebar Daftar Tabel -->
 			<div class="w-64 bg-slate-800/60 border border-slate-700/60 rounded-xl p-4 flex flex-col shrink-0">

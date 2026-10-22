@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"dbplatform/app/domain"
 	"dbplatform/app/internal/authn"
@@ -64,6 +65,11 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /dashboard/select-db", s.handleDashboardPage)
 	s.mux.HandleFunc("GET /dashboard/table", s.handleDashboardTable)
 	s.mux.HandleFunc("POST /logout", s.handleLogoutHTMX)
+
+	// Migration Editor Routes
+	s.mux.HandleFunc("GET /migration", s.handleMigrationPage)
+	s.mux.HandleFunc("POST /migration/dry-run", s.handleMigrationDryRun)
+	s.mux.HandleFunc("POST /migration/apply", s.handleMigrationApply)
 
 	// JSON API Routes
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
@@ -154,6 +160,11 @@ func (s *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	csrfToken := ""
+	if cookie, err := r.Cookie(CSRFCookieName); err == nil {
+		csrfToken = cookie.Value
+	}
+
 	activeDBID := r.URL.Query().Get("db_id")
 	if activeDBID == "" && len(user.Databases) > 0 {
 		activeDBID = user.Databases[0].DatabaseID
@@ -178,7 +189,7 @@ func (s *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
 		TotalPages:  15,
 	}
 
-	templ.Handler(pages.Dashboard(user, activeDBID, dummyTables, dummyData)).ServeHTTP(w, r)
+	templ.Handler(pages.Dashboard(user, activeDBID, dummyTables, dummyData, csrfToken)).ServeHTTP(w, r)
 }
 
 func (s *Server) handleDashboardTable(w http.ResponseWriter, r *http.Request) {
@@ -210,6 +221,66 @@ func (s *Server) handleDashboardTable(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = components.DataGrid(dummyData).Render(r.Context(), w)
+}
+
+// Migration Editor Handlers
+
+func (s *Server) handleMigrationPage(w http.ResponseWriter, r *http.Request) {
+	sidCookie, err := r.Cookie(authn.SessionCookieName)
+	if err != nil || sidCookie.Value == "" {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	user, ok := s.sessions.Get(sidCookie.Value)
+	if !ok || user == nil {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	// Ambil atau buat token CSRF
+	csrfToken := ""
+	if cookie, err := r.Cookie(CSRFCookieName); err == nil {
+		csrfToken = cookie.Value
+	} else {
+		if token, err := GenerateCSRFToken(); err == nil {
+			csrfToken = token
+			http.SetCookie(w, &http.Cookie{
+				Name:     CSRFCookieName,
+				Value:    token,
+				Path:     "/",
+				HttpOnly: true,
+				Secure:   true,
+				SameSite: http.SameSiteLaxMode,
+			})
+		}
+	}
+
+	activeDBID := r.URL.Query().Get("db_id")
+	if activeDBID == "" && len(user.Databases) > 0 {
+		activeDBID = user.Databases[0].DatabaseID
+	}
+
+	dummyHistories := []domain.MigrationHistory{
+		{
+			ID:          "m-001",
+			Filename:    "0001_create_users_table.sql",
+			ExecutedAt:  time.Now().Add(-24 * time.Hour),
+			ExecutedBy:  user.Username,
+			Status:      "SUCCESS",
+			ExecutionMs: 45,
+		},
+	}
+
+	templ.Handler(pages.Migration(user, activeDBID, dummyHistories, csrfToken)).ServeHTTP(w, r)
+}
+
+func (s *Server) handleMigrationDryRun(w http.ResponseWriter, r *http.Request) {
+	_ = pages.MigrationFeedback(true, "Simulasi DDL Valid: 1 tabel akan dibuat tanpa error.").Render(r.Context(), w)
+}
+
+func (s *Server) handleMigrationApply(w http.ResponseWriter, r *http.Request) {
+	_ = pages.MigrationFeedback(true, "Migrasi berhasil dieksekusi ke PostgreSQL Target dalam 18ms.").Render(r.Context(), w)
 }
 
 func (s *Server) handleLogoutHTMX(w http.ResponseWriter, r *http.Request) {
