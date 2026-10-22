@@ -31,3 +31,38 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Node.js dependencies & logs
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Go binaries & build outputs
+bin/
+*.exe
+*.exe?
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Templ generated Go files (Opsional: jika tim sepakat re-generate otomatis via Makefile saat CI/build)
+# *_templ.go
+
+# Air / Live reload temporary files
+tmp/
+
+# Environment variables & secrets
+.env
+.env.local
+
+# IDE & OS specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
