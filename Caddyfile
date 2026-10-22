@@ -13,13 +13,8 @@ localhost {
         }
     }
 
-    # mengarahkan seluruh request /api/* ke Go backend
-    handle /api/* {
-        reverse_proxy backend:8080
-    }
-
-    # mengarahkan seluruh request halaman UI ke SSR frontend
+    # mengarahkan seluruh request (UI GOTTH & API) ke Go App server
     handle /* {
-        reverse_proxy frontend:3000
+        reverse_proxy app:8080
     }
 }

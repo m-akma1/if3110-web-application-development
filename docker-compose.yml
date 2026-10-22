@@ -10,28 +10,13 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - backend
-      - frontend
+      - app
     networks:
       - app_net
 
-  frontend:
+  app:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      - INTERNAL_API_URL=${INTERNAL_API_URL:-http://backend:8080}
-    depends_on:
-      - backend
-    networks:
-      - app_net
-
-  backend:
-    build:
-      context: ./backend
+      context: ./app
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file:
