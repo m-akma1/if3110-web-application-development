@@ -185,8 +185,8 @@ func (s *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
 		Columns:   []string{"id", "username", "role", "created_at"},
 		Rows: [][]string{
 			{"usr-101", "moreno", "PLATFORM_ADMIN", "2026-08-01 10:00"},
-			{"usr-102", "dhia", "USER", "2026-08-02 11:30"},
-			{"usr-103", "caca", "USER", "2026-08-03 14:15"},
+			{"usr-102", "akmal", "USER", "2026-08-02 11:30"},
+			{"usr-103", "dzaki", "USER", "2026-08-03 14:15"},
 		},
 		TotalRows:   150,
 		CurrentPage: 1,

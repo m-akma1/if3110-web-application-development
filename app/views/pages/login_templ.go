@@ -43,30 +43,30 @@ func Login(csrfToken string, errorMessage string) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"sm:mx-auto sm:w-full sm:max-w-md\"><div class=\"flex justify-center\"><div class=\"w-12 h-12 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-2xl text-white shadow-lg shadow-blue-500/30\">DB</div></div><h2 class=\"mt-4 text-center text-2xl font-bold tracking-tight text-white\">Masuk ke Akun Anda</h2><p class=\"mt-1 text-center text-sm text-slate-400\">Platform Pengelolaan Database & Migration</p></div><div class=\"mt-8 sm:mx-auto sm:w-full sm:max-w-md\"><div class=\"bg-slate-800/80 backdrop-blur-md py-8 px-4 shadow-xl border border-slate-700/60 sm:rounded-xl sm:px-10\"><!-- Container untuk pesan error dari HTMX / Backend --><div id=\"login-error\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"min-h-screen flex items-center justify-center bg-slate-950 p-4\"><div class=\"w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl space-y-6\" x-data=\"{ showPassword: false }\"><div class=\"text-center space-y-2\"><h1 class=\"text-2xl font-bold text-slate-100\">DB Manager</h1><p class=\"text-xs text-slate-400\">Masuk ke platform manajemen database</p></div><div id=\"login-error\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if errorMessage != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var3 string
-				templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(errorMessage)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/login.templ`, Line: 28, Col: 42}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</div>")
+				templ_7745c5c3_Err = LoginError(errorMessage).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</div><form hx-post=\"/login\" hx-target=\"#login-error\" hx-swap=\"innerHTML\" class=\"space-y-5\"><div><label for=\"username\" class=\"block text-sm font-medium text-slate-300\">Username</label><div class=\"mt-1\"><input id=\"username\" name=\"username\" type=\"text\" required autocomplete=\"username\" class=\"w-full px-3 py-2 bg-slate-900/90 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm transition\" placeholder=\"Masukkan username\"></div></div><div x-data=\"{ showPassword: false }\"><label for=\"password\" class=\"block text-sm font-medium text-slate-300\">Password</label><div class=\"mt-1 relative\"><input id=\"password\" name=\"password\" :type=\"showPassword ? 'text' : 'password'\" required autocomplete=\"current-password\" class=\"w-full px-3 py-2 bg-slate-900/90 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm transition pr-10\" placeholder=\"••••••••\"> <button type=\"button\" @click=\"showPassword = !showPassword\" class=\"absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200 text-xs\"><span x-text=\"showPassword ? 'Sembunyikan' : 'Tampilkan'\"></span></button></div></div><div><button type=\"submit\" class=\"w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-150\"><span class=\"htmx-indicator hidden\">Diproses...</span> <span>Masuk</span></button></div></form></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</div><form id=\"login-form\" hx-post=\"/login\" hx-target=\"#login-error\" hx-swap=\"innerHTML\" class=\"space-y-4\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var3 string
+			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(csrfToken)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/login.templ`, Line: 27, Col: 61}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\"><div><label class=\"block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1\">Username</label> <input type=\"text\" name=\"username\" required autofocus @keydown.enter.prevent=\"document.getElementById('login-btn').click()\" placeholder=\"Masukkan username\" class=\"w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition\"></div><div><label class=\"block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1\">Password</label><div class=\"relative flex items-center\"><input :type=\"showPassword ? 'text' : 'password'\" name=\"password\" required @keydown.enter.prevent=\"document.getElementById('login-btn').click()\" placeholder=\"••••••••\" class=\"w-full px-3.5 py-2.5 pr-10 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition\"> <button type=\"button\" @click=\"showPassword = !showPassword\" class=\"absolute right-3 text-slate-400 hover:text-cyan-400 transition\" tabindex=\"-1\"><!-- Ikon Mata Terbuka --><svg x-show=\"!showPassword\" class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg><!-- Ikon Mata Tertutup --><svg x-show=\"showPassword\" class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\" x-cloak><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858-5.908a10.02 10.02 0 012.122-.363c4.478 0 8.268 2.943 9.542 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21M3 3l18 18\"></path></svg></button></div></div><button id=\"login-btn\" type=\"submit\" class=\"w-full py-2.5 px-4 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold transition shadow-lg shadow-cyan-900/30 mt-2\">Masuk</button></form></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -80,8 +80,7 @@ func Login(csrfToken string, errorMessage string) templ.Component {
 	})
 }
 
-// Partial Component untuk respon error login via HTMX
-func LoginError(message string) templ.Component {
+func LoginError(msg string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -102,20 +101,20 @@ func LoginError(message string) templ.Component {
 			templ_7745c5c3_Var4 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var5 string
-		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(message)
+		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(msg)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/login.templ`, Line: 98, Col: 17}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/login.templ`, Line: 87, Col: 7}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
