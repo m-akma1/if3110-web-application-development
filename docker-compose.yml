@@ -1,0 +1,71 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - app_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - INTERNAL_API_URL=${INTERNAL_API_URL:-http://backend:8080}
+    depends_on:
+      - backend
+    networks:
+      - app_net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app_net
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dbplatform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-supersecretpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-dbplatform_core}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-dbplatform} -d $${POSTGRES_DB:-dbplatform_core}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app_net
+
+volumes:
+  caddy_data:
+  caddy_config:
+  postgres_data:
+
+networks:
+  app_net:
+    driver: bridge
