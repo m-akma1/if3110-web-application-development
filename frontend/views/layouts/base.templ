@@ -1,0 +1,24 @@
+package layouts
+
+templ Base(title string, csrfToken string) {
+    <!DOCTYPE html>
+    <html lang="id" class="h-full bg-slate-900">
+    <head>
+        <meta charset="UTF-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+        <meta name="csrf-token" content={ csrfToken }/>
+        <title>{ title } - Platform Manajemen Database</title>
+        <link href="/static/css/style.css" rel="stylesheet"/>
+        <script src="/static/js/htmx.min.js"></script>
+        <script defer src="/static/js/alpine.min.js"></script>
+    </head>
+    <body 
+        class="h-full text-slate-100 antialiased font-sans bg-slate-900"
+        hx-headers={ `{"X-CSRF-Token": "` + csrfToken + `"}` }
+    >
+        <div class="min-h-full flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+            { children... }
+        </div>
+    </body>
+    </html>
+}

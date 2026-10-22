@@ -6,12 +6,15 @@ import (
 	"log"
 	"net/http"
 	"os"
+
+	"dbplatform/backend/internal/authn"
 )
 
 type Server struct {
-	mux     *http.ServeMux
-	handler http.Handler
-	logger  *log.Logger
+	mux      *http.ServeMux
+	handler  http.Handler
+	logger   *log.Logger
+	sessions *authn.SessionStore
 }
 
 // menyusun router beserta rantai middleware (Logger -> CSRF -> Mux)
@@ -24,8 +27,9 @@ func NewServer(logOutput io.Writer) *Server {
 	mux := http.NewServeMux()
 
 	s := &Server{
-		mux:    mux,
-		logger: logger,
+		mux:      mux,
+		logger:   logger,
+		sessions: authn.NewSessionStore(),
 	}
 	s.registerRoutes()
 
@@ -55,6 +59,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/csrf-token", s.handleGetCSRFToken)
 	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
+	s.mux.HandleFunc("GET /api/auth/me", s.handleGetMe)
+	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -71,6 +77,7 @@ func (S *Server) handleGetCSRFToken(w http.ResponseWriter, r *http.Request) {
 	token, err := GenerateCSRFToken()
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Gagal membuat token CSRF")
+		return
 	}
 
 	http.SetCookie(w, &http.Cookie{
@@ -111,10 +118,17 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	opaqueSessionID, _ := GenerateCSRFToken()
+	opaqueSessionID, err := GenerateCSRFToken()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Gagal membuat sesi")
+		return
+	}
+
+	userProfile := authn.BuildUserProfile(req.Username)
+	s.sessions.Save(opaqueSessionID, userProfile)
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     "__Host-sid",
+		Name:     authn.SessionCookieName,
 		Value:    opaqueSessionID,
 		Path:     "/",
 		HttpOnly: true,
@@ -122,9 +136,48 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	writeJSON(w, http.StatusOK, map[string]string{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"message":  "login berhasil",
 		"username": req.Username,
+		"user":     userProfile,
+	})
+}
+
+// Handler mengambil profil & otorisasi user berdasarkan cookie sesi (__Host-sid)
+func (s *Server) handleGetMe(w http.ResponseWriter, r *http.Request) {
+	sidCookie, err := r.Cookie(authn.SessionCookieName)
+	if err != nil || sidCookie.Value == "" {
+		writeJSONError(w, http.StatusUnauthorized, "Sesi tidak ditemukan atau belum login")
+		return
+	}
+
+	user, ok := s.sessions.Get(sidCookie.Value)
+	if !ok || user == nil {
+		writeJSONError(w, http.StatusUnauthorized, "Sesi tidak valid atau telah berakhir")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, user)
+}
+
+// Handler logout untuk menghapus sesi aktif di server dan membersihkan cookie __Host-sid
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if sidCookie, err := r.Cookie(authn.SessionCookieName); err == nil && sidCookie.Value != "" {
+		s.sessions.Delete(sidCookie.Value)
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     authn.SessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"message": "logout berhasil",
 	})
 }
 

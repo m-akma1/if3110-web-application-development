@@ -112,4 +112,20 @@ func TestLoginFlow_CSRFAndSanitizedLog_Integration(t *testing.T) {
 	if strings.Contains(logOutput, secretPassword) || strings.Contains(logOutput, sessionCookie.Value) {
 		t.Fatalf("kebocoran password atau session identifier pada log aplikasi: %s", logOutput)
 	}
+
+	// Verifikasi GET /api/auth/me mengembalikan profil AuthLayoutUser dari sesi aktif
+	reqMe := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	reqMe.AddCookie(sessionCookie)
+	recMe := httptest.NewRecorder()
+	srv.ServeHTTP(recMe, reqMe)
+
+	if recMe.Code != http.StatusOK {
+		t.Fatalf("seharusnya GET /api/auth/me dengan sesi valid berhasil (200 OK), dapat: %d", recMe.Code)
+	}
+
+	var meResp map[string]any
+	_ = json.NewDecoder(recMe.Body).Decode(&meResp)
+	if meResp["username"] != "admin" {
+		t.Fatalf("seharusnya username pada /api/auth/me adalah 'admin', dapat: %v", meResp["username"])
+	}
 }

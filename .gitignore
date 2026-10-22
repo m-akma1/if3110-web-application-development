@@ -27,11 +27,17 @@ go.work.sum
 
 # env file
 .env
+.env.local
 
 node_modules/
 dist/
+bin/
+tmp/
 
-
-# Editor/IDE
-# .idea/
-# .vscode/
+# IDE & OS specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
