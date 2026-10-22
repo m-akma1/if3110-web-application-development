@@ -435,7 +435,7 @@ func (s *Server) handleAdminPage(w http.ResponseWriter, r *http.Request) {
 
 	dummyUsers := []domain.UserManagementItem{
 		{ID: "usr-101", Username: "moreno", Role: "PLATFORM_ADMIN", AccessCount: 2},
-		{ID: "usr-102", Username: "dhia", Role: "USER", AccessCount: 1},
+		{ID: "usr-102", Username: "dzaki", Role: "USER", AccessCount: 1},
 	}
 
 	templ.Handler(pages.Admin(user, activeDBID, dummyInstances, dummyUsers, csrfToken)).ServeHTTP(w, r)
