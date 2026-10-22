@@ -1,0 +1,25 @@
+localhost {
+    tls internal
+
+    log {
+        output stdout
+        format filter {
+            wrap json
+            fields {
+                request>headers>Cookie delete
+                request>headers>Authorization delete
+                resp_headers>Set-Cookie delete
+            }
+        }
+    }
+
+    # mengarahkan seluruh request /api/* ke Go backend
+    handle /api/* {
+        reverse_proxy backend:8080
+    }
+
+    # mengarahkan seluruh request halaman UI ke SSR frontend
+    handle /* {
+        reverse_proxy frontend:3000
+    }
+}
