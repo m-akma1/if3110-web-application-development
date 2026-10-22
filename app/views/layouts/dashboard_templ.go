@@ -34,7 +34,7 @@ func Dashboard(title string, user *authn.AuthLayoutUser, activeDBID string, acti
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<!doctype html><html lang=\"id\" class=\"h-full bg-slate-900\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<!doctype html><html lang=\"id\" class=\"h-full bg-slate-950\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -47,7 +47,7 @@ func Dashboard(title string, user *authn.AuthLayoutUser, activeDBID string, acti
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, " - Platform Manajemen Database</title><link href=\"/static/css/style.css\" rel=\"stylesheet\"><script src=\"/static/js/htmx.min.js\"></script><script defer src=\"/static/js/alpine.min.js\"></script></head><body class=\"h-full text-slate-100 bg-slate-900 font-sans\" hx-headers=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, " - Platform Manajemen Database</title><link href=\"/static/css/style.css\" rel=\"stylesheet\"><script src=\"/static/js/htmx.min.js\"></script><script defer src=\"/static/js/alpine.min.js\"></script></head><body class=\"h-full text-slate-100 bg-slate-950 font-sans antialiased\" hx-headers=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -76,7 +76,7 @@ func Dashboard(title string, user *authn.AuthLayoutUser, activeDBID string, acti
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<main class=\"flex-1 overflow-y-auto p-6 bg-slate-900\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<main class=\"flex-1 overflow-y-auto p-6 bg-slate-950\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
