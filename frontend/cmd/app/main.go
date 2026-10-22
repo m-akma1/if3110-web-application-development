@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"dbplatform/frontend/authn"
+	"dbplatform/frontend/domain"
+	"dbplatform/frontend/views/components"
 	"dbplatform/frontend/views/pages"
 
 	"github.com/a-h/templ"
@@ -167,11 +169,53 @@ func NewFrontendMux(internalAPIURL string) *http.ServeMux {
 			activeDBID = user.Databases[0].DatabaseID
 		}
 
-		templ.Handler(pages.Dashboard(&user, activeDBID)).ServeHTTP(w, r)
+		// Dummy data untuk pengetesan awal UI
+		dummyTables := []domain.TableSummary{
+			{Name: "users", RowCount: 150, IsSelected: true},
+			{Name: "groups", RowCount: 12, IsSelected: false},
+			{Name: "migration_histories", RowCount: 45, IsSelected: false},
+		}
+
+		dummyData := domain.TableDataResult{
+			TableName:   "users",
+			Columns:     []string{"id", "username", "role", "created_at"},
+			Rows: [][]string{
+				{"usr-101", "moreno", "PLATFORM_ADMIN", "2026-08-01 10:00"},
+				{"usr-102", "dhia", "USER", "2026-08-02 11:30"},
+				{"usr-103", "caca", "USER", "2026-08-03 14:15"},
+			},
+			TotalRows:   150,
+			CurrentPage: 1,
+			TotalPages:  15,
+		}
+
+		templ.Handler(pages.Dashboard(&user, activeDBID, dummyTables, dummyData)).ServeHTTP(w, r)
 	}
 
 	mux.HandleFunc("/dashboard", renderDashboard)
 	mux.HandleFunc("/dashboard/select-db", renderDashboard)
+
+	// Endpoint HTMXPartial untuk perpindahan tabel
+	mux.HandleFunc("/dashboard/table", func(w http.ResponseWriter, r *http.Request) {
+		tableName := r.URL.Query().Get("name")
+		if tableName == "" {
+			tableName = "users"
+		}
+
+		dummyData := domain.TableDataResult{
+			TableName:   tableName,
+			Columns:     []string{"id", "name", "status"},
+			Rows: [][]string{
+				{"1", "Sample Item A", "ACTIVE"},
+				{"2", "Sample Item B", "PENDING"},
+			},
+			TotalRows:   2,
+			CurrentPage: 1,
+			TotalPages:  1,
+		}
+
+		components.DataGrid(dummyData).Render(r.Context(), w)
+	})
 
 	// Route /logout (Meneruskan logout ke Backend POST /api/auth/logout & menghapus cookie sesi)
 	mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
