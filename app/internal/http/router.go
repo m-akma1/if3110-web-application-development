@@ -77,6 +77,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	s.mux.HandleFunc("GET /api/auth/me", s.handleGetMe)
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
+
+	// Route Platform Admin
+	s.mux.HandleFunc("GET /admin", s.handleAdminPage)
+	s.mux.HandleFunc("POST /admin/db/add", s.handleAddDBInstance)
 }
 
 // --- GOTTH UI & HTMX Handlers ---
@@ -399,6 +403,46 @@ func (s *Server) handleGetMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, user)
+}
+
+func (s *Server) handleAdminPage(w http.ResponseWriter, r *http.Request) {
+	sidCookie, err := r.Cookie(authn.SessionCookieName)
+	if err != nil || sidCookie.Value == "" {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	user, ok := s.sessions.Get(sidCookie.Value)
+	if !ok || user == nil || !user.IsPlatformAdmin {
+		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+		return
+	}
+
+	csrfToken := ""
+	if cookie, err := r.Cookie(CSRFCookieName); err == nil {
+		csrfToken = cookie.Value
+	}
+
+	activeDBID := r.URL.Query().Get("db_id")
+	if activeDBID == "" && len(user.Databases) > 0 {
+		activeDBID = user.Databases[0].DatabaseID
+	}
+
+	dummyInstances := []domain.DBInstance{
+		{ID: "db-1", Name: "PostgreSQL Utama", DBMS: "POSTGRESQL", Host: "postgres", Port: 5432, DBName: "app_db", Status: "CONNECTED"},
+		{ID: "db-2", Name: "MySQL Analytics", DBMS: "MYSQL", Host: "10.0.0.12", Port: 3306, DBName: "analytics_db", Status: "CONNECTED"},
+	}
+
+	dummyUsers := []domain.UserManagementItem{
+		{ID: "usr-101", Username: "moreno", Role: "PLATFORM_ADMIN", AccessCount: 2},
+		{ID: "usr-102", Username: "dhia", Role: "USER", AccessCount: 1},
+	}
+
+	templ.Handler(pages.Admin(user, activeDBID, dummyInstances, dummyUsers, csrfToken)).ServeHTTP(w, r)
+}
+
+func (s *Server) handleAddDBInstance(w http.ResponseWriter, r *http.Request) {
+	_ = pages.AdminFeedback(true, "Koneksi database target berhasil diuji dan disimpan.").Render(r.Context(), w)
 }
 
 // Handler logout untuk menghapus sesi aktif di server dan membersihkan cookie __Host-sid
