@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"if3110-web-application-development/authn"
 	"if3110-web-application-development/views/pages"
 
 	"github.com/a-h/templ"
@@ -14,7 +15,7 @@ func main() {
 
 	// Handler Tunggal untuk /login (GET & POST)
 	http.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		// 1. Jika request GET, render Halaman Login
+		// Jika request GET, render Halaman Login
 		if r.Method == http.MethodGet {
 			templ.Handler(pages.Login("", "")).ServeHTTP(w, r)
 			return
@@ -48,6 +49,32 @@ func main() {
 			return
 		}
 		http.NotFound(w, r)
+	})
+
+	// Route /dashboard
+	http.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
+		// Simulasi data respon dari Auth Context
+		dummyUser := &authn.AuthLayoutUser{
+			ID:              "usr-123",
+			Username:        "Moreno",
+			Role:            "PLATFORM_ADMIN",
+			IsPlatformAdmin: true,
+			Databases: []authn.DatabaseAccessSummary{
+				{DatabaseID: "db-1", DatabaseName: "PostgreSQL Utama", DBMS: "POSTGRESQL", EffectiveAccess: "VIEW_EDIT"},
+				{DatabaseID: "db-2", DatabaseName: "MySQL Production", DBMS: "MYSQL", EffectiveAccess: "VIEW_ONLY"},
+			},
+		}
+
+		templ.Handler(pages.Dashboard(dummyUser, "db-1")).ServeHTTP(w, r)
+	})
+
+	// Route /logout
+	http.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			w.Header().Set("HX-Redirect", "/login")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 	})
 
 	log.Println("Server berjalan di http://localhost:8080")
