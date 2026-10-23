@@ -48,7 +48,7 @@ func Dashboard(user *authn.AuthLayoutUser, activeDBID string, tables []domain.Ta
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"flex gap-6 h-full\" x-data=\"{ selectedTable: 'users' }\"><!-- Sidebar Daftar Tabel --><div class=\"w-64 bg-slate-800/60 border border-slate-700/60 rounded-xl p-4 flex flex-col shrink-0\"><h3 class=\"text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2\">Daftar Tabel</h3><div class=\"space-y-1 overflow-y-auto flex-1\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"flex gap-6 h-full\" x-data=\"{ selectedTable: 'users' }\"><!-- Sidebar Daftar Tabel --><div class=\"w-60 bg-[#222126] border border-[#333138] rounded-2xl p-4 flex flex-col shrink-0\"><h3 class=\"text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 px-2\">Daftar Tabel</h3><div class=\"space-y-1 overflow-y-auto flex-1\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -84,15 +84,15 @@ func Dashboard(user *authn.AuthLayoutUser, activeDBID string, tables []domain.Ta
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var5 string
-				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue("selectedTable === '" + tbl.Name + "' ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30' : 'text-slate-300 hover:bg-slate-700/50'")
+				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue("selectedTable === '" + tbl.Name + "' ? 'bg-[#ceafa3]/15 text-[#ceafa3] border border-[#ceafa3]/30 font-bold' : 'text-zinc-300 hover:bg-[#2c2a30] border border-transparent'")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/dashboard.templ`, Line: 23, Col: 154}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/dashboard.templ`, Line: 23, Col: 189}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" class=\"w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition flex justify-between items-center border border-transparent\"><span class=\"truncate font-mono text-xs\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" class=\"w-full text-left px-3 py-2 rounded-xl text-xs transition flex justify-between items-center\"><span class=\"truncate font-mono text-xs\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

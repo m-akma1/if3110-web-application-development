@@ -31,11 +31,11 @@ func Sidebar(user *authn.AuthLayoutUser, activeTab string) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<aside class=\"w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between shrink-0\"><div><!-- Brand Name Tanpa Logo DB --><div class=\"p-4 border-b border-slate-800 flex items-center\"><span class=\"font-bold text-lg text-slate-100 tracking-wide\">DB Manager</span></div><!-- Navigation Links --><nav class=\"p-3 space-y-1\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<aside class=\"w-60 bg-[#1c1b1e] border border-[#333138] rounded-2xl flex flex-col justify-between shrink-0 p-2\"><div><!-- Brand Name Tanpa Logo --><div class=\"p-4 flex items-center\"><span class=\"font-bold text-base text-zinc-100 tracking-wide\">DB Manager</span></div><!-- Navigation Links --><nav class=\"mt-2 space-y-1\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var2 = []any{"flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition", templ.KV("bg-cyan-500/10 text-cyan-400 border border-cyan-500/30", activeTab == "viewer"), templ.KV("text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 border border-transparent", activeTab != "viewer")}
+		var templ_7745c5c3_Var2 = []any{"flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition", templ.KV("bg-[#2c2a30] text-zinc-100 border border-[#3f3c45]", activeTab == "viewer"), templ.KV("text-zinc-400 hover:bg-[#252429] hover:text-zinc-200 border border-transparent", activeTab != "viewer")}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var2...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -57,7 +57,7 @@ func Sidebar(user *authn.AuthLayoutUser, activeTab string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var4 = []any{"flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition", templ.KV("bg-cyan-500/10 text-cyan-400 border border-cyan-500/30", activeTab == "migration"), templ.KV("text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 border border-transparent", activeTab != "migration")}
+		var templ_7745c5c3_Var4 = []any{"flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition", templ.KV("bg-[#2c2a30] text-zinc-100 border border-[#3f3c45]", activeTab == "migration"), templ.KV("text-zinc-400 hover:bg-[#252429] hover:text-zinc-200 border border-transparent", activeTab != "migration")}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var4...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -75,12 +75,12 @@ func Sidebar(user *authn.AuthLayoutUser, activeTab string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\"><svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 9l3 3-3 3m5 0h3M5 20h14a2 2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z\"></path></svg> Migration Editor</a> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\"><svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z\"></path></svg> Migration Editor</a> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if user != nil && user.IsPlatformAdmin {
-			var templ_7745c5c3_Var6 = []any{"flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition", templ.KV("bg-cyan-500/10 text-cyan-400 border border-cyan-500/30", activeTab == "admin"), templ.KV("text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 border border-transparent", activeTab != "admin")}
+			var templ_7745c5c3_Var6 = []any{"flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition", templ.KV("bg-[#2c2a30] text-zinc-100 border border-[#3f3c45]", activeTab == "admin"), templ.KV("text-zinc-400 hover:bg-[#252429] hover:text-zinc-200 border border-transparent", activeTab != "admin")}
 			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var6...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -103,7 +103,7 @@ func Sidebar(user *authn.AuthLayoutUser, activeTab string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</nav></div><div class=\"p-3 border-t border-slate-800\"><button hx-post=\"/logout\" class=\"w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-semibold text-rose-400 hover:bg-rose-500/10 transition\"><svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1\"></path></svg> Keluar</button></div></aside>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</nav></div><div class=\"pt-2 border-t border-[#333138]\"><button hx-post=\"/logout\" class=\"w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-[#ff8080] hover:bg-[#ff8080]/10 transition\"><svg class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1\"></path></svg> Keluar</button></div></aside>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
