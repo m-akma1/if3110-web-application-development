@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -13,14 +12,13 @@ import (
 )
 
 const (
-	SessionCookieName    = "__Host-sid"
-	RolePlatformAdmin    = "PLATFORM_ADMIN"
-	RoleUser             = "USER"
-	DefaultAdminPasscode = "OWNER-SECRET-2026"
+	SessionCookieName = "__Host-sid"
+	RolePlatformAdmin = "PLATFORM_ADMIN"
+	RoleUser          = "USER"
 )
 
 var (
-	ErrInvalidInviteCode = errors.New("kode undangan tim atau passcode admin tidak valid")
+	ErrInvalidInviteCode = errors.New("kode undangan tim tidak valid")
 	teamCodesMu          sync.RWMutex
 	defaultTeamCodes     = map[string]GroupSummary{
 		"TEAM-BACKEND": {ID: "grp-1", Name: "Backend-Engineers"},
@@ -40,7 +38,7 @@ func RegisterTeamCode(code, groupID, groupName string) {
 	}
 }
 
-// SetUserDBAccess mengatur level akses efektif seorang user pada database tertentu
+// SetUserDBAccess untuk mengatur level akses efektif seorang user pada database tertentu
 func SetUserDBAccess(userID, dbID, accessLevel string) {
 	userAccessMu.Lock()
 	defer userAccessMu.Unlock()
@@ -50,7 +48,7 @@ func SetUserDBAccess(userID, dbID, accessLevel string) {
 	userDBAccessGrants[userID][dbID] = accessLevel
 }
 
-// GetUserDBAccess membaca level akses efektif seorang user pada database tertentu
+// GetUserDBAccess untuk membaca level akses efektif seorang user pada database tertentu
 func GetUserDBAccess(userID, dbID, fallback string) string {
 	userAccessMu.RLock()
 	defer userAccessMu.RUnlock()
@@ -62,31 +60,21 @@ func GetUserDBAccess(userID, dbID, fallback string) string {
 	return fallback
 }
 
-// ValidateSignupCode memvalidasi pilihan tipe akun (Pemilik Database vs Anggota Tim) beserta kode khusus saat Sign Up
-func ValidateSignupCode(accountType, inviteCode string) (string, GroupSummary, error) {
+// ValidateSignupCode memvalidasi kode undangan tim saat Sign Up.
+// Sign Up publik hanya dapat membuat akun USER
+func ValidateSignupCode(inviteCode string) (GroupSummary, error) {
 	code := strings.TrimSpace(inviteCode)
 	if code == "" {
-		return "", GroupSummary{}, ErrInvalidInviteCode
-	}
-
-	if strings.ToUpper(strings.TrimSpace(accountType)) == RolePlatformAdmin {
-		expectedAdminCode := os.Getenv("ADMIN_REGISTRATION_CODE")
-		if expectedAdminCode == "" {
-			expectedAdminCode = DefaultAdminPasscode
-		}
-		if code != expectedAdminCode {
-			return "", GroupSummary{}, ErrInvalidInviteCode
-		}
-		return RolePlatformAdmin, GroupSummary{ID: "grp-owner", Name: "Database-Owners"}, nil
+		return GroupSummary{}, ErrInvalidInviteCode
 	}
 
 	teamCodesMu.RLock()
 	grp, ok := defaultTeamCodes[strings.ToUpper(code)]
 	teamCodesMu.RUnlock()
 	if !ok {
-		return "", GroupSummary{}, ErrInvalidInviteCode
+		return GroupSummary{}, ErrInvalidInviteCode
 	}
-	return RoleUser, grp, nil
+	return grp, nil
 }
 
 // SessionStore adalah mesin pengelola Identifikasi Principal & Siklus Hidup Sesi (Session Lifecycle Engine)
@@ -148,9 +136,9 @@ func (s *SessionStore) SeedDefaultUsers(ctx context.Context) error {
 		role     string
 	}{
 		{id: "usr-admin-001", username: "admin", email: "admin@email.com", password: "SuperSecretPass999!", role: RolePlatformAdmin},
-		{id: "usr-moreno-002", username: "Moreno", email: "moreno@email.com", password: "Rahasia123", role: RolePlatformAdmin},
-		{id: "usr-dhia-003", username: "dhia", email: "dhia@email.com", password: "PasswordDhia123!", role: RoleUser},
-		{id: "usr-caca-004", username: "caca", email: "caca@email.com", password: "PasswordCaca123!", role: RoleUser},
+		{id: "usr-moreno-002", username: "moreno", email: "moreno@email.com", password: "Password123!", role: RolePlatformAdmin},
+		{id: "usr-akmal-003", username: "akmal", email: "akmal@email.com", password: "Password123!", role: RoleUser},
+		{id: "usr-dzaki-004", username: "dzaki", email: "dzaki@email.com", password: "Password123!", role: RoleUser},
 	}
 
 	now := s.nowFunc()
@@ -611,7 +599,7 @@ func BuildUserProfileFromUser(u *User) *AuthLayoutUser {
 	if db1Access != string(rbac.AccessNone) {
 		dbs = append(dbs, DatabaseAccessSummary{
 			DatabaseID:      "db-1",
-			DatabaseName:    "PostgreSQL Utama",
+			DatabaseName:    "PostgreSQL Demo",
 			DBMS:            "POSTGRESQL",
 			EffectiveAccess: db1Access,
 		})

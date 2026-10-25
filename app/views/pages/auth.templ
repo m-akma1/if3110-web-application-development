@@ -5,19 +5,11 @@ import "dbplatform/app/views/layouts"
 // Struct untuk menampung pesan error & nilai input sebelumnya
 type AuthFormState struct {
 	Email         string
-	AccountType   string // "USER" atau "PLATFORM_ADMIN"
 	InviteCode    string
 	EmailError    string
 	PasswordError string
 	CodeError     string
 	GeneralError  string
-}
-
-func resolveAccountType(t string) string {
-	if t == "PLATFORM_ADMIN" {
-		return "PLATFORM_ADMIN"
-	}
-	return "USER"
 }
 
 // ==========================================
@@ -175,7 +167,7 @@ templ SignupPage(csrfToken string, state AuthFormState) {
 }
 
 templ SignupForm(state AuthFormState) {
-	<div class="space-y-6" x-data={ "{ show: false, accountType: '" + resolveAccountType(state.AccountType) + "' }" }>
+	<div class="space-y-6" x-data="{ show: false }">
 		<!-- Header -->
 		<div class="space-y-2.5">
 			<div class="text-[#ceafa3]">
@@ -187,7 +179,7 @@ templ SignupForm(state AuthFormState) {
 				Create an account
 			</h1>
 			<p class="text-xs sm:text-sm text-zinc-400 leading-relaxed">
-				Pilih peran akun Anda dan masukkan kode akses untuk mulai mengelola atau melihat database.
+				Masukkan kode tim dari Platform Admin untuk bergabung dan mulai melihat database.
 			</p>
 		</div>
 
@@ -199,34 +191,6 @@ templ SignupForm(state AuthFormState) {
 
 		<!-- Form Sign Up -->
 		<form hx-post="/auth/signup" hx-target="#auth-form-container" hx-swap="innerHTML" class="space-y-4">
-			<!-- Pilihan Peran: Anggota Tim vs Pemilik Database -->
-			<div class="space-y-1.5">
-				<label class="block text-xs font-semibold text-zinc-200">
-					Daftar Sebagai
-				</label>
-				<input type="hidden" name="account_type" :value="accountType"/>
-				<div class="grid grid-cols-2 gap-2.5">
-					<button
-						type="button"
-						@click="accountType = 'USER'"
-						:class="accountType === 'USER' ? 'bg-[#ceafa3]/15 border-[#ceafa3] text-[#ceafa3]' : 'bg-[#18171b] border-[#333138] text-zinc-300 hover:bg-[#252429]'"
-						class="p-2.5 rounded-lg border text-left transition cursor-pointer"
-					>
-						<div class="text-xs font-bold">Anggota Tim (User)</div>
-						<div class="text-[10px] text-zinc-400 mt-0.5">Gabung via kode tim</div>
-					</button>
-					<button
-						type="button"
-						@click="accountType = 'PLATFORM_ADMIN'"
-						:class="accountType === 'PLATFORM_ADMIN' ? 'bg-[#ceafa3]/15 border-[#ceafa3] text-[#ceafa3]' : 'bg-[#18171b] border-[#333138] text-zinc-300 hover:bg-[#252429]'"
-						class="p-2.5 rounded-lg border text-left transition cursor-pointer"
-					>
-						<div class="text-xs font-bold">Pemilik Database</div>
-						<div class="text-[10px] text-zinc-400 mt-0.5">Kelola DB &amp; akses grup</div>
-					</button>
-				</div>
-			</div>
-
 			<!-- Input Email + Error di Samping Label -->
 			<div class="space-y-1.5">
 				<div class="flex items-center justify-between gap-2">
@@ -298,13 +262,12 @@ templ SignupForm(state AuthFormState) {
 				</div>
 			</div>
 
-			<!-- Input Kode Khusus (Team Invite Code / Owner Passcode) -->
+			<!-- Input Kode Undangan Tim -->
 			<div class="space-y-1.5">
 				<div class="flex items-center justify-between gap-2">
 					<label
 						for="signup-invite-code"
 						class="block text-xs font-semibold text-zinc-200"
-						x-text="accountType === 'PLATFORM_ADMIN' ? 'Owner / Admin Passcode' : 'Team Invite Code'"
 					>
 						Team Invite Code
 					</label>
@@ -322,18 +285,12 @@ templ SignupForm(state AuthFormState) {
 					id="signup-invite-code"
 					name="invite_code"
 					value={ state.InviteCode }
-					:placeholder="accountType === 'PLATFORM_ADMIN' ? 'Masukkan passcode pemilik (misal: OWNER-SECRET-2026)' : 'Masukkan kode tim (misal: TEAM-BACKEND)'"
+					placeholder="Masukkan kode tim"
 					required
 					class={ "w-full px-3.5 py-2.5 text-sm font-mono rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
 						templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.CodeError != ""),
 						templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.CodeError == "") }
 				/>
-				<p x-show="accountType === 'USER'" class="text-[10px] text-zinc-400">
-					Kode tim tersedia: <span class="font-mono text-[#ceafa3]">TEAM-BACKEND</span> atau <span class="font-mono text-[#ceafa3]">TEAM-ANALYST</span>
-				</p>
-				<p x-show="accountType === 'PLATFORM_ADMIN'" x-cloak class="text-[10px] text-zinc-400">
-					Memerlukan kode registrasi pemilik database (<span class="font-mono text-[#ffbc5e]">OWNER-SECRET-2026</span>).
-				</p>
 			</div>
 
 			<!-- Tombol Submit -->

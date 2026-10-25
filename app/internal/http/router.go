@@ -60,11 +60,11 @@ func NewServerWithSessions(logOutput io.Writer, sessionStore *authn.SessionStore
 		sessions:   sessionStore,
 		dbRegistry: dbmanager.NewConnectionRegistry(),
 		instances: []domain.DBInstance{
-			{ID: "db-1", InviteCode: "TEAM-BACKEND", Name: "PostgreSQL Utama", DBMS: "POSTGRESQL", Host: "postgres", Port: 5432, DBName: "dbplatform_core", Status: "CONNECTED"},
+			{ID: "db-1", InviteCode: "TEAM-BACKEND", Name: "PostgreSQL Demo", DBMS: "POSTGRESQL", Host: "target-postgres", Port: 5432, DBName: "demo_target", Status: "CONNECTED"},
 			{ID: "db-2", InviteCode: "TEAM-ANALYST", Name: "MySQL Production", DBMS: "MYSQL", Host: "mysql-prod.internal", Port: 3306, DBName: "analytics_db", Status: "CONNECTED"},
 		},
 		inviteCodes: []domain.TeamInviteCodeItem{
-			{Code: "TEAM-BACKEND", GroupName: "Backend-Engineers", DatabaseID: "db-1", DatabaseName: "PostgreSQL Utama", DefaultAccess: "VIEW_EDIT"},
+			{Code: "TEAM-BACKEND", GroupName: "Backend-Engineers", DatabaseID: "db-1", DatabaseName: "PostgreSQL Demo", DefaultAccess: "VIEW_EDIT"},
 			{Code: "TEAM-ANALYST", GroupName: "Data-Analysts", DatabaseID: "db-2", DatabaseName: "MySQL Production", DefaultAccess: "VIEW_ONLY"},
 		},
 	}
@@ -82,6 +82,11 @@ func NewServerWithSessions(logOutput io.Writer, sessionStore *authn.SessionStore
 // Sessions mengembalikan instance SessionStore milik server
 func (s *Server) Sessions() *authn.SessionStore {
 	return s.sessions
+}
+
+// ConnectDatabase membuka koneksi ke database target, melakukan Ping, lalu mendaftarkannya ke registry
+func (s *Server) ConnectDatabase(ctx context.Context, dbID, dsn string) error {
+	return s.dbRegistry.ConnectAndRegister(ctx, dbID, dsn)
 }
 
 // RegisterDatabasePool mendaftarkan koneksi *sql.DB untuk database target tertentu (misal "db-1")
@@ -300,18 +305,14 @@ func (s *Server) handleSignupHTMX(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sign Up publik selalu membuat akun USER (Field account_type diabaikan)
 	email := strings.TrimSpace(r.FormValue("email"))
 	password := r.FormValue("password")
-	accountType := strings.TrimSpace(r.FormValue("account_type"))
-	if accountType == "" {
-		accountType = authn.RoleUser
-	}
 	inviteCode := strings.TrimSpace(r.FormValue("invite_code"))
 
 	state := pages.AuthFormState{
-		Email:       email,
-		AccountType: accountType,
-		InviteCode:  inviteCode,
+		Email:      email,
+		InviteCode: inviteCode,
 	}
 	if email == "" {
 		state.EmailError = "Email wajib diisi"
@@ -325,13 +326,8 @@ func (s *Server) handleSignupHTMX(w http.ResponseWriter, r *http.Request) {
 		state.PasswordError = "Minimal 8 karakter"
 	}
 
-	resolvedRole, _, codeErr := authn.ValidateSignupCode(accountType, inviteCode)
-	if codeErr != nil {
-		if accountType == authn.RolePlatformAdmin {
-			state.CodeError = "Passcode pemilik database tidak valid"
-		} else {
-			state.CodeError = "Kode tim tidak valid"
-		}
+	if _, codeErr := authn.ValidateSignupCode(inviteCode); codeErr != nil {
+		state.CodeError = "Kode tim tidak valid"
 	}
 
 	if state.EmailError != "" || state.PasswordError != "" || state.CodeError != "" {
@@ -347,7 +343,7 @@ func (s *Server) handleSignupHTMX(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.sessions.RegisterUserWithEmail(r.Context(), "", "", email, password, resolvedRole); err != nil {
+	if _, err := s.sessions.RegisterUserWithEmail(r.Context(), "", "", email, password, authn.RoleUser); err != nil {
 		state.GeneralError = "Gagal mendaftarkan akun, silakan coba lagi."
 		w.WriteHeader(http.StatusOK)
 		_ = pages.SignupForm(state).Render(r.Context(), w)
@@ -713,7 +709,7 @@ func (s *Server) handleDashboardQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Jika pool koneksi live untuk database yang dipilih tersedia (misal PostgreSQL Utama "db-1"),
+	// 1. Jika pool koneksi live untuk database yang dipilih tersedia (misal PostgreSQL Demo "db-1"),
 	// jalankan query sesungguhnya ke database tersebut di dalam Read-Only Transaction!
 	if _, hasPool := s.dbRegistry.GetPool(dbID); hasPool {
 		liveRes, execErr := s.dbRegistry.ExecuteQueryOnDB(r.Context(), dbID, cleanedSQL)
@@ -848,7 +844,7 @@ func (s *Server) buildAdminUsersList(ctx context.Context) []domain.UserManagemen
 			Role:     u.Role,
 			IsActive: u.IsActive,
 			Grants: []domain.UserAccessGrant{
-				{DatabaseID: "db-1", DatabaseName: "PostgreSQL Utama", DBMS: "POSTGRESQL", EffectiveAccess: db1Access},
+				{DatabaseID: "db-1", DatabaseName: "PostgreSQL Demo", DBMS: "POSTGRESQL", EffectiveAccess: db1Access},
 				{DatabaseID: "db-2", DatabaseName: "MySQL Production", DBMS: "MYSQL", EffectiveAccess: db2Access},
 			},
 		})
@@ -949,7 +945,7 @@ func (s *Server) handleAdminGenerateCode(w http.ResponseWriter, r *http.Request)
 	}
 
 	s.adminMu.Lock()
-	dbName := "PostgreSQL Utama"
+	dbName := "PostgreSQL Demo"
 	for _, inst := range s.instances {
 		if inst.ID == dbID {
 			dbName = inst.Name
