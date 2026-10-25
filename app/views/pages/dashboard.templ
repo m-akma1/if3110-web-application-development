@@ -2,13 +2,15 @@ package pages
 
 import (
 	"dbplatform/app/domain"
-	"dbplatform/app/internal/authn"
 	"dbplatform/app/views/components"
 	"dbplatform/app/views/layouts"
 )
 
-templ Dashboard(user *authn.AuthLayoutUser, activeDBID string, tables []domain.TableSummary, selectedData domain.TableDataResult, csrfToken string) {
+templ Dashboard(user *domain.AuthLayoutUser, activeDBID string, tables []domain.TableSummary, selectedData domain.TableDataResult, csrfToken string) {
 	@layouts.Dashboard("Database Viewer", user, activeDBID, "viewer", csrfToken) {
+		if activeDBID == "" {
+			@components.NoDatabaseAccess(user)
+		} else {
 		<div class="flex gap-6 h-full" x-data="{ selectedTable: 'users' }">
 			<!-- Sidebar Daftar Tabel -->
 			<div class="w-60 bg-[#222126] border border-[#333138] rounded-2xl p-4 flex flex-col shrink-0">
@@ -115,5 +117,6 @@ templ Dashboard(user *authn.AuthLayoutUser, activeDBID string, tables []domain.T
 				@components.DataGrid(selectedData)
 			</div>
 		</div>
+		}
 	}
 }

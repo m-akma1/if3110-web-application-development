@@ -10,12 +10,11 @@ import templruntime "github.com/a-h/templ/runtime"
 
 import (
 	"dbplatform/app/domain"
-	"dbplatform/app/internal/authn"
 	"dbplatform/app/views/components"
 	"dbplatform/app/views/layouts"
 )
 
-func Dashboard(user *authn.AuthLayoutUser, activeDBID string, tables []domain.TableSummary, selectedData domain.TableDataResult, csrfToken string) templ.Component {
+func Dashboard(user *domain.AuthLayoutUser, activeDBID string, tables []domain.TableSummary, selectedData domain.TableDataResult, csrfToken string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -48,105 +47,112 @@ func Dashboard(user *authn.AuthLayoutUser, activeDBID string, tables []domain.Ta
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"flex gap-6 h-full\" x-data=\"{ selectedTable: 'users' }\"><!-- Sidebar Daftar Tabel --><div class=\"w-60 bg-[#222126] border border-[#333138] rounded-2xl p-4 flex flex-col shrink-0\"><h3 class=\"text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 px-2\">Daftar Tabel</h3><div class=\"space-y-1 overflow-y-auto flex-1\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			for _, tbl := range tables {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<button hx-get=\"")
+			if activeDBID == "" {
+				templ_7745c5c3_Err = components.NoDatabaseAccess(user).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var3 string
-				templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue("/dashboard/table?db_id=" + activeDBID + "&name=" + tbl.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/dashboard.templ`, Line: 19, Col: 76}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
+			} else {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"flex gap-6 h-full\" x-data=\"{ selectedTable: 'users' }\"><!-- Sidebar Daftar Tabel --><div class=\"w-60 bg-[#222126] border border-[#333138] rounded-2xl p-4 flex flex-col shrink-0\"><h3 class=\"text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 px-2\">Daftar Tabel</h3><div class=\"space-y-1 overflow-y-auto flex-1\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" hx-target=\"#data-grid-container\" hx-swap=\"outerHTML\" @click=\"")
+				for _, tbl := range tables {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<button hx-get=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var3 string
+					templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue("/dashboard/table?db_id=" + activeDBID + "&name=" + tbl.Name)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/dashboard.templ`, Line: 21, Col: 76}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" hx-target=\"#data-grid-container\" hx-swap=\"outerHTML\" @click=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var4 string
+					templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue("selectedTable = '" + tbl.Name + "'")
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/dashboard.templ`, Line: 24, Col: 52}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\" :class=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var5 string
+					templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue("selectedTable === '" + tbl.Name + "' ? 'bg-[#ceafa3]/15 text-[#ceafa3] border border-[#ceafa3]/30 font-bold' : 'text-zinc-300 hover:bg-[#2c2a30] border border-transparent'")
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/dashboard.templ`, Line: 25, Col: 189}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" class=\"w-full text-left px-3 py-2 rounded-xl text-xs transition flex justify-between items-center cursor-pointer\"><span class=\"truncate font-mono text-xs\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var6 string
+					templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(tbl.Name)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/dashboard.templ`, Line: 28, Col: 58}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</span></button>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</div></div><!-- Main Panel: Read-Only Query Runner + Data Grid --><div class=\"flex-1 min-w-0 space-y-5\"><!-- Read-Only SQL Query Runner dengan Live Keyword Guard --><div class=\"bg-[#222126] border border-[#333138] rounded-2xl p-4 shadow-xl space-y-3\" x-data=\"{\n\t\t\t\t\t\tsqlQuery: 'SELECT id, username, role, created_at FROM users;',\n\t\t\t\t\t\tget forbiddenKeyword() {\n\t\t\t\t\t\t\tconst m = this.sqlQuery.match(/\\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|REPLACE|GRANT|REVOKE|MERGE|CALL|EXEC|EXECUTE|COPY|VACUUM)\\b/i);\n\t\t\t\t\t\t\treturn m ? m[1].toUpperCase() : '';\n\t\t\t\t\t\t},\n\t\t\t\t\t\tget hasMultiStatement() {\n\t\t\t\t\t\t\tconst trimmed = this.sqlQuery.trim().replace(/;$/, '');\n\t\t\t\t\t\t\treturn trimmed.includes(';');\n\t\t\t\t\t\t}\n\t\t\t\t\t}\"><div class=\"flex items-center justify-between\"><div class=\"flex items-center gap-2\"><span class=\"text-xs font-bold text-white uppercase tracking-wider\">SQL Query Explorer</span> <span class=\"px-2 py-0.5 rounded text-[10px] font-semibold bg-[#ceafa3]/10 text-[#ceafa3] border border-[#ceafa3]/20\">SELECT Only (Read-Only Guard)</span> <span class=\"px-2 py-0.5 rounded text-[10px] font-mono bg-[#18171b] text-zinc-300 border border-[#333138]\">Target DB: ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var4 string
-				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue("selectedTable = '" + tbl.Name + "'")
+				var templ_7745c5c3_Var7 string
+				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(activeDBID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/dashboard.templ`, Line: 22, Col: 52}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/dashboard.templ`, Line: 58, Col: 31}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\" :class=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var5 string
-				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue("selectedTable === '" + tbl.Name + "' ? 'bg-[#ceafa3]/15 text-[#ceafa3] border border-[#ceafa3]/30 font-bold' : 'text-zinc-300 hover:bg-[#2c2a30] border border-transparent'")
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/dashboard.templ`, Line: 23, Col: 189}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</span></div><span class=\"text-xs text-zinc-400\">Perubahan data/skema wajib melalui menu Migration</span></div><form hx-post=\"/dashboard/query\" hx-target=\"#data-grid-container\" hx-swap=\"outerHTML\" class=\"space-y-2.5\"><input type=\"hidden\" name=\"db_id\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" class=\"w-full text-left px-3 py-2 rounded-xl text-xs transition flex justify-between items-center cursor-pointer\"><span class=\"truncate font-mono text-xs\">")
+				var templ_7745c5c3_Var8 string
+				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(activeDBID)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/dashboard.templ`, Line: 72, Col: 58}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var6 string
-				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(tbl.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/dashboard.templ`, Line: 26, Col: 58}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\"><div class=\"space-y-2\"><textarea name=\"sql_query\" rows=\"3\" x-model=\"sqlQuery\" placeholder=\"SELECT * FROM users LIMIT 25;\" :class=\"(forbiddenKeyword !== '' || hasMultiStatement) ? 'border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30' : 'border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50'\" class=\"w-full px-3.5 py-2.5 text-xs font-mono rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition resize-y\"></textarea><div class=\"flex justify-end\"><button type=\"submit\" :disabled=\"forbiddenKeyword !== '' || hasMultiStatement || sqlQuery.trim() === ''\" class=\"px-4 py-2 rounded-lg bg-[#ceafa3] hover:bg-[#c2a195] disabled:opacity-40 disabled:cursor-not-allowed text-[#121212] text-xs font-semibold transition cursor-pointer shrink-0\">Jalankan Query</button></div></div><!-- Peringatan Real-Time di Frontend saat Terdeteksi Keyword Mutasi --><div x-show=\"forbiddenKeyword !== ''\" x-cloak class=\"p-2.5 rounded-lg bg-[#ff8080]/10 border border-[#ff8080]/30 text-xs text-[#ff8080] flex items-center gap-2\"><svg class=\"w-4 h-4 shrink-0\" viewBox=\"0 0 20 20\" fill=\"currentColor\"><path fill-rule=\"evenodd\" d=\"M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z\" clip-rule=\"evenodd\"></path></svg> <span>Perintah <strong class=\"font-mono underline\" x-text=\"forbiddenKeyword\"></strong> ditolak! Halaman utama hanya mengizinkan pembacaan data (<code class=\"font-mono\">SELECT</code>).</span></div><div x-show=\"forbiddenKeyword === '' && hasMultiStatement\" x-cloak class=\"p-2.5 rounded-lg bg-[#ffbc5e]/10 border border-[#ffbc5e]/20 text-xs text-[#ffbc5e] flex items-center gap-2\"><span>Multi-statement (<code class=\"font-mono\">;</code>) tidak diizinkan pada Data Viewer.</span></div></form></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</span></button>")
+				templ_7745c5c3_Err = components.DataGrid(selectedData).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</div></div><!-- Main Panel: Read-Only Query Runner + Data Grid --><div class=\"flex-1 min-w-0 space-y-5\"><!-- Read-Only SQL Query Runner dengan Live Keyword Guard --><div class=\"bg-[#222126] border border-[#333138] rounded-2xl p-4 shadow-xl space-y-3\" x-data=\"{\n\t\t\t\t\t\tsqlQuery: 'SELECT id, username, role, created_at FROM users;',\n\t\t\t\t\t\tget forbiddenKeyword() {\n\t\t\t\t\t\t\tconst m = this.sqlQuery.match(/\\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|REPLACE|GRANT|REVOKE|MERGE|CALL|EXEC|EXECUTE|COPY|VACUUM)\\b/i);\n\t\t\t\t\t\t\treturn m ? m[1].toUpperCase() : '';\n\t\t\t\t\t\t},\n\t\t\t\t\t\tget hasMultiStatement() {\n\t\t\t\t\t\t\tconst trimmed = this.sqlQuery.trim().replace(/;$/, '');\n\t\t\t\t\t\t\treturn trimmed.includes(';');\n\t\t\t\t\t\t}\n\t\t\t\t\t}\"><div class=\"flex items-center justify-between\"><div class=\"flex items-center gap-2\"><span class=\"text-xs font-bold text-white uppercase tracking-wider\">SQL Query Explorer</span> <span class=\"px-2 py-0.5 rounded text-[10px] font-semibold bg-[#ceafa3]/10 text-[#ceafa3] border border-[#ceafa3]/20\">SELECT Only (Read-Only Guard)</span> <span class=\"px-2 py-0.5 rounded text-[10px] font-mono bg-[#18171b] text-zinc-300 border border-[#333138]\">Target DB: ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var7 string
-			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(activeDBID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/dashboard.templ`, Line: 56, Col: 31}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</span></div><span class=\"text-xs text-zinc-400\">Perubahan data/skema wajib melalui menu Migration</span></div><form hx-post=\"/dashboard/query\" hx-target=\"#data-grid-container\" hx-swap=\"outerHTML\" class=\"space-y-2.5\"><input type=\"hidden\" name=\"db_id\" value=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var8 string
-			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(activeDBID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/dashboard.templ`, Line: 70, Col: 58}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\"><div class=\"space-y-2\"><textarea name=\"sql_query\" rows=\"3\" x-model=\"sqlQuery\" placeholder=\"SELECT * FROM users LIMIT 25;\" :class=\"(forbiddenKeyword !== '' || hasMultiStatement) ? 'border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30' : 'border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50'\" class=\"w-full px-3.5 py-2.5 text-xs font-mono rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition resize-y\"></textarea><div class=\"flex justify-end\"><button type=\"submit\" :disabled=\"forbiddenKeyword !== '' || hasMultiStatement || sqlQuery.trim() === ''\" class=\"px-4 py-2 rounded-lg bg-[#ceafa3] hover:bg-[#c2a195] disabled:opacity-40 disabled:cursor-not-allowed text-[#121212] text-xs font-semibold transition cursor-pointer shrink-0\">Jalankan Query</button></div></div><!-- Peringatan Real-Time di Frontend saat Terdeteksi Keyword Mutasi --><div x-show=\"forbiddenKeyword !== ''\" x-cloak class=\"p-2.5 rounded-lg bg-[#ff8080]/10 border border-[#ff8080]/30 text-xs text-[#ff8080] flex items-center gap-2\"><svg class=\"w-4 h-4 shrink-0\" viewBox=\"0 0 20 20\" fill=\"currentColor\"><path fill-rule=\"evenodd\" d=\"M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z\" clip-rule=\"evenodd\"></path></svg> <span>Perintah <strong class=\"font-mono underline\" x-text=\"forbiddenKeyword\"></strong> ditolak! Halaman utama hanya mengizinkan pembacaan data (<code class=\"font-mono\">SELECT</code>).</span></div><div x-show=\"forbiddenKeyword === '' && hasMultiStatement\" x-cloak class=\"p-2.5 rounded-lg bg-[#ffbc5e]/10 border border-[#ffbc5e]/20 text-xs text-[#ffbc5e] flex items-center gap-2\"><span>Multi-statement (<code class=\"font-mono\">;</code>) tidak diizinkan pada Data Viewer.</span></div></form></div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = components.DataGrid(selectedData).Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</div></div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</div></div>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
 			}
 			return nil
 		})

@@ -273,3 +273,15 @@ templ DataGrid(data domain.TableDataResult) {
 		</div>
 	</div>
 }
+
+// DataGridError replaces the data grid with an error (for example access denied).
+templ DataGridError(message string) {
+	<div id="data-grid-container" class="space-y-4">
+		<div class="p-3.5 rounded-xl bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs font-medium flex items-center gap-2">
+			<svg class="w-4 h-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+				<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
+			</svg>
+			<span>{ message }</span>
+		</div>
+	</div>
+}

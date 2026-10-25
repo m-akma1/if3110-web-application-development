@@ -10,12 +10,14 @@ import templruntime "github.com/a-h/templ/runtime"
 
 import (
 	"dbplatform/app/domain"
-	"dbplatform/app/internal/authn"
+	"dbplatform/app/views/components"
 	"dbplatform/app/views/layouts"
 	"fmt"
 )
 
-func Migration(user *authn.AuthLayoutUser, activeDBID string, histories []domain.MigrationHistory, csrfToken string) templ.Component {
+// Migration shows history to View Only users; the editor and run buttons only to View + Edit users.
+// The backend checks the same rule on every POST, the hidden UI is only a convenience.
+func Migration(user *domain.AuthLayoutUser, activeDBID string, canEdit bool, histories []domain.MigrationHistory, csrfToken string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -48,106 +50,141 @@ func Migration(user *authn.AuthLayoutUser, activeDBID string, histories []domain
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\" x-data=\"{ query: 'CREATE TABLE example (\\n    id SERIAL PRIMARY KEY,\\n    name VARCHAR(255) NOT NULL\\n);' }\"><div><h1 class=\"text-2xl font-bold text-zinc-100\">Migration Editor</h1><p class=\"text-zinc-400 mt-1\">Tulis dan eksekusi skrip DDL/SQL untuk memperbarui skema database terhubung.</p></div><div class=\"bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-6 space-y-4 shadow-xl\"><form id=\"migration-form\"><div class=\"flex justify-between items-center mb-4\"><label class=\"text-xs font-bold text-zinc-400 uppercase tracking-wider\">Skrip SQL Migrasi</label><div class=\"flex gap-2\"><button type=\"button\" @click=\"query = ''\" class=\"px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:bg-[#252525] transition\">Bersihkan</button> <button type=\"button\" hx-post=\"/migration/dry-run\" hx-target=\"#migration-feedback\" hx-include=\"#migration-form\" class=\"px-3 py-1.5 rounded-lg text-xs font-medium bg-[#252525] hover:bg-[#333] text-white transition\">Simulasi (Dry Run)</button> <button type=\"button\" hx-post=\"/migration/apply\" hx-target=\"#migration-feedback\" hx-include=\"#migration-form\" class=\"px-4 py-1.5 rounded-lg text-xs font-bold bg-[#ceafa3] hover:bg-[#c09f93] text-[#121212] transition shadow-md\">Terapkan Migrasi</button></div></div><div class=\"relative\"><textarea id=\"sql_script\" name=\"sql_script\" x-model=\"query\" rows=\"8\" class=\"w-full p-4 bg-[#121212] border border-[#2a2a2a] rounded-lg font-mono text-xs text-[#87d1ff] focus:outline-none focus:ring-2 focus:ring-[#ceafa3]/50 leading-relaxed resize-y\" placeholder=\"-- Tulis perintah SQL di sini...\"></textarea></div></form><div id=\"migration-feedback\"></div></div><div class=\"space-y-3\"><h3 class=\"text-xs font-bold text-zinc-400 uppercase tracking-wider px-1\">Riwayat Eksekusi Migrasi</h3><div class=\"bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl\"><table class=\"w-full text-left text-sm text-zinc-300\"><thead class=\"bg-[#121212] text-xs uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]\"><tr><th class=\"px-4 py-3 font-semibold\">ID</th><th class=\"px-4 py-3 font-semibold\">Nama File / Skrip</th><th class=\"px-4 py-3 font-semibold\">Waktu Eksekusi</th><th class=\"px-4 py-3 font-semibold\">Oleh</th><th class=\"px-4 py-3 font-semibold\">Durasi</th><th class=\"px-4 py-3 font-semibold\">Status</th></tr></thead> <tbody class=\"divide-y divide-[#2a2a2a]\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if len(histories) > 0 {
-				for _, h := range histories {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<tr class=\"hover:bg-[#252525]/50 transition\"><td class=\"px-4 py-3 font-mono text-xs\">")
+			if activeDBID == "" {
+				templ_7745c5c3_Err = components.NoDatabaseAccess(user).Render(ctx, templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			} else {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\" x-data=\"{ query: 'CREATE TABLE example (\\n    id SERIAL PRIMARY KEY,\\n    name VARCHAR(255) NOT NULL\\n);' }\"><div><h1 class=\"text-2xl font-bold text-zinc-100\">Migration Editor</h1><p class=\"text-zinc-400 mt-1\">Tulis dan eksekusi skrip DDL/SQL untuk memperbarui skema database terhubung.</p></div>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if canEdit {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-6 space-y-4 shadow-xl\"><form id=\"migration-form\"><input type=\"hidden\" name=\"db_id\" value=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var3 string
-					templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(h.ID)
+					templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(activeDBID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration.templ`, Line: 86, Col: 56}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration.templ`, Line: 26, Col: 57}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</td><td class=\"px-4 py-3 font-mono text-xs font-semibold text-zinc-200\">")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var4 string
-					templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(h.Filename)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration.templ`, Line: 87, Col: 90}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\"><div class=\"flex justify-between items-center mb-4\"><label class=\"text-xs font-bold text-zinc-400 uppercase tracking-wider\">Skrip SQL Migrasi</label><div class=\"flex gap-2\"><button type=\"button\" @click=\"query = ''\" class=\"px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:bg-[#252525] transition\">Bersihkan</button> <button type=\"button\" hx-post=\"/migration/dry-run\" hx-target=\"#migration-feedback\" hx-include=\"#migration-form\" class=\"px-3 py-1.5 rounded-lg text-xs font-medium bg-[#252525] hover:bg-[#333] text-white transition\">Simulasi (Dry Run)</button> <button type=\"button\" hx-post=\"/migration/apply\" hx-target=\"#migration-feedback\" hx-include=\"#migration-form\" class=\"px-4 py-1.5 rounded-lg text-xs font-bold bg-[#ceafa3] hover:bg-[#c09f93] text-[#121212] transition shadow-md\">Terapkan Migrasi</button></div></div><div class=\"relative\"><textarea id=\"sql_script\" name=\"sql_script\" x-model=\"query\" rows=\"8\" class=\"w-full p-4 bg-[#121212] border border-[#2a2a2a] rounded-lg font-mono text-xs text-[#87d1ff] focus:outline-none focus:ring-2 focus:ring-[#ceafa3]/50 leading-relaxed resize-y\" placeholder=\"-- Tulis perintah SQL di sini...\"></textarea></div></form><div id=\"migration-feedback\"></div></div>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</td><td class=\"px-4 py-3 text-xs\">")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var5 string
-					templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(h.ExecutedAt.Format("2006-01-02 15:04:05"))
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration.templ`, Line: 88, Col: 84}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</td><td class=\"px-4 py-3 text-xs\">")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var6 string
-					templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(h.ExecutedBy)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration.templ`, Line: 89, Col: 54}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</td><td class=\"px-4 py-3 font-mono text-xs\">")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var7 string
-					templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d ms", h.ExecutionMs))
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration.templ`, Line: 90, Col: 87}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</td><td class=\"px-4 py-3 text-xs\">")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					if h.Status == "SUCCESS" {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<span class=\"px-2 py-0.5 rounded text-[10px] font-bold bg-[#7dff95]/15 text-[#7dff95] border border-[#7dff95]/30\">SUCCESS</span>")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-					} else {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<span class=\"px-2 py-0.5 rounded text-[10px] font-bold bg-[#ff8080]/15 text-[#ff8080] border border-[#ff8080]/30\">FAILED</span>")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</td></tr>")
+				} else {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"p-4 rounded-xl bg-[#18171b] border border-[#333138] text-xs text-zinc-400\">Anda memiliki akses <span class=\"font-semibold text-zinc-200\">View Only</span> pada database ini: riwayat migrasi dapat dilihat, tetapi membuat dan menjalankan migrasi membutuhkan akses View + Edit melalui group.</div>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<tr><td colspan=\"6\" class=\"px-4 py-8 text-center text-zinc-500 text-xs\">Belum ada riwayat migrasi pada database ini.</td></tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"space-y-3\"><h3 class=\"text-xs font-bold text-zinc-400 uppercase tracking-wider px-1\">Riwayat Eksekusi Migrasi</h3><div class=\"bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl\"><table class=\"w-full text-left text-sm text-zinc-300\"><thead class=\"bg-[#121212] text-xs uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]\"><tr><th class=\"px-4 py-3 font-semibold\">ID</th><th class=\"px-4 py-3 font-semibold\">Nama File / Skrip</th><th class=\"px-4 py-3 font-semibold\">Waktu Eksekusi</th><th class=\"px-4 py-3 font-semibold\">Oleh</th><th class=\"px-4 py-3 font-semibold\">Durasi</th><th class=\"px-4 py-3 font-semibold\">Status</th></tr></thead> <tbody class=\"divide-y divide-[#2a2a2a]\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</tbody></table></div></div></div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
+				if len(histories) > 0 {
+					for _, h := range histories {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<tr class=\"hover:bg-[#252525]/50 transition\"><td class=\"px-4 py-3 font-mono text-xs\">")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var4 string
+						templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(h.ID)
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration.templ`, Line: 99, Col: 56}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</td><td class=\"px-4 py-3 font-mono text-xs font-semibold text-zinc-200\">")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var5 string
+						templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(h.Filename)
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration.templ`, Line: 100, Col: 90}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</td><td class=\"px-4 py-3 text-xs\">")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var6 string
+						templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(h.ExecutedAt.Format("2006-01-02 15:04:05"))
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration.templ`, Line: 101, Col: 84}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</td><td class=\"px-4 py-3 text-xs\">")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var7 string
+						templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(h.ExecutedBy)
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration.templ`, Line: 102, Col: 54}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</td><td class=\"px-4 py-3 font-mono text-xs\">")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var8 string
+						templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d ms", h.ExecutionMs))
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration.templ`, Line: 103, Col: 87}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</td><td class=\"px-4 py-3 text-xs\">")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						if h.Status == "SUCCESS" {
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<span class=\"px-2 py-0.5 rounded text-[10px] font-bold bg-[#7dff95]/15 text-[#7dff95] border border-[#7dff95]/30\">SUCCESS</span>")
+							if templ_7745c5c3_Err != nil {
+								return templ_7745c5c3_Err
+							}
+						} else {
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<span class=\"px-2 py-0.5 rounded text-[10px] font-bold bg-[#ff8080]/15 text-[#ff8080] border border-[#ff8080]/30\">FAILED</span>")
+							if templ_7745c5c3_Err != nil {
+								return templ_7745c5c3_Err
+							}
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</td></tr>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					}
+				} else {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<tr><td colspan=\"6\" class=\"px-4 py-8 text-center text-zinc-500 text-xs\">Belum ada riwayat migrasi pada database ini.</td></tr>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</tbody></table></div></div></div>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
 			}
 			return nil
 		})
@@ -175,44 +212,44 @@ func MigrationFeedback(success bool, message string) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var8 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var8 == nil {
-			templ_7745c5c3_Var8 = templ.NopComponent
+		templ_7745c5c3_Var9 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var9 == nil {
+			templ_7745c5c3_Var9 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		if success {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<div class=\"p-3 rounded-lg bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs font-mono\">✓ ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var9 string
-			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(message)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration.templ`, Line: 122, Col: 16}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<div class=\"p-3 rounded-lg bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs font-mono\">✗ ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<div class=\"p-3 rounded-lg bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs font-mono\">✓ ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration.templ`, Line: 126, Col: 16}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration.templ`, Line: 136, Col: 16}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		} else {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<div class=\"p-3 rounded-lg bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs font-mono\">✗ ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var11 string
+			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(message)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration.templ`, Line: 140, Col: 16}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

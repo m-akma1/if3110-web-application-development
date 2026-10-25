@@ -3,20 +3,27 @@ package pages
 import (
 	"fmt"
 	"dbplatform/app/domain"
-	"dbplatform/app/internal/authn"
+	"dbplatform/app/views/components"
 	"dbplatform/app/views/layouts"
 )
 
-templ Migration(user *authn.AuthLayoutUser, activeDBID string, histories []domain.MigrationHistory, csrfToken string) {
+// Migration shows history to View Only users; the editor and run buttons only to View + Edit users.
+// The backend checks the same rule on every POST, the hidden UI is only a convenience.
+templ Migration(user *domain.AuthLayoutUser, activeDBID string, canEdit bool, histories []domain.MigrationHistory, csrfToken string) {
 	@layouts.Dashboard("Migration Editor", user, activeDBID, "migration", csrfToken) {
+		if activeDBID == "" {
+			@components.NoDatabaseAccess(user)
+		} else {
 		<div class="space-y-6" x-data="{ query: 'CREATE TABLE example (\n    id SERIAL PRIMARY KEY,\n    name VARCHAR(255) NOT NULL\n);' }">
 			<div>
 				<h1 class="text-2xl font-bold text-zinc-100">Migration Editor</h1>
 				<p class="text-zinc-400 mt-1">Tulis dan eksekusi skrip DDL/SQL untuk memperbarui skema database terhubung.</p>
 			</div>
 
+			if canEdit {
 			<div class="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-6 space-y-4 shadow-xl">
 				<form id="migration-form">
+					<input type="hidden" name="db_id" value={ activeDBID }/>
 					<div class="flex justify-between items-center mb-4">
 						<label class="text-xs font-bold text-zinc-400 uppercase tracking-wider">
 							Skrip SQL Migrasi
@@ -64,6 +71,12 @@ templ Migration(user *authn.AuthLayoutUser, activeDBID string, histories []domai
 
 				<div id="migration-feedback"></div>
 			</div>
+			} else {
+			<div class="p-4 rounded-xl bg-[#18171b] border border-[#333138] text-xs text-zinc-400">
+				Anda memiliki akses <span class="font-semibold text-zinc-200">View Only</span> pada database ini:
+				riwayat migrasi dapat dilihat, tetapi membuat dan menjalankan migrasi membutuhkan akses View + Edit melalui group.
+			</div>
+			}
 
 			<div class="space-y-3">
 				<h3 class="text-xs font-bold text-zinc-400 uppercase tracking-wider px-1">Riwayat Eksekusi Migrasi</h3>
@@ -113,6 +126,7 @@ templ Migration(user *authn.AuthLayoutUser, activeDBID string, histories []domai
 				</div>
 			</div>
 		</div>
+		}
 	}
 }
 
