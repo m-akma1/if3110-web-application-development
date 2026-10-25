@@ -7,12 +7,18 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config is the process configuration. Session timing lives in authn.DefaultSessionConfig.
 type Config struct {
 	DatabaseURL string // platform PostgreSQL (required)
 	ListenAddr  string // LISTEN_ADDR, default ":8080"
+
+	// Migration engine limits; zero keeps the engine defaults (migration.DefaultLimits).
+	MigrationLockTimeout      time.Duration // MIGRATION_LOCK_TIMEOUT_MS: wait for a table lock on the target
+	MigrationStatementTimeout time.Duration // MIGRATION_STATEMENT_TIMEOUT_MS: one statement's run time
+	MigrationQueueTimeout     time.Duration // MIGRATION_QUEUE_TIMEOUT_MS: wait behind another migration on the same DB
 
 	BootstrapAdminUsername string
 	BootstrapAdminEmail    string
@@ -54,5 +60,28 @@ func load(getenv func(string) string) (Config, error) {
 	if cfg.SeedDemoData && cfg.SeedDemoPassword == "" {
 		errs = append(errs, errors.New("SEED_DEMO_PASSWORD is required when SEED_DEMO_DATA=true"))
 	}
+	errs = append(errs, loadMillis(getenv, map[string]*time.Duration{
+		"MIGRATION_LOCK_TIMEOUT_MS":      &cfg.MigrationLockTimeout,
+		"MIGRATION_STATEMENT_TIMEOUT_MS": &cfg.MigrationStatementTimeout,
+		"MIGRATION_QUEUE_TIMEOUT_MS":     &cfg.MigrationQueueTimeout,
+	})...)
 	return cfg, errors.Join(errs...)
+}
+
+// loadMillis reads optional positive millisecond values into durations.
+func loadMillis(getenv func(string) string, dst map[string]*time.Duration) []error {
+	var errs []error
+	for name, d := range dst {
+		raw := strings.TrimSpace(getenv(name))
+		if raw == "" {
+			continue
+		}
+		ms, err := strconv.Atoi(raw)
+		if err != nil || ms <= 0 {
+			errs = append(errs, fmt.Errorf("%s must be a positive number of milliseconds, got %q", name, raw))
+			continue
+		}
+		*d = time.Duration(ms) * time.Millisecond
+	}
+	return errs
 }
