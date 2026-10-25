@@ -116,7 +116,7 @@ func MigrationDetail(user *domain.AuthLayoutUser, v domain.MigrationDetailView, 
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" class=\"text-xs font-semibold text-[#ceafa3] hover:underline\">← Kembali ke Migration Editor</a><div class=\"flex flex-wrap items-start justify-between gap-4\"><div><div class=\"flex items-center gap-3\"><h1 class=\"text-2xl font-bold text-zinc-100\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" class=\"text-xs font-semibold text-brand-primary hover:underline\">← Kembali ke Migration Editor</a><div class=\"flex flex-wrap items-start justify-between gap-4\"><div><div class=\"flex items-center gap-3\"><h1 class=\"text-2xl font-bold text-zinc-100\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -169,7 +169,7 @@ func MigrationDetail(user *domain.AuthLayoutUser, v domain.MigrationDetailView, 
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" class=\"px-4 py-1.5 rounded-lg text-xs font-bold bg-[#ceafa3] hover:bg-[#c09f93] text-[#121212] transition shadow-md\">Buka di Editor</a>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" class=\"px-4 py-1.5 rounded-lg text-xs font-bold bg-brand-primary hover:bg-brand-primary-hover text-app-bg transition shadow-md\">Buka di Editor</a>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -187,13 +187,13 @@ func MigrationDetail(user *domain.AuthLayoutUser, v domain.MigrationDetailView, 
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" hx-target=\"#migration-feedback\" class=\"px-4 py-1.5 rounded-lg text-xs font-bold bg-[#252525] hover:bg-[#333] text-white transition\">Duplikat sebagai Draft Baru</button>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" hx-target=\"#migration-feedback\" class=\"px-4 py-1.5 rounded-lg text-xs font-bold bg-app-active hover:bg-app-border-strong text-white transition\">Duplikat sebagai Draft Baru</button>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</div><div id=\"migration-feedback\"></div><dl class=\"grid grid-cols-2 md:grid-cols-4 gap-4 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-5\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</div><div id=\"migration-feedback\"></div><dl class=\"grid grid-cols-2 md:grid-cols-4 gap-4 bg-app-card border border-app-border rounded-xl p-5\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -234,14 +234,14 @@ func MigrationDetail(user *domain.AuthLayoutUser, v domain.MigrationDetailView, 
 				return templ_7745c5c3_Err
 			}
 			if v.Migration.Status == "FAILED" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<div class=\"space-y-2\"><h3 class=\"text-xs font-bold text-[#ff8080] uppercase tracking-wider px-1\">Error · seluruh script di-ROLLBACK</h3><pre class=\"p-4 rounded-xl bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs font-mono whitespace-pre-wrap\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<div class=\"space-y-2\"><h3 class=\"text-xs font-bold text-sem-danger uppercase tracking-wider px-1\">Error · seluruh script di-ROLLBACK</h3><pre class=\"p-4 rounded-xl bg-sem-danger/10 border border-sem-danger/30 text-sem-danger text-xs font-mono whitespace-pre-wrap\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var11 string
 				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(v.Migration.Error)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration_detail.templ`, Line: 63, Col: 148}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration_detail.templ`, Line: 63, Col: 151}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 				if templ_7745c5c3_Err != nil {
@@ -253,7 +253,7 @@ func MigrationDetail(user *domain.AuthLayoutUser, v domain.MigrationDetailView, 
 				}
 			}
 			if v.Migration.Status == "SUCCESS" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<div class=\"p-3 rounded-lg bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs font-mono\">✓ Seluruh statement berhasil dan di-COMMIT sebagai ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<div class=\"p-3 rounded-lg bg-sem-success/10 border border-sem-success/30 text-sem-success text-xs font-mono\">✓ Seluruh statement berhasil dan di-COMMIT sebagai ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -271,14 +271,14 @@ func MigrationDetail(user *domain.AuthLayoutUser, v domain.MigrationDetailView, 
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<div class=\"space-y-2\"><h3 class=\"text-xs font-bold text-zinc-400 uppercase tracking-wider px-1\">Script SQL</h3><pre class=\"p-4 rounded-xl bg-[#121212] border border-[#2a2a2a] text-[#87d1ff] text-xs font-mono whitespace-pre-wrap overflow-x-auto\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<div class=\"space-y-2\"><h3 class=\"text-xs font-bold text-zinc-400 uppercase tracking-wider px-1\">Script SQL</h3><pre class=\"p-4 rounded-xl bg-app-bg border border-app-border text-sem-info text-xs font-mono whitespace-pre-wrap overflow-x-auto\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var13 string
 			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(v.Migration.SQL)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration_detail.templ`, Line: 74, Col: 155}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/migration_detail.templ`, Line: 74, Col: 152}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 			if templ_7745c5c3_Err != nil {

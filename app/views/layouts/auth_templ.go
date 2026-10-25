@@ -29,7 +29,7 @@ func Auth(title string, csrfToken string) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<!doctype html><html lang=\"id\" class=\"h-full bg-[#121212]\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><meta name=\"csrf-token\" content=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<!doctype html><html lang=\"id\" class=\"h-full bg-app-bg\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><meta name=\"csrf-token\" content=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -55,20 +55,7 @@ func Auth(title string, csrfToken string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, " - Platform Manajemen Database</title><link href=\"/static/css/style.css\" rel=\"stylesheet\"><script src=\"/static/js/htmx.min.js\"></script><script defer src=\"/static/js/alpine.min.js\"></script><script>\n\t\t\t\tdocument.addEventListener('htmx:configRequest', function(evt) {\n\t\t\t\t\tvar meta = document.querySelector('meta[name=\"csrf-token\"]');\n\t\t\t\t\tif (meta && meta.content) {\n\t\t\t\t\t\tevt.detail.headers['X-CSRF-Token'] = meta.content;\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t</script></head><body class=\"h-full bg-[#121212] text-zinc-100 font-sans antialiased\" hx-headers=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var4 string
-		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(`{"X-CSRF-Token": "` + csrfToken + `"}`)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/layouts/auth.templ`, Line: 25, Col: 55}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\"><div class=\"min-h-screen flex\"><!-- Panel Kiri: Gambar Statik (Menggantikan Efek Glow) --><div class=\"hidden lg:flex lg:w-1/2 relative overflow-hidden bg-[#121212] border-r border-[#333138] flex-col justify-between p-12\"><img src=\"/static/img/auth-bg.svg\" alt=\"Database Platform Visual\" class=\"absolute inset-0 w-full h-full object-cover pointer-events-none select-none\"><!-- Brand Header --><div class=\"relative z-10 flex items-center gap-3\"><div class=\"w-10 h-10 rounded-xl bg-[#ceafa3] flex items-center justify-center font-bold text-lg text-[#121212] shadow-md\">DB</div><span class=\"text-lg font-bold tracking-tight text-white\">DB Platform</span></div><!-- Caption Bawah --><div class=\"relative z-10 max-w-md space-y-3 bg-[#1c1b1e]/90 border border-[#333138] rounded-2xl p-6\"><h2 class=\"text-xl font-bold text-white tracking-tight\">Kelola seluruh koneksi database dan skema dalam satu tempat.</h2><p class=\"text-xs text-zinc-400 leading-relaxed\">Pantau tabel, jalankan migrasi skema dengan aman, dan atur kontrol akses berbasis grup secara terpusat.</p></div></div><!-- Panel Kanan: Container Form Login / Sign Up --><div class=\"w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-12 bg-[#121212]\"><div id=\"auth-form-container\" class=\"w-full max-w-md bg-[#1c1b1e] border border-[#333138] rounded-2xl p-6 sm:p-8 shadow-2xl\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, " - Platform Manajemen Database</title><link href=\"/static/css/style.css\" rel=\"stylesheet\"><script src=\"/static/js/htmx.min.js\"></script><script defer src=\"/static/js/alpine.min.js\"></script><script>\n\t\t\t\tdocument.addEventListener('htmx:configRequest', function(evt) {\n\t\t\t\t\tvar meta = document.querySelector('meta[name=\"csrf-token\"]');\n\t\t\t\t\tif (meta && meta.content) {\n\t\t\t\t\t\tevt.detail.headers['X-CSRF-Token'] = meta.content;\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t</script></head><body class=\"h-full bg-app-bg text-zinc-100 font-sans antialiased\"><div class=\"min-h-screen flex\"><!-- Panel Kiri: Gambar Statik (Menggantikan Efek Glow) --><div class=\"hidden lg:flex lg:w-1/2 relative overflow-hidden bg-app-bg border-r border-app-border flex-col justify-between p-12\"><img src=\"/static/img/auth-bg.svg\" alt=\"Database Platform Visual\" class=\"absolute inset-0 w-full h-full object-cover pointer-events-none select-none\"><!-- Brand Header --><div class=\"relative z-10 flex items-center gap-3\"><div class=\"w-10 h-10 rounded-xl bg-brand-primary flex items-center justify-center font-bold text-lg text-app-bg shadow-md\">DB</div><span class=\"text-lg font-bold tracking-tight text-white\">DB Platform</span></div><!-- Caption Bawah --><div class=\"relative z-10 max-w-md space-y-3 bg-app-sidebar/90 border border-app-border rounded-2xl p-6\"><h2 class=\"text-xl font-bold text-white tracking-tight\">Kelola seluruh koneksi database dan skema dalam satu tempat.</h2><p class=\"text-xs text-zinc-400 leading-relaxed\">Pantau tabel, jalankan migrasi skema dengan aman, dan atur kontrol akses berbasis grup secara terpusat.</p></div></div><!-- Panel Kanan: Container Form Login / Sign Up --><div class=\"w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-12 bg-app-bg\"><div id=\"auth-form-container\" class=\"w-full max-w-md bg-app-sidebar border border-app-border rounded-2xl p-6 sm:p-8 shadow-2xl\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -76,7 +63,7 @@ func Auth(title string, csrfToken string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</div></div></div></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</div></div></div></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

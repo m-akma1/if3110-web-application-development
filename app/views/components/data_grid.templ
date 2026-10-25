@@ -25,7 +25,7 @@ func TableURL(dbID, schema, name string, page int) string {
 templ DataGrid(data domain.TableDataResult) {
 	<div id="data-grid-container" class="space-y-4" x-data="{ activeView: 'data' }">
 		if data.QueryError != "" {
-			<div class="p-3.5 rounded-xl bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs font-medium flex items-center gap-2">
+			<div class="p-3.5 rounded-xl bg-sem-danger/10 border border-sem-danger/30 text-sem-danger text-xs font-medium flex items-center gap-2">
 				<svg class="w-4 h-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
 					<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
 				</svg>
@@ -34,14 +34,14 @@ templ DataGrid(data domain.TableDataResult) {
 		}
 
 		if data.ExecutedQuery != "" && data.QueryError == "" {
-			<div class="p-3 rounded-xl bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs flex items-center justify-between gap-2">
+			<div class="p-3 rounded-xl bg-sem-success/10 border border-sem-success/30 text-sem-success text-xs flex items-center justify-between gap-2">
 				<span>Query Read-Only berhasil dieksekusi: <code class="font-mono text-white">{ data.ExecutedQuery }</code></span>
-				<span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-[#7dff95]/20">Read-Only Tx</span>
+				<span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-sem-success/20">Read-Only Tx</span>
 			</div>
 		}
 
 		if data.Truncated && data.QueryError == "" {
-			<div class="p-3 rounded-xl bg-[#ffbc5e]/10 border border-[#ffbc5e]/30 text-[#ffbc5e] text-xs">
+			<div class="p-3 rounded-xl bg-sem-warning/10 border border-sem-warning/30 text-sem-warning text-xs">
 				Hasil dipotong: hanya { fmt.Sprintf("%d", len(data.Rows)) } baris pertama yang ditampilkan. Tambahkan LIMIT atau filter WHERE untuk mempersempit hasil.
 			</div>
 		}
@@ -55,27 +55,39 @@ templ DataGrid(data domain.TableDataResult) {
 						if data.HasSchema {
 							<span class="text-xs font-normal text-zinc-400">dari</span>
 							<span class="text-zinc-400 font-mono text-sm">{ data.SchemaName }.</span>
-							<span class="text-[#ceafa3] font-mono text-sm">{ data.TableName }</span>
+							<span class="text-brand-primary font-mono text-sm">{ data.TableName }</span>
 						}
 					</h2>
 				} else {
 					<h2 class="text-lg font-bold text-white flex items-center gap-1.5">
 						<span class="text-zinc-400 font-mono text-sm">{ data.SchemaName }.</span>
-						<span class="text-[#ceafa3] font-mono">{ data.TableName }</span>
+						<span class="text-brand-primary font-mono">{ data.TableName }</span>
 					</h2>
 				}
-				<span class="text-xs text-zinc-400 bg-[#1a1a1a] px-2.5 py-1 rounded-lg border border-[#2a2a2a]">
+				<span class="text-xs text-zinc-400 bg-app-card px-2.5 py-1 rounded-lg border border-app-border">
 					{ fmt.Sprintf("%d Baris", data.TotalRows) }
 				</span>
+				if len(data.Rows) > 0 {
+					<!-- Copies the rows on screen (header included) as tab-separated text, ready for a spreadsheet -->
+					<button
+						type="button"
+						x-data="{ copied: false }"
+						@click="navigator.clipboard.writeText([...$root.closest('#data-grid-container').querySelectorAll('[data-result-table] tr')].map(tr => [...tr.cells].map(c => c.innerText.trim()).join('\t')).join('\n')).then(() => { copied = true; setTimeout(() => copied = false, 1500) })"
+						class="text-xs text-zinc-300 bg-app-card hover:bg-app-active px-2.5 py-1 rounded-lg border border-app-border transition cursor-pointer"
+						title="Salin baris yang ditampilkan sebagai teks (dipisah tab)"
+					>
+						<span x-text="copied ? 'Tersalin' : 'Salin'">Salin</span>
+					</button>
+				}
 			</div>
 
 			<!-- Tombol Tab: Data Tabel & Schema Viewer (hanya jika hasil berasal dari satu tabel) -->
 			if data.HasSchema {
-			<div class="inline-flex rounded-lg bg-[#121212] p-1 border border-[#2a2a2a]">
+			<div class="inline-flex rounded-lg bg-app-bg p-1 border border-app-border">
 				<button
 					type="button"
 					@click="activeView = 'data'"
-					:class="activeView === 'data' ? 'bg-[#ceafa3] text-[#121212] shadow' : 'text-zinc-400 hover:text-zinc-200'"
+					:class="activeView === 'data' ? 'bg-brand-primary text-app-bg shadow' : 'text-zinc-400 hover:text-zinc-200'"
 					class="px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer"
 				>
 					Data Tabel
@@ -83,11 +95,11 @@ templ DataGrid(data domain.TableDataResult) {
 				<button
 					type="button"
 					@click="activeView = 'schema'"
-					:class="activeView === 'schema' ? 'bg-[#ceafa3] text-[#121212] shadow' : 'text-zinc-400 hover:text-zinc-200'"
+					:class="activeView === 'schema' ? 'bg-brand-primary text-app-bg shadow' : 'text-zinc-400 hover:text-zinc-200'"
 					class="px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
 				>
 					<span>Schema Viewer</span>
-					<span class="px-1.5 py-0.2 rounded text-[10px] bg-[#1a1a1a] text-zinc-300">
+					<span class="px-1.5 py-0.2 rounded text-[10px] bg-app-card text-zinc-300">
 						{ fmt.Sprintf("%d Kolom", len(data.ColumnsMeta)) }
 					</span>
 				</button>
@@ -96,20 +108,20 @@ templ DataGrid(data domain.TableDataResult) {
 		</div>
 
 		<!-- TAB 1: DATA VIEWER -->
-		<div x-show="activeView === 'data'" class="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl">
+		<div x-show="activeView === 'data'" class="bg-app-card border border-app-border rounded-xl overflow-hidden shadow-xl">
 			<div class="overflow-x-auto">
-				<table class="w-full text-left text-sm text-zinc-300">
-					<thead class="bg-[#121212] text-xs uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]">
+				<table data-result-table class="w-full text-left text-sm text-zinc-300">
+					<thead class="bg-app-bg text-xs uppercase tracking-wider text-zinc-400 border-b border-app-border">
 						<tr>
 							for _, col := range data.Columns {
 								<th class="px-4 py-3 font-semibold">{ col }</th>
 							}
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-[#2a2a2a]">
+					<tbody class="divide-y divide-app-border">
 						if len(data.Rows) > 0 {
 							for _, row := range data.Rows {
-								<tr class="hover:bg-[#252525]/50 transition">
+								<tr class="hover:bg-app-active/50 transition">
 									for _, val := range row {
 										<td class="px-4 py-3 whitespace-nowrap font-mono text-xs">{ val }</td>
 									}
@@ -131,7 +143,7 @@ templ DataGrid(data domain.TableDataResult) {
 			</div>
 
 			if !data.IsQueryResult {
-				<div class="p-4 border-t border-[#2a2a2a] flex items-center justify-between text-xs text-zinc-400">
+				<div class="p-4 border-t border-app-border flex items-center justify-between text-xs text-zinc-400">
 					<span>Halaman { fmt.Sprintf("%d dari %d", data.CurrentPage, data.TotalPages) }</span>
 					<div class="flex gap-2">
 						<button
@@ -139,7 +151,7 @@ templ DataGrid(data domain.TableDataResult) {
 							hx-get={ TableURL(data.DatabaseID, data.SchemaName, data.TableName, data.CurrentPage-1) }
 							hx-target="#data-grid-container"
 							hx-swap="outerHTML"
-							class="px-3 py-1.5 rounded bg-[#252525] hover:bg-[#333] disabled:opacity-40 text-white transition"
+							class="px-3 py-1.5 rounded bg-app-active hover:bg-app-border-strong disabled:opacity-40 text-white transition"
 						>
 							Sebelumnya
 						</button>
@@ -148,7 +160,7 @@ templ DataGrid(data domain.TableDataResult) {
 							hx-get={ TableURL(data.DatabaseID, data.SchemaName, data.TableName, data.CurrentPage+1) }
 							hx-target="#data-grid-container"
 							hx-swap="outerHTML"
-							class="px-3 py-1.5 rounded bg-[#252525] hover:bg-[#333] disabled:opacity-40 text-white transition"
+							class="px-3 py-1.5 rounded bg-app-active hover:bg-app-border-strong disabled:opacity-40 text-white transition"
 						>
 							Selanjutnya
 						</button>
@@ -161,14 +173,14 @@ templ DataGrid(data domain.TableDataResult) {
 		if data.HasSchema {
 		<div x-show="activeView === 'schema'" x-cloak class="space-y-4">
 			<!-- 1. Struktur Kolom -->
-			<div class="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl">
-				<div class="px-4 py-3 bg-[#121212] border-b border-[#2a2a2a] flex items-center justify-between">
+			<div class="bg-app-card border border-app-border rounded-xl overflow-hidden shadow-xl">
+				<div class="px-4 py-3 bg-app-bg border-b border-app-border flex items-center justify-between">
 					<span class="text-xs font-bold text-white uppercase tracking-wider">Daftar Kolom (Columns)</span>
 					<span class="text-[10px] font-mono text-zinc-400">Schema: { data.SchemaName }</span>
 				</div>
 				<div class="overflow-x-auto">
 					<table class="w-full text-left text-xs text-zinc-300">
-						<thead class="bg-[#121212] uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]">
+						<thead class="bg-app-bg uppercase tracking-wider text-zinc-400 border-b border-app-border">
 							<tr>
 								<th class="px-4 py-2.5 font-semibold">Nama Kolom</th>
 								<th class="px-4 py-2.5 font-semibold">Tipe Data</th>
@@ -177,17 +189,17 @@ templ DataGrid(data domain.TableDataResult) {
 								<th class="px-4 py-2.5 font-semibold">Atribut</th>
 							</tr>
 						</thead>
-						<tbody class="divide-y divide-[#2a2a2a]">
+						<tbody class="divide-y divide-app-border">
 							if len(data.ColumnsMeta) > 0 {
 								for _, colMeta := range data.ColumnsMeta {
-									<tr class="hover:bg-[#252525]/50 transition">
+									<tr class="hover:bg-app-active/50 transition">
 										<td class="px-4 py-2.5 font-mono font-semibold text-white">{ colMeta.Name }</td>
-										<td class="px-4 py-2.5 font-mono text-[#87d1ff]">{ colMeta.DataType }</td>
+										<td class="px-4 py-2.5 font-mono text-sem-info">{ colMeta.DataType }</td>
 										<td class="px-4 py-2.5">
 											if colMeta.IsNullable {
-												<span class="px-2 py-0.5 rounded bg-[#252525] text-zinc-300 text-[10px] font-mono">NULL</span>
+												<span class="px-2 py-0.5 rounded bg-app-active text-zinc-300 text-[10px] font-mono">NULL</span>
 											} else {
-												<span class="px-2 py-0.5 rounded bg-[#ffbc5e]/10 border border-[#ffbc5e]/20 text-[#ffbc5e] text-[10px] font-mono">NOT NULL</span>
+												<span class="px-2 py-0.5 rounded bg-sem-warning/10 border border-sem-warning/20 text-sem-warning text-[10px] font-mono">NOT NULL</span>
 											}
 										</td>
 										<td class="px-4 py-2.5 font-mono text-zinc-400">
@@ -199,7 +211,7 @@ templ DataGrid(data domain.TableDataResult) {
 										</td>
 										<td class="px-4 py-2.5">
 											if colMeta.IsPK {
-												<span class="px-2 py-0.5 rounded bg-[#ceafa3]/20 border border-[#ceafa3]/30 text-[#ceafa3] text-[10px] font-bold">PRIMARY KEY</span>
+												<span class="px-2 py-0.5 rounded bg-brand-primary/20 border border-brand-primary/30 text-brand-primary text-[10px] font-bold">PRIMARY KEY</span>
 											} else {
 												<span class="text-zinc-500">-</span>
 											}
@@ -221,27 +233,27 @@ templ DataGrid(data domain.TableDataResult) {
 			<!-- 2. Constraints & Indexes Grid -->
 			<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
 				<!-- Constraints -->
-				<div class="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl">
-					<div class="px-4 py-3 bg-[#121212] border-b border-[#2a2a2a] flex items-center justify-between">
+				<div class="bg-app-card border border-app-border rounded-xl overflow-hidden shadow-xl">
+					<div class="px-4 py-3 bg-app-bg border-b border-app-border flex items-center justify-between">
 						<span class="text-xs font-bold text-white uppercase tracking-wider">Constraints</span>
 						<span class="text-[10px] text-zinc-400">{ fmt.Sprintf("%d Constraint", len(data.Constraints)) }</span>
 					</div>
 					<div class="overflow-x-auto">
 						<table class="w-full text-left text-xs text-zinc-300">
-							<thead class="bg-[#121212] uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]">
+							<thead class="bg-app-bg uppercase tracking-wider text-zinc-400 border-b border-app-border">
 								<tr>
 									<th class="px-4 py-2.5 font-semibold">Nama</th>
 									<th class="px-4 py-2.5 font-semibold">Tipe</th>
 									<th class="px-4 py-2.5 font-semibold">Definisi</th>
 								</tr>
 							</thead>
-							<tbody class="divide-y divide-[#2a2a2a]">
+							<tbody class="divide-y divide-app-border">
 								if len(data.Constraints) > 0 {
 									for _, cst := range data.Constraints {
-										<tr class="hover:bg-[#252525]/50 transition">
+										<tr class="hover:bg-app-active/50 transition">
 											<td class="px-4 py-2.5 font-mono text-white">{ cst.Name }</td>
 											<td class="px-4 py-2.5">
-												<span class="px-2 py-0.5 rounded bg-[#ceafa3]/10 border border-[#ceafa3]/20 text-[#ceafa3] text-[10px] font-semibold">
+												<span class="px-2 py-0.5 rounded bg-brand-primary/10 border border-brand-primary/20 text-brand-primary text-[10px] font-semibold">
 													{ cst.Type }
 												</span>
 											</td>
@@ -259,14 +271,14 @@ templ DataGrid(data domain.TableDataResult) {
 				</div>
 
 				<!-- Indexes -->
-				<div class="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl">
-					<div class="px-4 py-3 bg-[#121212] border-b border-[#2a2a2a] flex items-center justify-between">
+				<div class="bg-app-card border border-app-border rounded-xl overflow-hidden shadow-xl">
+					<div class="px-4 py-3 bg-app-bg border-b border-app-border flex items-center justify-between">
 						<span class="text-xs font-bold text-white uppercase tracking-wider">Indexes</span>
 						<span class="text-[10px] text-zinc-400">{ fmt.Sprintf("%d Index", len(data.Indexes)) }</span>
 					</div>
 					<div class="overflow-x-auto">
 						<table class="w-full text-left text-xs text-zinc-300">
-							<thead class="bg-[#121212] uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]">
+							<thead class="bg-app-bg uppercase tracking-wider text-zinc-400 border-b border-app-border">
 								<tr>
 									<th class="px-4 py-2.5 font-semibold">Nama Index</th>
 									<th class="px-4 py-2.5 font-semibold">Kolom</th>
@@ -274,18 +286,18 @@ templ DataGrid(data domain.TableDataResult) {
 									<th class="px-4 py-2.5 font-semibold">Sifat</th>
 								</tr>
 							</thead>
-							<tbody class="divide-y divide-[#2a2a2a]">
+							<tbody class="divide-y divide-app-border">
 								if len(data.Indexes) > 0 {
 									for _, idx := range data.Indexes {
-										<tr class="hover:bg-[#252525]/50 transition">
+										<tr class="hover:bg-app-active/50 transition">
 											<td class="px-4 py-2.5 font-mono text-white" title={ idx.Definition }>{ idx.Name }</td>
-											<td class="px-4 py-2.5 font-mono text-[#87d1ff]">{ idx.Columns }</td>
+											<td class="px-4 py-2.5 font-mono text-sem-info">{ idx.Columns }</td>
 											<td class="px-4 py-2.5 font-mono text-zinc-400">{ idx.IndexType }</td>
 											<td class="px-4 py-2.5">
 												if idx.IsUnique {
-													<span class="px-2 py-0.5 rounded bg-[#7dff95]/10 border border-[#7dff95]/20 text-[#7dff95] text-[10px] font-bold">UNIQUE</span>
+													<span class="px-2 py-0.5 rounded bg-sem-success/10 border border-sem-success/20 text-sem-success text-[10px] font-bold">UNIQUE</span>
 												} else {
-													<span class="px-2 py-0.5 rounded bg-[#252525] text-zinc-300 text-[10px]">NON-UNIQUE</span>
+													<span class="px-2 py-0.5 rounded bg-app-active text-zinc-300 text-[10px]">NON-UNIQUE</span>
 												}
 											</td>
 										</tr>
@@ -308,7 +320,7 @@ templ DataGrid(data domain.TableDataResult) {
 // DataGridError replaces the data grid with an error (for example access denied).
 templ DataGridError(message string) {
 	<div id="data-grid-container" class="space-y-4">
-		<div class="p-3.5 rounded-xl bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs font-medium flex items-center gap-2">
+		<div class="p-3.5 rounded-xl bg-sem-danger/10 border border-sem-danger/30 text-sem-danger text-xs font-medium flex items-center gap-2">
 			<svg class="w-4 h-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
 				<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
 			</svg>

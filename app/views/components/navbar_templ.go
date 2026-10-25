@@ -54,7 +54,7 @@ func Navbar(user *domain.AuthLayoutUser, activeDBID string, activeTab string) te
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<header class=\"h-16 w-full border-b border-[#333138] px-6 flex items-center justify-between shrink-0 bg-[#1c1b1e]\"><div class=\"flex items-center gap-3\"><span class=\"text-xs font-semibold text-zinc-400 uppercase tracking-wider\">Database:</span> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<header class=\"h-16 w-full border-b border-app-border px-6 flex items-center justify-between shrink-0 bg-app-sidebar\"><div class=\"flex items-center gap-3\"><span class=\"text-xs font-semibold text-zinc-400 uppercase tracking-wider\">Database:</span> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -72,7 +72,7 @@ func Navbar(user *domain.AuthLayoutUser, activeDBID string, activeTab string) te
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" id=\"db-switcher\"><select name=\"db_id\" aria-label=\"Pilih database\" onchange=\"this.form.submit()\" class=\"bg-[#18171b] border border-[#333138] text-zinc-200 text-xs font-mono rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#ceafa3]/50\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" id=\"db-switcher\"><select name=\"db_id\" aria-label=\"Pilih database\" onchange=\"this.form.submit()\" class=\"bg-app-input border border-app-border text-zinc-200 text-xs font-mono rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary/50\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -131,12 +131,12 @@ func Navbar(user *domain.AuthLayoutUser, activeDBID string, activeTab string) te
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</select><noscript><button type=\"submit\" class=\"ml-1 text-xs text-[#ceafa3]\">Buka</button></noscript></form>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</select><noscript><button type=\"submit\" class=\"ml-1 text-xs text-brand-primary\">Buka</button></noscript></form>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<span class=\"text-xs text-[#ffbc5e] font-mono bg-[#ffbc5e]/10 px-2.5 py-1 rounded-md border border-[#ffbc5e]/20\">Belum ada akses database</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<span class=\"text-xs text-sem-warning font-mono bg-sem-warning/10 px-2.5 py-1 rounded-md border border-sem-warning/20\">Belum ada akses database</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -147,7 +147,7 @@ func Navbar(user *domain.AuthLayoutUser, activeDBID string, activeTab string) te
 		}
 		if user != nil {
 			if user.IsPlatformAdmin {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<span class=\"text-[10px] font-bold tracking-wider uppercase bg-[#ceafa3] text-[#121212] px-2.5 py-1 rounded-lg\">ADMIN</span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<span class=\"text-[10px] font-bold tracking-wider uppercase bg-brand-primary text-app-bg px-2.5 py-1 rounded-lg\">ADMIN</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

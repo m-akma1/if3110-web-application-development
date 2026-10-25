@@ -56,7 +56,7 @@ func adminGroupsSection(ov domain.AdminOverview) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<table class=\"w-full text-left text-sm text-zinc-300\"><thead class=\"bg-[#18171b] text-xs uppercase tracking-wider text-zinc-400 border-b border-[#333138]\"><tr><th class=\"px-4 py-3 font-semibold\">Group</th>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<table class=\"w-full text-left text-sm text-zinc-300\"><thead class=\"bg-app-input text-xs uppercase tracking-wider text-zinc-400 border-b border-app-border\"><tr><th class=\"px-4 py-3 font-semibold\">Group</th>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -79,7 +79,7 @@ func adminGroupsSection(ov domain.AdminOverview) templ.Component {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</tr></thead> <tbody class=\"divide-y divide-[#333138]\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</tr></thead> <tbody class=\"divide-y divide-app-border\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -229,7 +229,7 @@ func adminGroupsSection(ov domain.AdminOverview) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<form hx-post=\"/admin/groups\" class=\"p-4 grid grid-cols-1 md:grid-cols-3 gap-3\"><div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<form method=\"post\" hx-post=\"/admin/groups\" class=\"p-4 grid grid-cols-1 md:grid-cols-3 gap-3\"><div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -388,7 +388,7 @@ func adminGroupCard(g domain.GroupItem, users []domain.UserManagementItem) templ
 			templ_7745c5c3_Var22 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<div class=\"bg-[#222126] border border-[#333138] rounded-2xl p-4 space-y-3\"><div class=\"flex items-start justify-between gap-3\"><div><div class=\"text-sm font-bold text-white\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<div class=\"bg-app-card border border-app-border rounded-2xl p-4 space-y-3\"><div class=\"flex items-start justify-between gap-3\"><div><div class=\"text-sm font-bold text-white\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -406,7 +406,7 @@ func adminGroupCard(g domain.GroupItem, users []domain.UserManagementItem) templ
 			return templ_7745c5c3_Err
 		}
 		if g.IsSystem {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<span class=\"ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#2c2a30] text-zinc-300\">SISTEM</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<span class=\"ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-app-active text-zinc-300\">SISTEM</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -478,14 +478,14 @@ func adminGroupCard(g domain.GroupItem, users []domain.UserManagementItem) templ
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</div><details class=\"text-xs\"><summary class=\"cursor-pointer text-zinc-400 hover:text-zinc-200\">Ubah nama / deskripsi</summary><form hx-post=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</div><details class=\"text-xs\"><summary class=\"cursor-pointer text-zinc-400 hover:text-zinc-200\">Ubah nama / deskripsi</summary><form method=\"post\" hx-post=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var29 string
 		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue("/admin/groups/" + g.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin_groups.templ`, Line: 97, Col: 42}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin_groups.templ`, Line: 97, Col: 56}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 		if templ_7745c5c3_Err != nil {
@@ -637,7 +637,7 @@ func adminGroupCard(g domain.GroupItem, users []domain.UserManagementItem) templ
 				}
 			}
 			for _, m := range g.Members {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<span class=\"inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md text-[11px] font-mono bg-[#18171b] border border-[#333138] text-zinc-200\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<span class=\"inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md text-[11px] font-mono bg-app-input border border-app-border text-zinc-200\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -676,19 +676,19 @@ func adminGroupCard(g domain.GroupItem, users []domain.UserManagementItem) templ
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "\" class=\"px-1 text-zinc-500 hover:text-[#ff8080] cursor-pointer\">×</button></span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "\" class=\"px-1 text-zinc-500 hover:text-sem-danger cursor-pointer\">×</button></span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "</div><form hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "</div><form method=\"post\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var43 string
 			templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.ResolveAttributeValue("/admin/groups/" + g.ID + "/members")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin_groups.templ`, Line: 128, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin_groups.templ`, Line: 128, Col: 70}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
 			if templ_7745c5c3_Err != nil {

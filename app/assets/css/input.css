@@ -6,6 +6,9 @@
   --color-app-card: #222126;
   --color-app-input: #18171b;
   --color-app-border: #333138;
+  --color-app-border-strong: #3f3c45;
+  --color-app-hover: #252429; /* hover on dark surfaces */
+  --color-app-active: #2c2a30; /* selected item, hover on buttons */
 
   --color-brand-primary: #ceafa3;
   --color-brand-primary-hover: #c2a195;

@@ -32,7 +32,7 @@ func NoDatabaseAccess(user *domain.AuthLayoutUser) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"max-w-xl mx-auto mt-16 bg-[#222126] border border-[#333138] rounded-2xl p-8 text-center space-y-3\"><div class=\"text-[#ffbc5e] flex justify-center\"><svg class=\"w-10 h-10\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.5\" d=\"M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4\"></path></svg></div><h2 class=\"text-lg font-bold text-white\">Belum ada database yang dapat diakses</h2><p class=\"text-xs text-zinc-400 leading-relaxed\">Akses database diberikan melalui group. Minta Platform Admin menambahkan Anda ke group yang memiliki akses, atau memberi akses pada group yang sudah Anda ikuti.</p>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"max-w-xl mx-auto mt-16 bg-app-card border border-app-border rounded-2xl p-8 text-center space-y-3\"><div class=\"text-sem-warning flex justify-center\"><svg class=\"w-10 h-10\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.5\" d=\"M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4\"></path></svg></div><h2 class=\"text-lg font-bold text-white\">Belum ada database yang dapat diakses</h2><p class=\"text-xs text-zinc-400 leading-relaxed\">Akses database diberikan melalui group. Minta Platform Admin menambahkan Anda ke group yang memiliki akses, atau memberi akses pada group yang sudah Anda ikuti.</p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -42,14 +42,14 @@ func NoDatabaseAccess(user *domain.AuthLayoutUser) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			for _, g := range user.Groups {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<span class=\"px-2 py-0.5 rounded-md text-[10px] font-mono bg-[#18171b] text-zinc-300 border border-[#333138]\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<span class=\"px-2 py-0.5 rounded-md text-[10px] font-mono bg-app-input text-zinc-300 border border-app-border\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var2 string
 				templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(g.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/no_access.templ`, Line: 20, Col: 123}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/no_access.templ`, Line: 20, Col: 124}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 				if templ_7745c5c3_Err != nil {

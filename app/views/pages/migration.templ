@@ -38,11 +38,11 @@ func fmtTime(t time.Time) string {
 templ MigrationStatusBadge(status string) {
 	switch status {
 		case "SUCCESS":
-			<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-[#7dff95]/15 text-[#7dff95] border border-[#7dff95]/30">SUCCESS</span>
+			<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-success/15 text-sem-success border border-sem-success/30">SUCCESS</span>
 		case "FAILED":
-			<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-[#ff8080]/15 text-[#ff8080] border border-[#ff8080]/30">FAILED</span>
+			<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-danger/15 text-sem-danger border border-sem-danger/30">FAILED</span>
 		default:
-			<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-[#ffbc5e]/15 text-[#ffbc5e] border border-[#ffbc5e]/30">DRAFT</span>
+			<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30">DRAFT</span>
 	}
 }
 
@@ -62,7 +62,7 @@ templ Migration(user *domain.AuthLayoutUser, page domain.MigrationPageView, csrf
 						</p>
 					</div>
 					if page.DatabaseName != "" {
-						<span class="px-2.5 py-1 rounded-lg text-xs font-mono bg-[#18171b] text-zinc-300 border border-[#333138]">
+						<span class="px-2.5 py-1 rounded-lg text-xs font-mono bg-app-input text-zinc-300 border border-app-border">
 							Database: { page.DatabaseName }
 						</span>
 					}
@@ -74,7 +74,7 @@ templ Migration(user *domain.AuthLayoutUser, page domain.MigrationPageView, csrf
 						@MigrationEditor(page.DatabaseID, page.Editing)
 					</div>
 				} else {
-					<div class="p-4 rounded-xl bg-[#18171b] border border-[#333138] text-xs text-zinc-400">
+					<div class="p-4 rounded-xl bg-app-input border border-app-border text-xs text-zinc-400">
 						Anda memiliki akses <span class="font-semibold text-zinc-200">View Only</span> pada database ini:
 						riwayat migrasi dapat dilihat, tetapi membuat dan menjalankan migrasi membutuhkan akses View + Edit melalui group.
 					</div>
@@ -87,10 +87,10 @@ templ Migration(user *domain.AuthLayoutUser, page domain.MigrationPageView, csrf
 }
 
 templ migrationDraftList(page domain.MigrationPageView) {
-	<div class="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-3 space-y-2 h-fit">
+	<div class="bg-app-card border border-app-border rounded-xl p-3 space-y-2 h-fit">
 		<div class="flex items-center justify-between px-1">
 			<h3 class="text-xs font-bold text-zinc-400 uppercase tracking-wider">Draft</h3>
-			<a href={ templ.SafeURL(migrationPageURL(page.DatabaseID, "")) } class="text-[11px] font-semibold text-[#ceafa3] hover:underline">+ Draft baru</a>
+			<a href={ templ.SafeURL(migrationPageURL(page.DatabaseID, "")) } class="text-[11px] font-semibold text-brand-primary hover:underline">+ Draft baru</a>
 		</div>
 		if len(page.Drafts) == 0 {
 			<p class="px-1 py-2 text-[11px] text-zinc-500">Belum ada draft.</p>
@@ -99,8 +99,8 @@ templ migrationDraftList(page domain.MigrationPageView) {
 			<a
 				href={ templ.SafeURL(migrationPageURL(page.DatabaseID, d.ID)) }
 				class={ "block px-3 py-2 rounded-lg border text-xs transition",
-					templ.KV("bg-[#2c2a30] border-[#3f3c45] text-zinc-100", page.Editing != nil && page.Editing.ID == d.ID),
-					templ.KV("border-transparent text-zinc-300 hover:bg-[#252429]", page.Editing == nil || page.Editing.ID != d.ID) }
+					templ.KV("bg-app-active border-app-border-strong text-zinc-100", page.Editing != nil && page.Editing.ID == d.ID),
+					templ.KV("border-transparent text-zinc-300 hover:bg-app-hover", page.Editing == nil || page.Editing.ID != d.ID) }
 			>
 				<div class="font-semibold truncate">{ d.Name }</div>
 				<div class="text-[10px] text-zinc-500 mt-0.5">{ d.CreatedByName } · { fmtTime(d.UpdatedAt) }</div>
@@ -112,8 +112,9 @@ templ migrationDraftList(page domain.MigrationPageView) {
 // MigrationEditor edits one draft (draft != nil) or creates a new one.
 // The script can be typed or loaded from a .sql file (read in the browser into the textarea).
 templ MigrationEditor(dbID string, draft *domain.MigrationView) {
-	<div id="migration-editor" class="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-5 space-y-4 shadow-xl" x-data="{}">
-		<form id="migration-form" class="space-y-3">
+	<div id="migration-editor" class="bg-app-card border border-app-border rounded-xl p-5 space-y-4 shadow-xl" x-data="{}">
+		<!-- All actions are htmx buttons; Enter in the name field must not submit the form natively -->
+		<form id="migration-form" class="space-y-3" @submit.prevent>
 			<input type="hidden" name="db_id" value={ dbID }/>
 			<div class="flex flex-wrap items-center gap-3">
 				<input
@@ -124,9 +125,9 @@ templ MigrationEditor(dbID string, draft *domain.MigrationView) {
 					maxlength="200"
 					placeholder="Nama migration, mis. tambah tabel orders"
 					value={ draftField(draft, false) }
-					class="flex-1 min-w-[12rem] px-3 py-2 bg-[#121212] border border-[#2a2a2a] rounded-lg text-xs text-zinc-100 focus:outline-none focus:ring-2 focus:ring-[#ceafa3]/50"
+					class="flex-1 min-w-[12rem] px-3 py-2 bg-app-bg border border-app-border rounded-lg text-xs text-zinc-100 focus:outline-none focus:ring-2 focus:ring-brand-primary/50"
 				/>
-				<label class="px-3 py-2 rounded-lg text-xs font-medium bg-[#252525] hover:bg-[#333] text-zinc-200 cursor-pointer transition">
+				<label class="px-3 py-2 rounded-lg text-xs font-medium bg-app-active hover:bg-app-border-strong text-zinc-200 cursor-pointer transition">
 					Muat file .sql
 					<input
 						type="file"
@@ -142,7 +143,7 @@ templ MigrationEditor(dbID string, draft *domain.MigrationView) {
 				x-ref="sql"
 				rows="12"
 				spellcheck="false"
-				class="w-full p-4 bg-[#121212] border border-[#2a2a2a] rounded-lg font-mono text-xs text-[#87d1ff] focus:outline-none focus:ring-2 focus:ring-[#ceafa3]/50 leading-relaxed resize-y"
+				class="w-full p-4 bg-app-bg border border-app-border rounded-lg font-mono text-xs text-sem-info focus:outline-none focus:ring-2 focus:ring-brand-primary/50 leading-relaxed resize-y"
 				placeholder="-- Tulis perintah SQL di sini. Jangan tulis BEGIN/COMMIT: platform yang mengelola transaksi."
 			>{ draftField(draft, true) }</textarea>
 			<div class="flex flex-wrap items-center justify-between gap-2">
@@ -153,7 +154,7 @@ templ MigrationEditor(dbID string, draft *domain.MigrationView) {
 						hx-post="/migration/drafts"
 						hx-include="#migration-form"
 						hx-target="#migration-feedback"
-						class="px-4 py-1.5 rounded-lg text-xs font-bold bg-[#ceafa3] hover:bg-[#c09f93] text-[#121212] transition shadow-md"
+						class="px-4 py-1.5 rounded-lg text-xs font-bold bg-brand-primary hover:bg-brand-primary-hover text-app-bg transition shadow-md"
 					>
 						Simpan Draft
 					</button>
@@ -163,7 +164,7 @@ templ MigrationEditor(dbID string, draft *domain.MigrationView) {
 						hx-post={ fmt.Sprintf("/migration/%s/delete", draft.ID) }
 						hx-confirm="Hapus draft ini?"
 						hx-target="#migration-feedback"
-						class="px-3 py-1.5 rounded-lg text-xs font-medium text-[#ff8080] hover:bg-[#ff8080]/10 transition"
+						class="px-3 py-1.5 rounded-lg text-xs font-medium text-sem-danger hover:bg-sem-danger/10 transition"
 					>
 						Hapus Draft
 					</button>
@@ -173,7 +174,7 @@ templ MigrationEditor(dbID string, draft *domain.MigrationView) {
 							hx-post={ fmt.Sprintf("/migration/%s", draft.ID) }
 							hx-include="#migration-form"
 							hx-target="#migration-feedback"
-							class="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#252525] hover:bg-[#333] text-white transition"
+							class="px-3 py-1.5 rounded-lg text-xs font-medium bg-app-active hover:bg-app-border-strong text-white transition"
 						>
 							Simpan
 						</button>
@@ -182,7 +183,7 @@ templ MigrationEditor(dbID string, draft *domain.MigrationView) {
 							hx-post={ fmt.Sprintf("/migration/%s/dry-run", draft.ID) }
 							hx-include="#migration-form"
 							hx-target="#migration-feedback"
-							class="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#252525] hover:bg-[#333] text-white transition"
+							class="px-3 py-1.5 rounded-lg text-xs font-medium bg-app-active hover:bg-app-border-strong text-white transition"
 						>
 							Dry Run + EXPLAIN
 						</button>
@@ -192,7 +193,7 @@ templ MigrationEditor(dbID string, draft *domain.MigrationView) {
 							hx-include="#migration-form"
 							hx-target="#migration-feedback"
 							hx-confirm="Simpan dan eksekusi migration ini pada database target? Hasilnya (COMMIT atau ROLLBACK) dicatat permanen di riwayat."
-							class="px-4 py-1.5 rounded-lg text-xs font-bold bg-[#ceafa3] hover:bg-[#c09f93] text-[#121212] transition shadow-md"
+							class="px-4 py-1.5 rounded-lg text-xs font-bold bg-brand-primary hover:bg-brand-primary-hover text-app-bg transition shadow-md"
 						>
 							Eksekusi Migration
 						</button>
@@ -207,9 +208,9 @@ templ MigrationEditor(dbID string, draft *domain.MigrationView) {
 templ migrationHistory(history []domain.MigrationView) {
 	<div class="space-y-3">
 		<h3 class="text-xs font-bold text-zinc-400 uppercase tracking-wider px-1">Riwayat Eksekusi Migrasi</h3>
-		<div class="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl">
+		<div class="bg-app-card border border-app-border rounded-xl overflow-hidden shadow-xl">
 			<table class="w-full text-left text-sm text-zinc-300">
-				<thead class="bg-[#121212] text-xs uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]">
+				<thead class="bg-app-bg text-xs uppercase tracking-wider text-zinc-400 border-b border-app-border">
 					<tr>
 						<th class="px-4 py-3 font-semibold">Versi</th>
 						<th class="px-4 py-3 font-semibold">Nama</th>
@@ -219,17 +220,17 @@ templ migrationHistory(history []domain.MigrationView) {
 						<th class="px-4 py-3 font-semibold">Status</th>
 					</tr>
 				</thead>
-				<tbody class="divide-y divide-[#2a2a2a]">
+				<tbody class="divide-y divide-app-border">
 					if len(history) == 0 {
 						<tr>
 							<td colspan="6" class="px-4 py-8 text-center text-zinc-500 text-xs">Belum ada riwayat migrasi pada database ini.</td>
 						</tr>
 					}
 					for _, h := range history {
-						<tr class="hover:bg-[#252525]/50 transition">
+						<tr class="hover:bg-app-active/50 transition">
 							<td class="px-4 py-3 font-mono text-xs">{ h.VersionLabel() }</td>
 							<td class="px-4 py-3 text-xs font-semibold">
-								<a href={ templ.SafeURL("/migration/" + h.ID) } class="text-zinc-200 hover:text-[#ceafa3] hover:underline">{ h.Name }</a>
+								<a href={ templ.SafeURL("/migration/" + h.ID) } class="text-zinc-200 hover:text-brand-primary hover:underline">{ h.Name }</a>
 							</td>
 							<td class="px-4 py-3 text-xs">{ fmtTime(h.ExecutedAt) }</td>
 							<td class="px-4 py-3 text-xs">{ h.ExecutedByName }</td>
@@ -245,8 +246,8 @@ templ migrationHistory(history []domain.MigrationView) {
 
 templ MigrationFeedback(success bool, message string) {
 	if success {
-		<div class="p-3 rounded-lg bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs font-mono whitespace-pre-wrap">✓ { message }</div>
+		<div class="p-3 rounded-lg bg-sem-success/10 border border-sem-success/30 text-sem-success text-xs font-mono whitespace-pre-wrap">✓ { message }</div>
 	} else {
-		<div class="p-3 rounded-lg bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs font-mono whitespace-pre-wrap">✗ { message }</div>
+		<div class="p-3 rounded-lg bg-sem-danger/10 border border-sem-danger/30 text-sem-danger text-xs font-mono whitespace-pre-wrap">✗ { message }</div>
 	}
 }

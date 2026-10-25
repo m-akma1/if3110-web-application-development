@@ -5,7 +5,7 @@ import "dbplatform/app/domain"
 templ adminCodesSection(ov domain.AdminOverview) {
 	<div class="space-y-6">
 		@adminCard("Buat Kode Undangan", "Pengguna yang mendaftar dengan kode ini masuk ke group tujuan") {
-			<form hx-post="/admin/codes" class="p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+			<form method="post" hx-post="/admin/codes" class="p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
 				<div>
 					<label class={ adminLabel } for="code-group">Group tujuan</label>
 					<select id="code-group" name="group_id" required class={ adminInput }>
@@ -29,7 +29,7 @@ templ adminCodesSection(ov domain.AdminOverview) {
 
 		@adminCard("Kode Undangan", "") {
 			<table class="w-full text-left text-sm text-zinc-300">
-				<thead class="bg-[#18171b] text-xs uppercase tracking-wider text-zinc-400 border-b border-[#333138]">
+				<thead class="bg-app-input text-xs uppercase tracking-wider text-zinc-400 border-b border-app-border">
 					<tr>
 						<th class="px-4 py-3 font-semibold">Kode</th>
 						<th class="px-4 py-3 font-semibold">Group Tujuan</th>
@@ -37,18 +37,18 @@ templ adminCodesSection(ov domain.AdminOverview) {
 						<th class="px-4 py-3 font-semibold">Status</th>
 					</tr>
 				</thead>
-				<tbody class="divide-y divide-[#333138]">
+				<tbody class="divide-y divide-app-border">
 					if len(ov.Codes) == 0 {
 						<tr><td colspan="4" class="px-4 py-8 text-center text-xs text-zinc-500">Belum ada kode undangan.</td></tr>
 					}
 					for _, c := range ov.Codes {
 						<tr>
-							<td class="px-4 py-3 text-xs font-mono font-bold text-[#ceafa3]">{ c.Code }</td>
+							<td class="px-4 py-3 text-xs font-mono font-bold text-brand-primary">{ c.Code }</td>
 							<td class="px-4 py-3 text-xs">{ c.GroupName }</td>
 							<td class="px-4 py-3 text-xs text-zinc-400">{ c.CreatedAt.Format("2006-01-02 15:04") }</td>
 							<td class="px-4 py-3 text-xs">
 								if c.IsActive {
-									<span class="text-[#7dff95] mr-2">Aktif</span>
+									<span class="text-sem-success mr-2">Aktif</span>
 									<button hx-post={ "/admin/codes/" + c.Code + "/active" } hx-vals='{"active":"false"}' class={ btnDanger }>Nonaktifkan</button>
 								} else {
 									<span class="text-zinc-500 mr-2">Nonaktif</span>

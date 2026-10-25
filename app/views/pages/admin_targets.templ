@@ -8,7 +8,7 @@ import (
 templ adminTargetsSection(ov domain.AdminOverview) {
 	<div class="space-y-6">
 		@adminCard("Daftarkan Database PostgreSQL", "Koneksi diuji saat disimpan; password disimpan terenkripsi") {
-			<form hx-post="/admin/databases" class="p-4">
+			<form method="post" hx-post="/admin/databases" class="p-4">
 				@targetFields(domain.TargetItem{Port: 5432, SSLMode: "disable"}, true)
 				<div class="mt-3 flex justify-end">
 					<button type="submit" class={ btnPrimary }>+ Uji &amp; Simpan Koneksi</button>
@@ -20,7 +20,7 @@ templ adminTargetsSection(ov domain.AdminOverview) {
 			if len(ov.Targets) == 0 {
 				<p class="p-4 text-xs text-zinc-500">Belum ada database terdaftar.</p>
 			} else {
-				<div class="divide-y divide-[#333138]">
+				<div class="divide-y divide-app-border">
 					for _, t := range ov.Targets {
 						@targetRow(t)
 					}
@@ -50,14 +50,14 @@ templ targetRow(t domain.TargetItem) {
 			</div>
 		</div>
 		if t.LastError != "" {
-			<div class="text-[11px] text-[#ff8080] font-mono break-all">{ t.LastError }</div>
+			<div class="text-[11px] text-sem-danger font-mono break-all">{ t.LastError }</div>
 		}
 		if t.LastCheckedAt != nil {
 			<div class="text-[10px] text-zinc-500">Terakhir diuji { t.LastCheckedAt.Format("2006-01-02 15:04:05") }</div>
 		}
 		<details class="text-xs">
 			<summary class="cursor-pointer text-zinc-400 hover:text-zinc-200">Ubah koneksi</summary>
-			<form hx-post={ "/admin/databases/" + t.ID } class="mt-2">
+			<form method="post" hx-post={ "/admin/databases/" + t.ID } class="mt-2">
 				@targetFields(t, false)
 				<div class="mt-3 flex justify-end">
 					<button type="submit" class={ btnSmall }>Simpan &amp; Uji Ulang</button>
@@ -70,11 +70,11 @@ templ targetRow(t domain.TargetItem) {
 templ targetStatusBadge(status string) {
 	switch status {
 		case "CONNECTED":
-			<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-[#7dff95]/15 text-[#7dff95] border border-[#7dff95]/30">CONNECTED</span>
+			<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-success/15 text-sem-success border border-sem-success/30">CONNECTED</span>
 		case "ERROR":
-			<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-[#ff8080]/15 text-[#ff8080] border border-[#ff8080]/30">ERROR</span>
+			<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-danger/15 text-sem-danger border border-sem-danger/30">ERROR</span>
 		default:
-			<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-[#2c2a30] text-zinc-300">BELUM DIUJI</span>
+			<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-app-active text-zinc-300">BELUM DIUJI</span>
 	}
 }
 

@@ -30,7 +30,7 @@ func EmptyState(title, message string) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"max-w-xl mx-auto my-10 bg-[#222126] border border-[#333138] rounded-2xl p-8 text-center space-y-3\"><div class=\"text-zinc-500 flex justify-center\"><svg class=\"w-10 h-10\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.5\" d=\"M3 7.5l9-4.5 9 4.5M3 7.5v9l9 4.5m-9-13.5l9 4.5m0 9v-9m0 9l9-4.5v-9m-9 4.5l9-4.5\"></path></svg></div><h2 class=\"text-lg font-bold text-white\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"max-w-xl mx-auto my-10 bg-app-card border border-app-border rounded-2xl p-8 text-center space-y-3\"><div class=\"text-zinc-500 flex justify-center\"><svg class=\"w-10 h-10\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.5\" d=\"M3 7.5l9-4.5 9 4.5M3 7.5v9l9 4.5m-9-13.5l9 4.5m0 9v-9m0 9l9-4.5v-9m-9 4.5l9-4.5\"></path></svg></div><h2 class=\"text-lg font-bold text-white\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -47,7 +47,7 @@ func Forbidden(user *domain.AuthLayoutUser, activeTab string, message string, cs
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"max-w-xl mx-auto mt-16 bg-[#222126] border border-[#ff8080]/30 rounded-2xl p-8 text-center space-y-3\"><h1 class=\"text-lg font-bold text-[#ff8080]\">403 · Akses ditolak</h1><p class=\"text-xs text-zinc-300 leading-relaxed\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"max-w-xl mx-auto mt-16 bg-app-card border border-sem-danger/30 rounded-2xl p-8 text-center space-y-3\"><h1 class=\"text-lg font-bold text-sem-danger\">403 · Akses ditolak</h1><p class=\"text-xs text-zinc-300 leading-relaxed\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -60,7 +60,7 @@ func Forbidden(user *domain.AuthLayoutUser, activeTab string, message string, cs
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</p><a href=\"/dashboard\" class=\"inline-block mt-2 text-xs font-semibold text-[#ceafa3] hover:underline\">Kembali ke Database Viewer</a></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</p><a href=\"/dashboard\" class=\"inline-block mt-2 text-xs font-semibold text-brand-primary hover:underline\">Kembali ke Database Viewer</a></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

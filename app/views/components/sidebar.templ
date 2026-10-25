@@ -3,7 +3,7 @@ package components
 import "dbplatform/app/domain"
 
 templ Sidebar(user *domain.AuthLayoutUser, activeTab string) {
-    <aside class="w-60 bg-[#1c1b1e] border border-[#333138] rounded-2xl flex flex-col justify-between shrink-0 p-2">
+    <aside class="w-60 bg-app-sidebar border border-app-border rounded-2xl flex flex-col justify-between shrink-0 p-2">
         <div>
             <!-- Brand Name Tanpa Logo -->
             <div class="p-4 flex items-center">
@@ -14,7 +14,7 @@ templ Sidebar(user *domain.AuthLayoutUser, activeTab string) {
             <nav class="mt-2 space-y-1">
                 <a 
                     href="/dashboard" 
-                    class={ "flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition", templ.KV("bg-[#2c2a30] text-zinc-100 border border-[#3f3c45]", activeTab == "viewer"), templ.KV("text-zinc-400 hover:bg-[#252429] hover:text-zinc-200 border border-transparent", activeTab != "viewer") }
+                    class={ "flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition", templ.KV("bg-app-active text-zinc-100 border border-app-border-strong", activeTab == "viewer"), templ.KV("text-zinc-400 hover:bg-app-hover hover:text-zinc-200 border border-transparent", activeTab != "viewer") }
                 >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21 3.582 4 8 4s8-1.79 8-4"></path></svg>
                     Database Viewer
@@ -23,7 +23,7 @@ templ Sidebar(user *domain.AuthLayoutUser, activeTab string) {
                 if user != nil && len(user.Databases) > 0 {
                 <a 
                     href="/migration" 
-                    class={ "flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition", templ.KV("bg-[#2c2a30] text-zinc-100 border border-[#3f3c45]", activeTab == "migration"), templ.KV("text-zinc-400 hover:bg-[#252429] hover:text-zinc-200 border border-transparent", activeTab != "migration") }
+                    class={ "flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition", templ.KV("bg-app-active text-zinc-100 border border-app-border-strong", activeTab == "migration"), templ.KV("text-zinc-400 hover:bg-app-hover hover:text-zinc-200 border border-transparent", activeTab != "migration") }
                 >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                     Migration Editor
@@ -33,7 +33,7 @@ templ Sidebar(user *domain.AuthLayoutUser, activeTab string) {
                 if user != nil && user.IsPlatformAdmin {
                     <a 
                         href="/admin" 
-                        class={ "flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition", templ.KV("bg-[#2c2a30] text-zinc-100 border border-[#3f3c45]", activeTab == "admin"), templ.KV("text-zinc-400 hover:bg-[#252429] hover:text-zinc-200 border border-transparent", activeTab != "admin") }
+                        class={ "flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition", templ.KV("bg-app-active text-zinc-100 border border-app-border-strong", activeTab == "admin"), templ.KV("text-zinc-400 hover:bg-app-hover hover:text-zinc-200 border border-transparent", activeTab != "admin") }
                     >
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
                         Platform Admin
@@ -42,10 +42,10 @@ templ Sidebar(user *domain.AuthLayoutUser, activeTab string) {
             </nav>
         </div>
 
-        <div class="pt-2 border-t border-[#333138]">
+        <div class="pt-2 border-t border-app-border">
             <button 
                 hx-post="/logout" 
-                class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-[#ff8080] hover:bg-[#ff8080]/10 transition"
+                class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-sem-danger hover:bg-sem-danger/10 transition"
             >
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
                 Keluar

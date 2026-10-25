@@ -7,7 +7,7 @@ import (
 
 templ Dashboard(title string, user *domain.AuthLayoutUser, activeDBID string, activeTab string, csrfToken string) {
 	<!DOCTYPE html>
-	<html lang="id" class="h-full bg-[#121212]">
+	<html lang="id" class="h-full bg-app-bg">
 	<head>
 		<meta charset="UTF-8"/>
 		<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -28,17 +28,14 @@ templ Dashboard(title string, user *domain.AuthLayoutUser, activeDBID string, ac
 			});
 		</script>
 	</head>
-	<body
-		class="h-full text-zinc-100 bg-[#121212] font-sans antialiased"
-		hx-headers={ `{"X-CSRF-Token": "` + csrfToken + `"}` }
-	>
-		<div class="flex h-screen overflow-hidden p-3 gap-3 bg-[#121212]">
+	<body class="h-full text-zinc-100 bg-app-bg font-sans antialiased">
+		<div class="flex h-screen overflow-hidden p-3 gap-3 bg-app-bg">
 			@components.Sidebar(user, activeTab)
 
-			<div class="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#1c1b1e] rounded-2xl border border-[#333138]">
+			<div class="flex-1 flex flex-col min-w-0 overflow-hidden bg-app-sidebar rounded-2xl border border-app-border">
 				@components.Navbar(user, activeDBID, activeTab)
 
-				<main class="flex-1 overflow-y-auto p-6 bg-[#1c1b1e]">
+				<main class="flex-1 overflow-y-auto p-6 bg-app-sidebar">
 					{ children... }
 				</main>
 			</div>

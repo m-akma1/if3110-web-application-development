@@ -32,7 +32,7 @@ func ErrorState(title, message, retryURL, retryTarget string) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"max-w-xl mx-auto my-10 bg-[#222126] border border-[#ff8080]/30 rounded-2xl p-8 text-center space-y-3\" role=\"alert\"><div class=\"text-[#ff8080] flex justify-center\"><svg class=\"w-10 h-10\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.5\" d=\"M12 9v3.75m0 3.75h.008M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z\"></path></svg></div><h2 class=\"text-lg font-bold text-white\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"max-w-xl mx-auto my-10 bg-app-card border border-sem-danger/30 rounded-2xl p-8 text-center space-y-3\" role=\"alert\"><div class=\"text-sem-danger flex justify-center\"><svg class=\"w-10 h-10\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.5\" d=\"M12 9v3.75m0 3.75h.008M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z\"></path></svg></div><h2 class=\"text-lg font-bold text-white\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -90,7 +90,7 @@ func ErrorState(title, message, retryURL, retryTarget string) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" hx-swap=\"outerHTML\" class=\"mt-2 px-4 py-2 rounded-lg bg-[#ceafa3] hover:bg-[#c2a195] text-[#121212] text-xs font-semibold transition cursor-pointer\">Coba lagi</button>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" hx-swap=\"outerHTML\" class=\"mt-2 px-4 py-2 rounded-lg bg-brand-primary hover:bg-brand-primary-hover text-app-bg text-xs font-semibold transition cursor-pointer\">Coba lagi</button>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -108,7 +108,7 @@ func ErrorState(title, message, retryURL, retryTarget string) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" class=\"inline-block mt-2 px-4 py-2 rounded-lg bg-[#ceafa3] hover:bg-[#c2a195] text-[#121212] text-xs font-semibold transition\">Coba lagi</a>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" class=\"inline-block mt-2 px-4 py-2 rounded-lg bg-brand-primary hover:bg-brand-primary-hover text-app-bg text-xs font-semibold transition\">Coba lagi</a>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

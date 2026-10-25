@@ -47,7 +47,7 @@ func adminCodesSection(ov domain.AdminOverview) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<form hx-post=\"/admin/codes\" class=\"p-4 grid grid-cols-1 md:grid-cols-3 gap-3\"><div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<form method=\"post\" hx-post=\"/admin/codes\" class=\"p-4 grid grid-cols-1 md:grid-cols-3 gap-3\"><div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -217,7 +217,7 @@ func adminCodesSection(ov domain.AdminOverview) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<table class=\"w-full text-left text-sm text-zinc-300\"><thead class=\"bg-[#18171b] text-xs uppercase tracking-wider text-zinc-400 border-b border-[#333138]\"><tr><th class=\"px-4 py-3 font-semibold\">Kode</th><th class=\"px-4 py-3 font-semibold\">Group Tujuan</th><th class=\"px-4 py-3 font-semibold\">Dibuat</th><th class=\"px-4 py-3 font-semibold\">Status</th></tr></thead> <tbody class=\"divide-y divide-[#333138]\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<table class=\"w-full text-left text-sm text-zinc-300\"><thead class=\"bg-app-input text-xs uppercase tracking-wider text-zinc-400 border-b border-app-border\"><tr><th class=\"px-4 py-3 font-semibold\">Kode</th><th class=\"px-4 py-3 font-semibold\">Group Tujuan</th><th class=\"px-4 py-3 font-semibold\">Dibuat</th><th class=\"px-4 py-3 font-semibold\">Status</th></tr></thead> <tbody class=\"divide-y divide-app-border\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -228,14 +228,14 @@ func adminCodesSection(ov domain.AdminOverview) templ.Component {
 				}
 			}
 			for _, c := range ov.Codes {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<tr><td class=\"px-4 py-3 text-xs font-mono font-bold text-[#ceafa3]\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<tr><td class=\"px-4 py-3 text-xs font-mono font-bold text-brand-primary\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var16 string
 				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(c.Code)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin_codes.templ`, Line: 46, Col: 80}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin_codes.templ`, Line: 46, Col: 84}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 				if templ_7745c5c3_Err != nil {
@@ -272,7 +272,7 @@ func adminCodesSection(ov domain.AdminOverview) templ.Component {
 					return templ_7745c5c3_Err
 				}
 				if c.IsActive {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<span class=\"text-[#7dff95] mr-2\">Aktif</span> ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<span class=\"text-sem-success mr-2\">Aktif</span> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}

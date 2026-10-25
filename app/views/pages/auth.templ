@@ -26,7 +26,7 @@ templ LoginForm(state AuthFormState) {
 	<div class="space-y-7">
 		<!-- Header -->
 		<div class="space-y-3">
-			<div class="text-[#ceafa3]">
+			<div class="text-brand-primary">
 				<svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
 					<path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9"></path>
 				</svg>
@@ -40,13 +40,13 @@ templ LoginForm(state AuthFormState) {
 		</div>
 
 		if state.GeneralError != "" {
-			<div class="p-3 rounded-lg bg-[#ff8080]/10 border border-[#ff8080]/30 text-xs font-medium text-[#ff8080]">
+			<div class="p-3 rounded-lg bg-sem-danger/10 border border-sem-danger/30 text-xs font-medium text-sem-danger">
 				{ state.GeneralError }
 			</div>
 		}
 
 		<!-- Form Login -->
-		<form hx-post="/auth/login" hx-target="#auth-form-container" hx-swap="innerHTML" class="space-y-5">
+		<form method="post" action="/login" hx-post="/login" hx-target="#auth-form-container" hx-swap="innerHTML" class="space-y-5">
 			<!-- Input Username atau Email + Error di Samping Label -->
 			<div class="space-y-1.5">
 				<div class="flex items-center justify-between gap-2">
@@ -54,7 +54,7 @@ templ LoginForm(state AuthFormState) {
 						Username or email
 					</label>
 					if state.IdentifierError != "" {
-						<span class="text-xs font-medium text-[#ff8080] flex items-center gap-1 animate-pulse">
+						<span class="text-xs font-medium text-sem-danger flex items-center gap-1 animate-pulse">
 							<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
 								<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
 							</svg>
@@ -73,9 +73,9 @@ templ LoginForm(state AuthFormState) {
 					spellcheck="false"
 					required
 					autofocus
-					class={ "w-full px-3.5 py-2.5 text-sm rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
-						templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.IdentifierError != ""),
-						templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.IdentifierError == "") }
+					class={ "w-full px-3.5 py-2.5 text-sm rounded-lg border bg-app-input text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
+						templ.KV("border-sem-danger focus:border-sem-danger focus:ring-sem-danger/30", state.IdentifierError != ""),
+						templ.KV("border-app-border focus:border-brand-primary focus:ring-brand-primary/50", state.IdentifierError == "") }
 				/>
 			</div>
 
@@ -86,7 +86,7 @@ templ LoginForm(state AuthFormState) {
 						Password
 					</label>
 					if state.PasswordError != "" {
-						<span class="text-xs font-medium text-[#ff8080] flex items-center gap-1 animate-pulse">
+						<span class="text-xs font-medium text-sem-danger flex items-center gap-1 animate-pulse">
 							<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
 								<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
 							</svg>
@@ -102,9 +102,9 @@ templ LoginForm(state AuthFormState) {
 						placeholder="••••••••••"
 						autocomplete="current-password"
 						required
-						class={ "w-full pl-3.5 pr-10 py-2.5 text-sm rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
-							templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.PasswordError != ""),
-							templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.PasswordError == "") }
+						class={ "w-full pl-3.5 pr-10 py-2.5 text-sm rounded-lg border bg-app-input text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
+							templ.KV("border-sem-danger focus:border-sem-danger focus:ring-sem-danger/30", state.PasswordError != ""),
+							templ.KV("border-app-border focus:border-brand-primary focus:ring-brand-primary/50", state.PasswordError == "") }
 					/>
 					<button
 						type="button"
@@ -122,22 +122,17 @@ templ LoginForm(state AuthFormState) {
 					</button>
 				</div>
 
-				<!-- Tombol Lupa Password (tidak melakukan aksi karena belum disetup di backend) -->
-				<div class="flex justify-end pt-1">
-					<button
-						type="button"
-						class="text-xs font-medium text-[#ceafa3] hover:text-[#c2a195] hover:underline focus:outline-none transition cursor-pointer"
-					>
-						Forgot password?
-					</button>
-				</div>
+				<!-- Password direset oleh Platform Admin (Admin → Users), tidak ada reset mandiri -->
+				<p class="pt-1 text-right text-[11px] text-zinc-500">
+					Lupa password? Minta Platform Admin untuk meresetnya.
+				</p>
 			</div>
 
 			<!-- Tombol Submit -->
 			<div class="pt-1">
 				<button
 					type="submit"
-					class="w-full py-2.5 px-4 bg-[#ceafa3] hover:bg-[#c2a195] text-[#121212] text-xs sm:text-sm font-semibold rounded-lg shadow-lg shadow-[#ceafa3]/20 transition cursor-pointer"
+					class="w-full py-2.5 px-4 bg-brand-primary hover:bg-brand-primary-hover text-app-bg text-xs sm:text-sm font-semibold rounded-lg shadow-lg shadow-brand-primary/20 transition cursor-pointer"
 				>
 					Get Started
 				</button>
@@ -148,11 +143,11 @@ templ LoginForm(state AuthFormState) {
 		<p class="text-center text-xs text-zinc-400 pt-2">
 			Don't have an account?
 			<a
-				href="/auth/signup"
-				hx-get="/auth/signup"
+				href="/signup"
+				hx-get="/signup"
 				hx-target="#auth-form-container"
 				hx-push-url="true"
-				class="font-semibold text-[#ceafa3] hover:text-[#c2a195] hover:underline ml-1"
+				class="font-semibold text-brand-primary hover:text-brand-primary-hover hover:underline ml-1"
 			>
 				Sign up
 			</a>
@@ -170,7 +165,7 @@ templ SignupForm(state AuthFormState) {
 	<div class="space-y-6" x-data="{ show: false }">
 		<!-- Header -->
 		<div class="space-y-2.5">
-			<div class="text-[#ceafa3]">
+			<div class="text-brand-primary">
 				<svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
 					<path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9"></path>
 				</svg>
@@ -184,13 +179,13 @@ templ SignupForm(state AuthFormState) {
 		</div>
 
 		if state.GeneralError != "" {
-			<div class="p-3 rounded-lg bg-[#ff8080]/10 border border-[#ff8080]/30 text-xs font-medium text-[#ff8080]">
+			<div class="p-3 rounded-lg bg-sem-danger/10 border border-sem-danger/30 text-xs font-medium text-sem-danger">
 				{ state.GeneralError }
 			</div>
 		}
 
 		<!-- Form Sign Up -->
-		<form hx-post="/auth/signup" hx-target="#auth-form-container" hx-swap="innerHTML" class="space-y-4">
+		<form method="post" action="/signup" hx-post="/signup" hx-target="#auth-form-container" hx-swap="innerHTML" class="space-y-4">
 			<!-- Input Username + Error di Samping Label -->
 			<div class="space-y-1.5">
 				<div class="flex items-center justify-between gap-2">
@@ -198,7 +193,7 @@ templ SignupForm(state AuthFormState) {
 						Username
 					</label>
 					if state.UsernameError != "" {
-						<span class="text-xs font-medium text-[#ff8080] flex items-center gap-1">
+						<span class="text-xs font-medium text-sem-danger flex items-center gap-1">
 							<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
 								<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
 							</svg>
@@ -219,9 +214,9 @@ templ SignupForm(state AuthFormState) {
 					maxlength="32"
 					required
 					autofocus
-					class={ "w-full px-3.5 py-2.5 text-sm rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
-						templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.UsernameError != ""),
-						templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.UsernameError == "") }
+					class={ "w-full px-3.5 py-2.5 text-sm rounded-lg border bg-app-input text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
+						templ.KV("border-sem-danger focus:border-sem-danger focus:ring-sem-danger/30", state.UsernameError != ""),
+						templ.KV("border-app-border focus:border-brand-primary focus:ring-brand-primary/50", state.UsernameError == "") }
 				/>
 			</div>
 
@@ -232,7 +227,7 @@ templ SignupForm(state AuthFormState) {
 						Email <span class="font-normal text-zinc-500">(opsional)</span>
 					</label>
 					if state.EmailError != "" {
-						<span class="text-xs font-medium text-[#ff8080] flex items-center gap-1">
+						<span class="text-xs font-medium text-sem-danger flex items-center gap-1">
 							<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
 								<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
 							</svg>
@@ -247,9 +242,9 @@ templ SignupForm(state AuthFormState) {
 					value={ state.Email }
 					placeholder="nama@email.com"
 					autocomplete="email"
-					class={ "w-full px-3.5 py-2.5 text-sm rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
-						templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.EmailError != ""),
-						templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.EmailError == "") }
+					class={ "w-full px-3.5 py-2.5 text-sm rounded-lg border bg-app-input text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
+						templ.KV("border-sem-danger focus:border-sem-danger focus:ring-sem-danger/30", state.EmailError != ""),
+						templ.KV("border-app-border focus:border-brand-primary focus:ring-brand-primary/50", state.EmailError == "") }
 				/>
 			</div>
 
@@ -260,7 +255,7 @@ templ SignupForm(state AuthFormState) {
 						Password
 					</label>
 					if state.PasswordError != "" {
-						<span class="text-xs font-medium text-[#ff8080] flex items-center gap-1">
+						<span class="text-xs font-medium text-sem-danger flex items-center gap-1">
 							<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
 								<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
 							</svg>
@@ -276,9 +271,9 @@ templ SignupForm(state AuthFormState) {
 						placeholder="Minimal 8 karakter"
 						autocomplete="new-password"
 						required
-						class={ "w-full pl-3.5 pr-10 py-2.5 text-sm rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
-							templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.PasswordError != ""),
-							templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.PasswordError == "") }
+						class={ "w-full pl-3.5 pr-10 py-2.5 text-sm rounded-lg border bg-app-input text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
+							templ.KV("border-sem-danger focus:border-sem-danger focus:ring-sem-danger/30", state.PasswordError != ""),
+							templ.KV("border-app-border focus:border-brand-primary focus:ring-brand-primary/50", state.PasswordError == "") }
 					/>
 					<button
 						type="button"
@@ -307,7 +302,7 @@ templ SignupForm(state AuthFormState) {
 						Team Invite Code <span class="font-normal text-zinc-500">(opsional)</span>
 					</label>
 					if state.CodeError != "" {
-						<span class="text-xs font-medium text-[#ff8080] flex items-center gap-1">
+						<span class="text-xs font-medium text-sem-danger flex items-center gap-1">
 							<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
 								<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
 							</svg>
@@ -321,9 +316,9 @@ templ SignupForm(state AuthFormState) {
 					name="invite_code"
 					value={ state.InviteCode }
 					placeholder="Kode Tim dari Platform Admin"
-					class={ "w-full px-3.5 py-2.5 text-sm font-mono rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
-						templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.CodeError != ""),
-						templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.CodeError == "") }
+					class={ "w-full px-3.5 py-2.5 text-sm font-mono rounded-lg border bg-app-input text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
+						templ.KV("border-sem-danger focus:border-sem-danger focus:ring-sem-danger/30", state.CodeError != ""),
+						templ.KV("border-app-border focus:border-brand-primary focus:ring-brand-primary/50", state.CodeError == "") }
 				/>
 			</div>
 
@@ -331,7 +326,7 @@ templ SignupForm(state AuthFormState) {
 			<div class="pt-1">
 				<button
 					type="submit"
-					class="w-full py-2.5 px-4 bg-[#ceafa3] hover:bg-[#c2a195] text-[#121212] text-xs sm:text-sm font-semibold rounded-lg shadow-lg shadow-[#ceafa3]/20 transition cursor-pointer"
+					class="w-full py-2.5 px-4 bg-brand-primary hover:bg-brand-primary-hover text-app-bg text-xs sm:text-sm font-semibold rounded-lg shadow-lg shadow-brand-primary/20 transition cursor-pointer"
 				>
 					Create Account
 				</button>
@@ -342,11 +337,11 @@ templ SignupForm(state AuthFormState) {
 		<p class="text-center text-xs text-zinc-400 pt-1">
 			Already have an account?
 			<a
-				href="/auth/login"
-				hx-get="/auth/login"
+				href="/login"
+				hx-get="/login"
 				hx-target="#auth-form-container"
 				hx-push-url="true"
-				class="font-semibold text-[#ceafa3] hover:text-[#c2a195] hover:underline ml-1"
+				class="font-semibold text-brand-primary hover:text-brand-primary-hover hover:underline ml-1"
 			>
 				Log in
 			</a>

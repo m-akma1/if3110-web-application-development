@@ -34,13 +34,13 @@ func planIndent(depth int) string {
 func stepBadgeClass(kind string) string {
 	switch kind {
 	case "EXPLAINED":
-		return "bg-[#87d1ff]/15 text-[#87d1ff] border-[#87d1ff]/30"
+		return "bg-sem-info/15 text-sem-info border-sem-info/30"
 	case "FAILED":
-		return "bg-[#ff8080]/15 text-[#ff8080] border-[#ff8080]/30"
+		return "bg-sem-danger/15 text-sem-danger border-sem-danger/30"
 	case "SKIPPED":
 		return "bg-zinc-500/10 text-zinc-500 border-zinc-500/30"
 	default:
-		return "bg-[#7dff95]/10 text-[#7dff95] border-[#7dff95]/30"
+		return "bg-sem-success/10 text-sem-success border-sem-success/30"
 	}
 }
 
@@ -86,7 +86,7 @@ func DryRunReport(v domain.DryRunView) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if v.OK {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"p-3 rounded-lg bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs font-mono\">✓ Dry run berhasil: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"p-3 rounded-lg bg-sem-success/10 border border-sem-success/30 text-sem-success text-xs font-mono\">✓ Dry run berhasil: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -117,7 +117,7 @@ func DryRunReport(v domain.DryRunView) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"p-3 rounded-lg bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs font-mono whitespace-pre-wrap\">✗ Dry run gagal (seluruh perubahan di-ROLLBACK): ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"p-3 rounded-lg bg-sem-danger/10 border border-sem-danger/30 text-sem-danger text-xs font-mono whitespace-pre-wrap\">✗ Dry run gagal (seluruh perubahan di-ROLLBACK): ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -136,7 +136,7 @@ func DryRunReport(v domain.DryRunView) templ.Component {
 			}
 		}
 		for _, st := range v.Steps {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"bg-[#121212] border border-[#2a2a2a] rounded-lg overflow-hidden\"><div class=\"flex items-start justify-between gap-3 px-3 py-2 border-b border-[#2a2a2a]\"><pre class=\"font-mono text-[11px] text-zinc-300 whitespace-pre-wrap break-all flex-1\"><span class=\"text-zinc-500\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"bg-app-bg border border-app-border rounded-lg overflow-hidden\"><div class=\"flex items-start justify-between gap-3 px-3 py-2 border-b border-app-border\"><pre class=\"font-mono text-[11px] text-zinc-300 whitespace-pre-wrap break-all flex-1\"><span class=\"text-zinc-500\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -221,7 +221,7 @@ func DryRunReport(v domain.DryRunView) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(st.Nodes) > 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<div class=\"overflow-x-auto\"><table class=\"w-full text-left text-[11px] text-zinc-300\"><thead class=\"text-[10px] uppercase tracking-wider text-zinc-500 border-b border-[#2a2a2a]\"><tr><th class=\"px-3 py-1.5 font-semibold\">Node</th><th class=\"px-3 py-1.5 font-semibold text-right\">Rows est.</th><th class=\"px-3 py-1.5 font-semibold text-right\">Rows actual</th><th class=\"px-3 py-1.5 font-semibold text-right\">Loops</th><th class=\"px-3 py-1.5 font-semibold text-right\">Cost</th><th class=\"px-3 py-1.5 font-semibold text-right\">Actual time</th><th class=\"px-3 py-1.5 font-semibold text-right\">Buffers hit/read</th></tr></thead> <tbody class=\"divide-y divide-[#2a2a2a]/60\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<div class=\"overflow-x-auto\"><table class=\"w-full text-left text-[11px] text-zinc-300\"><thead class=\"text-[10px] uppercase tracking-wider text-zinc-500 border-b border-app-border\"><tr><th class=\"px-3 py-1.5 font-semibold\">Node</th><th class=\"px-3 py-1.5 font-semibold text-right\">Rows est.</th><th class=\"px-3 py-1.5 font-semibold text-right\">Rows actual</th><th class=\"px-3 py-1.5 font-semibold text-right\">Loops</th><th class=\"px-3 py-1.5 font-semibold text-right\">Cost</th><th class=\"px-3 py-1.5 font-semibold text-right\">Actual time</th><th class=\"px-3 py-1.5 font-semibold text-right\">Buffers hit/read</th></tr></thead> <tbody class=\"divide-y divide-app-border/60\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -281,14 +281,14 @@ func DryRunReport(v domain.DryRunView) templ.Component {
 						return templ_7745c5c3_Err
 					}
 					if n.JoinType != "" {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<span class=\"ml-1 text-[10px] text-[#ceafa3]\">")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<span class=\"ml-1 text-[10px] text-brand-primary\">")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var15 string
 						templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(n.JoinType)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/explain_plan.templ`, Line: 100, Col: 71}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/explain_plan.templ`, Line: 100, Col: 75}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 						if templ_7745c5c3_Err != nil {
@@ -364,7 +364,7 @@ func DryRunReport(v domain.DryRunView) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var19 = []any{"px-3 py-1.5 font-mono text-right", templ.KV("text-[#ffbc5e] font-bold", n.Misestimated)}
+					var templ_7745c5c3_Var19 = []any{"px-3 py-1.5 font-mono text-right", templ.KV("text-sem-warning font-bold", n.Misestimated)}
 					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var19...)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
@@ -462,7 +462,7 @@ func DryRunReport(v domain.DryRunView) templ.Component {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</tbody></table></div><div class=\"px-3 py-1.5 border-t border-[#2a2a2a] text-[10px] font-mono text-zinc-500\">Planning ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</tbody></table></div><div class=\"px-3 py-1.5 border-t border-app-border text-[10px] font-mono text-zinc-500\">Planning ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

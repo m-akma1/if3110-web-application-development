@@ -47,7 +47,7 @@ func adminUsersSection(actorID string, ov domain.AdminOverview) templ.Component 
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<form hx-post=\"/admin/users\" class=\"p-4 grid grid-cols-1 md:grid-cols-4 gap-3\"><div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<form method=\"post\" hx-post=\"/admin/users\" class=\"p-4 grid grid-cols-1 md:grid-cols-4 gap-3\"><div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -264,7 +264,7 @@ func adminUsersSection(actorID string, ov domain.AdminOverview) templ.Component 
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" class=\"accent-[#ceafa3]\"> ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" class=\"accent-brand-primary\"> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -327,7 +327,7 @@ func adminUsersSection(actorID string, ov domain.AdminOverview) templ.Component 
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<table class=\"w-full text-left text-sm text-zinc-300\"><thead class=\"bg-[#18171b] text-xs uppercase tracking-wider text-zinc-400 border-b border-[#333138]\"><tr><th class=\"px-4 py-3 font-semibold\">Pengguna</th><th class=\"px-4 py-3 font-semibold\">Group</th><th class=\"px-4 py-3 font-semibold\">Role</th><th class=\"px-4 py-3 font-semibold\">Status</th><th class=\"px-4 py-3 font-semibold\">Reset Password</th></tr></thead> <tbody class=\"divide-y divide-[#333138]\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<table class=\"w-full text-left text-sm text-zinc-300\"><thead class=\"bg-app-input text-xs uppercase tracking-wider text-zinc-400 border-b border-app-border\"><tr><th class=\"px-4 py-3 font-semibold\">Pengguna</th><th class=\"px-4 py-3 font-semibold\">Group</th><th class=\"px-4 py-3 font-semibold\">Role</th><th class=\"px-4 py-3 font-semibold\">Status</th><th class=\"px-4 py-3 font-semibold\">Reset Password</th></tr></thead> <tbody class=\"divide-y divide-app-border\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -350,7 +350,7 @@ func adminUsersSection(actorID string, ov domain.AdminOverview) templ.Component 
 					return templ_7745c5c3_Err
 				}
 				if u.ID == actorID {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<span class=\"ml-1 text-[10px] text-[#ceafa3]\">(Anda)</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<span class=\"ml-1 text-[10px] text-brand-primary\">(Anda)</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -383,14 +383,14 @@ func adminUsersSection(actorID string, ov domain.AdminOverview) templ.Component 
 					return templ_7745c5c3_Err
 				}
 				for _, g := range u.Groups {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<span class=\"px-1.5 py-0.5 rounded text-[10px] font-mono bg-[#18171b] border border-[#333138] text-zinc-300\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<span class=\"px-1.5 py-0.5 rounded text-[10px] font-mono bg-app-input border border-app-border text-zinc-300\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var28 string
 					templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(g.Name)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin_users.templ`, Line: 75, Col: 127}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin_users.templ`, Line: 75, Col: 128}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 					if templ_7745c5c3_Err != nil {
@@ -424,14 +424,14 @@ func adminUsersSection(actorID string, ov domain.AdminOverview) templ.Component 
 						return templ_7745c5c3_Err
 					}
 				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<form hx-post=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<form method=\"post\" hx-post=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var30 string
 					templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.ResolveAttributeValue("/admin/users/" + u.ID + "/role")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin_users.templ`, Line: 83, Col: 57}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin_users.templ`, Line: 83, Col: 71}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
 					if templ_7745c5c3_Err != nil {
@@ -524,7 +524,7 @@ func adminUsersSection(actorID string, ov domain.AdminOverview) templ.Component 
 					return templ_7745c5c3_Err
 				}
 				if u.IsActive {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<span class=\"text-xs text-[#7dff95] mr-2\">Aktif</span> ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<span class=\"text-xs text-sem-success mr-2\">Aktif</span> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -619,14 +619,14 @@ func adminUsersSection(actorID string, ov domain.AdminOverview) templ.Component 
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</td><td class=\"px-4 py-3\"><form hx-post=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</td><td class=\"px-4 py-3\"><form method=\"post\" hx-post=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var43 string
 				templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.ResolveAttributeValue("/admin/users/" + u.ID + "/password")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin_users.templ`, Line: 109, Col: 60}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin_users.templ`, Line: 109, Col: 74}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
 				if templ_7745c5c3_Err != nil {

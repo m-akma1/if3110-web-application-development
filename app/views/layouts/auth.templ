@@ -2,7 +2,7 @@ package layouts
 
 templ Auth(title string, csrfToken string) {
 	<!DOCTYPE html>
-	<html lang="id" class="h-full bg-[#121212]">
+	<html lang="id" class="h-full bg-app-bg">
 		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -20,13 +20,10 @@ templ Auth(title string, csrfToken string) {
 				});
 			</script>
 		</head>
-		<body
-			class="h-full bg-[#121212] text-zinc-100 font-sans antialiased"
-			hx-headers={ `{"X-CSRF-Token": "` + csrfToken + `"}` }
-		>
+		<body class="h-full bg-app-bg text-zinc-100 font-sans antialiased">
 			<div class="min-h-screen flex">
 				<!-- Panel Kiri: Gambar Statik (Menggantikan Efek Glow) -->
-				<div class="hidden lg:flex lg:w-1/2 relative overflow-hidden bg-[#121212] border-r border-[#333138] flex-col justify-between p-12">
+				<div class="hidden lg:flex lg:w-1/2 relative overflow-hidden bg-app-bg border-r border-app-border flex-col justify-between p-12">
 					<img
 						src="/static/img/auth-bg.svg"
 						alt="Database Platform Visual"
@@ -35,7 +32,7 @@ templ Auth(title string, csrfToken string) {
 
 					<!-- Brand Header -->
 					<div class="relative z-10 flex items-center gap-3">
-						<div class="w-10 h-10 rounded-xl bg-[#ceafa3] flex items-center justify-center font-bold text-lg text-[#121212] shadow-md">
+						<div class="w-10 h-10 rounded-xl bg-brand-primary flex items-center justify-center font-bold text-lg text-app-bg shadow-md">
 							DB
 						</div>
 						<span class="text-lg font-bold tracking-tight text-white">
@@ -44,7 +41,7 @@ templ Auth(title string, csrfToken string) {
 					</div>
 
 					<!-- Caption Bawah -->
-					<div class="relative z-10 max-w-md space-y-3 bg-[#1c1b1e]/90 border border-[#333138] rounded-2xl p-6">
+					<div class="relative z-10 max-w-md space-y-3 bg-app-sidebar/90 border border-app-border rounded-2xl p-6">
 						<h2 class="text-xl font-bold text-white tracking-tight">
 							Kelola seluruh koneksi database dan skema dalam satu tempat.
 						</h2>
@@ -55,10 +52,10 @@ templ Auth(title string, csrfToken string) {
 				</div>
 
 				<!-- Panel Kanan: Container Form Login / Sign Up -->
-				<div class="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-12 bg-[#121212]">
+				<div class="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-12 bg-app-bg">
 					<div
 						id="auth-form-container"
-						class="w-full max-w-md bg-[#1c1b1e] border border-[#333138] rounded-2xl p-6 sm:p-8 shadow-2xl"
+						class="w-full max-w-md bg-app-sidebar border border-app-border rounded-2xl p-6 sm:p-8 shadow-2xl"
 					>
 						{ children... }
 					</div>

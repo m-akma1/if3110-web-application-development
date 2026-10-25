@@ -16,12 +16,12 @@ import (
 
 // Shared form styles for the admin console.
 const (
-	adminInput  = "w-full px-3 py-2 bg-[#18171b] border border-[#333138] rounded-xl text-xs text-white placeholder:text-zinc-500 focus:ring-2 focus:ring-[#ceafa3]/50 focus:border-[#ceafa3] focus:outline-none"
-	adminSelect = "bg-[#18171b] border border-[#333138] text-zinc-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#ceafa3]"
+	adminInput  = "w-full px-3 py-2 bg-app-input border border-app-border rounded-xl text-xs text-white placeholder:text-zinc-500 focus:ring-2 focus:ring-brand-primary/50 focus:border-brand-primary focus:outline-none"
+	adminSelect = "bg-app-input border border-app-border text-zinc-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-brand-primary"
 	adminLabel  = "block text-xs font-medium text-zinc-300 mb-1"
-	btnPrimary  = "px-3 py-2 rounded-xl bg-[#ceafa3] hover:bg-[#c2a195] text-[#121212] text-xs font-bold transition cursor-pointer"
-	btnSmall    = "px-2.5 py-1 rounded-lg bg-[#2c2a30] hover:bg-[#3a3740] text-zinc-200 text-[11px] font-semibold transition cursor-pointer"
-	btnDanger   = "px-2.5 py-1 rounded-lg bg-[#ff8080]/10 hover:bg-[#ff8080]/20 text-[#ff8080] text-[11px] font-semibold border border-[#ff8080]/30 transition cursor-pointer"
+	btnPrimary  = "px-3 py-2 rounded-xl bg-brand-primary hover:bg-brand-primary-hover text-app-bg text-xs font-bold transition cursor-pointer"
+	btnSmall    = "px-2.5 py-1 rounded-lg bg-app-active hover:bg-app-border-strong text-zinc-200 text-[11px] font-semibold transition cursor-pointer"
+	btnDanger   = "px-2.5 py-1 rounded-lg bg-sem-danger/10 hover:bg-sem-danger/20 text-sem-danger text-[11px] font-semibold border border-sem-danger/30 transition cursor-pointer"
 )
 
 // Admin is the Platform Admin console. Platform Admin manages the platform; it is not a
@@ -72,7 +72,7 @@ func Admin(user *domain.AuthLayoutUser, activeDBID string, tab string, actorID s
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\"><div><h1 class=\"text-2xl font-bold text-white tracking-tight\">Platform Administration</h1><p class=\"text-zinc-400 mt-1 text-xs\">Kelola pengguna, group, koneksi database, dan kode undangan. Akses database diberikan per group; setiap user selalu menjadi anggota group Public.</p></div><div class=\"flex flex-wrap gap-2 border-b border-[#333138] pb-3\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\"><div><h1 class=\"text-2xl font-bold text-white tracking-tight\">Platform Administration</h1><p class=\"text-zinc-400 mt-1 text-xs\">Kelola pengguna, group, koneksi database, dan kode undangan. Akses database diberikan per group; setiap user selalu menjadi anggota group Public.</p></div><div class=\"flex flex-wrap gap-2 border-b border-app-border pb-3\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -208,14 +208,14 @@ func adminFlash(f domain.Flash) templ.Component {
 		}
 		ctx = templ.ClearChildren(ctx)
 		if f.Success {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div role=\"status\" class=\"p-3 rounded-xl bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div role=\"status\" class=\"p-3 rounded-xl bg-sem-success/10 border border-sem-success/30 text-sem-success text-xs\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(f.Message)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 69, Col: 121}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 69, Col: 127}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
@@ -226,14 +226,14 @@ func adminFlash(f domain.Flash) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<div role=\"alert\" class=\"p-3 rounded-xl bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<div role=\"alert\" class=\"p-3 rounded-xl bg-sem-danger/10 border border-sem-danger/30 text-sem-danger text-xs\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(f.Message)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 71, Col: 120}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 71, Col: 123}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 			if templ_7745c5c3_Err != nil {
@@ -287,9 +287,9 @@ func adminTabButton(key string, label string) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var10 string
-		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue("activeTab === '" + key + "' ? 'bg-[#ceafa3] text-[#121212] font-bold' : 'text-zinc-400 hover:bg-[#252429] hover:text-zinc-200'")
+		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue("activeTab === '" + key + "' ? 'bg-brand-primary text-app-bg font-bold' : 'text-zinc-400 hover:bg-app-hover hover:text-zinc-200'")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 79, Col: 139}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 79, Col: 140}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 		if templ_7745c5c3_Err != nil {
@@ -337,7 +337,7 @@ func adminCard(title string, subtitle string) templ.Component {
 			templ_7745c5c3_Var12 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<div class=\"bg-[#222126] border border-[#333138] rounded-2xl overflow-hidden shadow-xl\"><div class=\"px-4 py-3 bg-[#18171b] border-b border-[#333138] flex items-center justify-between gap-3\"><span class=\"text-xs font-bold text-white uppercase tracking-wider\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<div class=\"bg-app-card border border-app-border rounded-2xl overflow-hidden shadow-xl\"><div class=\"px-4 py-3 bg-app-input border-b border-app-border flex items-center justify-between gap-3\"><span class=\"text-xs font-bold text-white uppercase tracking-wider\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
