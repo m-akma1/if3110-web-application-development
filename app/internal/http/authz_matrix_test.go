@@ -49,7 +49,11 @@ func TestAuthorizationMatrix_Integration(t *testing.T) {
 
 	// Migration routes need a live target, an executed migration (history) and, per principal,
 	// a draft of their own so one principal's execute does not affect the next.
-	env.connectTarget(t, target)
+	pool := env.connectTarget(t, target)
+	// The table fragment route reads a real table (there is no placeholder data any more).
+	if _, err := pool.ExecContext(ctx, `CREATE TABLE customers (id int PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
 	engine := migration.NewEngine(env.db, env.registry, migration.Limits{})
 	newDraft := func() string {
 		d, err := env.migrations.CreateDraft(ctx, migration.NewDraft{DatabaseID: target, Name: "matrix", SQL: "SELECT 1"})

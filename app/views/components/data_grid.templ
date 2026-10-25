@@ -3,13 +3,23 @@ package components
 import (
 	"dbplatform/app/domain"
 	"fmt"
+	"net/url"
+	"strconv"
 )
 
-func resolveSchemaName(s string) string {
-	if s == "" {
-		return "public"
+// ViewerURL is the Database Viewer page of one database.
+func ViewerURL(dbID string) string {
+	return "/dashboard?" + url.Values{"db_id": {dbID}}.Encode()
+}
+
+// TableURL is the data grid fragment of one table page. It always carries the database and
+// schema, so paging never falls back to another database or a same-named table elsewhere.
+func TableURL(dbID, schema, name string, page int) string {
+	q := url.Values{"db_id": {dbID}, "schema": {schema}, "name": {name}}
+	if page > 1 {
+		q.Set("page", strconv.Itoa(page))
 	}
-	return s
+	return "/dashboard/table?" + q.Encode()
 }
 
 templ DataGrid(data domain.TableDataResult) {
@@ -39,16 +49,28 @@ templ DataGrid(data domain.TableDataResult) {
 		<!-- Header Tabel & Tab Switcher (Data Viewer vs Schema Viewer) -->
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="flex items-center gap-2.5">
-				<h2 class="text-lg font-bold text-white flex items-center gap-1.5">
-					<span class="text-zinc-400 font-mono text-sm">{ resolveSchemaName(data.SchemaName) }.</span>
-					<span class="text-[#ceafa3] font-mono">{ data.TableName }</span>
-				</h2>
+				if data.IsQueryResult {
+					<h2 class="text-lg font-bold text-white flex items-center gap-1.5">
+						<span>Hasil Query</span>
+						if data.HasSchema {
+							<span class="text-xs font-normal text-zinc-400">dari</span>
+							<span class="text-zinc-400 font-mono text-sm">{ data.SchemaName }.</span>
+							<span class="text-[#ceafa3] font-mono text-sm">{ data.TableName }</span>
+						}
+					</h2>
+				} else {
+					<h2 class="text-lg font-bold text-white flex items-center gap-1.5">
+						<span class="text-zinc-400 font-mono text-sm">{ data.SchemaName }.</span>
+						<span class="text-[#ceafa3] font-mono">{ data.TableName }</span>
+					</h2>
+				}
 				<span class="text-xs text-zinc-400 bg-[#1a1a1a] px-2.5 py-1 rounded-lg border border-[#2a2a2a]">
 					{ fmt.Sprintf("%d Baris", data.TotalRows) }
 				</span>
 			</div>
 
-			<!-- Tombol Tab: Data Tabel & Schema Viewer -->
+			<!-- Tombol Tab: Data Tabel & Schema Viewer (hanya jika hasil berasal dari satu tabel) -->
+			if data.HasSchema {
 			<div class="inline-flex rounded-lg bg-[#121212] p-1 border border-[#2a2a2a]">
 				<button
 					type="button"
@@ -70,6 +92,7 @@ templ DataGrid(data domain.TableDataResult) {
 					</span>
 				</button>
 			</div>
+			}
 		</div>
 
 		<!-- TAB 1: DATA VIEWER -->
@@ -94,8 +117,12 @@ templ DataGrid(data domain.TableDataResult) {
 							}
 						} else {
 							<tr>
-								<td colspan={ fmt.Sprintf("%d", len(data.Columns)) } class="px-4 py-8 text-center text-zinc-500">
-									Tabel ini tidak memiliki data.
+								<td colspan={ fmt.Sprintf("%d", max(1, len(data.Columns))) } class="px-4 py-8 text-center text-zinc-500">
+									if data.IsQueryResult {
+										Query tidak mengembalikan baris.
+									} else {
+										Tabel ini tidak memiliki data.
+									}
 								</td>
 							</tr>
 						}
@@ -103,38 +130,41 @@ templ DataGrid(data domain.TableDataResult) {
 				</table>
 			</div>
 
-			<div class="p-4 border-t border-[#2a2a2a] flex items-center justify-between text-xs text-zinc-400">
-				<span>Halaman { fmt.Sprintf("%d dari %d", data.CurrentPage, data.TotalPages) }</span>
-				<div class="flex gap-2">
-					<button
-						disabled?={ data.CurrentPage <= 1 }
-						hx-get={ fmt.Sprintf("/dashboard/table?name=%s&page=%d", data.TableName, data.CurrentPage-1) }
-						hx-target="#data-grid-container"
-						hx-swap="outerHTML"
-						class="px-3 py-1.5 rounded bg-[#252525] hover:bg-[#333] disabled:opacity-40 text-white transition"
-					>
-						Sebelumnya
-					</button>
-					<button
-						disabled?={ data.CurrentPage >= data.TotalPages }
-						hx-get={ fmt.Sprintf("/dashboard/table?name=%s&page=%d", data.TableName, data.CurrentPage+1) }
-						hx-target="#data-grid-container"
-						hx-swap="outerHTML"
-						class="px-3 py-1.5 rounded bg-[#252525] hover:bg-[#333] disabled:opacity-40 text-white transition"
-					>
-						Selanjutnya
-					</button>
+			if !data.IsQueryResult {
+				<div class="p-4 border-t border-[#2a2a2a] flex items-center justify-between text-xs text-zinc-400">
+					<span>Halaman { fmt.Sprintf("%d dari %d", data.CurrentPage, data.TotalPages) }</span>
+					<div class="flex gap-2">
+						<button
+							disabled?={ data.CurrentPage <= 1 }
+							hx-get={ TableURL(data.DatabaseID, data.SchemaName, data.TableName, data.CurrentPage-1) }
+							hx-target="#data-grid-container"
+							hx-swap="outerHTML"
+							class="px-3 py-1.5 rounded bg-[#252525] hover:bg-[#333] disabled:opacity-40 text-white transition"
+						>
+							Sebelumnya
+						</button>
+						<button
+							disabled?={ data.CurrentPage >= data.TotalPages }
+							hx-get={ TableURL(data.DatabaseID, data.SchemaName, data.TableName, data.CurrentPage+1) }
+							hx-target="#data-grid-container"
+							hx-swap="outerHTML"
+							class="px-3 py-1.5 rounded bg-[#252525] hover:bg-[#333] disabled:opacity-40 text-white transition"
+						>
+							Selanjutnya
+						</button>
+					</div>
 				</div>
-			</div>
+			}
 		</div>
 
 		<!-- TAB 2: SCHEMA VIEWER (Columns, Constraints, Indexes) -->
+		if data.HasSchema {
 		<div x-show="activeView === 'schema'" x-cloak class="space-y-4">
 			<!-- 1. Struktur Kolom -->
 			<div class="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl">
 				<div class="px-4 py-3 bg-[#121212] border-b border-[#2a2a2a] flex items-center justify-between">
 					<span class="text-xs font-bold text-white uppercase tracking-wider">Daftar Kolom (Columns)</span>
-					<span class="text-[10px] font-mono text-zinc-400">Schema: { resolveSchemaName(data.SchemaName) }</span>
+					<span class="text-[10px] font-mono text-zinc-400">Schema: { data.SchemaName }</span>
 				</div>
 				<div class="overflow-x-auto">
 					<table class="w-full text-left text-xs text-zinc-300">
@@ -248,7 +278,7 @@ templ DataGrid(data domain.TableDataResult) {
 								if len(data.Indexes) > 0 {
 									for _, idx := range data.Indexes {
 										<tr class="hover:bg-[#252525]/50 transition">
-											<td class="px-4 py-2.5 font-mono text-white">{ idx.Name }</td>
+											<td class="px-4 py-2.5 font-mono text-white" title={ idx.Definition }>{ idx.Name }</td>
 											<td class="px-4 py-2.5 font-mono text-[#87d1ff]">{ idx.Columns }</td>
 											<td class="px-4 py-2.5 font-mono text-zinc-400">{ idx.IndexType }</td>
 											<td class="px-4 py-2.5">
@@ -271,6 +301,7 @@ templ DataGrid(data domain.TableDataResult) {
 				</div>
 			</div>
 		</div>
+		}
 	</div>
 }
 
@@ -283,5 +314,13 @@ templ DataGridError(message string) {
 			</svg>
 			<span>{ message }</span>
 		</div>
+	</div>
+}
+
+// DataGridUnavailable replaces the data grid when the database or table could not be read.
+// An empty retryURL hides the retry button.
+templ DataGridUnavailable(title, message, retryURL string) {
+	<div id="data-grid-container">
+		@ErrorState(title, message, retryURL, "#data-grid-container")
 	</div>
 }

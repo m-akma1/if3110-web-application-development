@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or PR cancels the run that is still going.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Generate, vet and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Same disposable database as the `postgres-test` compose profile (make test-integration).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: dbplatform_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d dbplatform_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+
+    env:
+      # With this set, integration tests run instead of being skipped.
+      TEST_DATABASE_URL: postgres://test:test@localhost:5433/dbplatform_test?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: app/go.mod
+          cache-dependency-path: app/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install Tailwind
+        working-directory: app
+        run: npm ci
+
+      - name: Generate templ code
+        run: make templ
+
+      # The Go build uses the committed *_templ.go files, so they must match the .templ sources.
+      - name: Check generated templ code is committed
+        run: |
+          changed=$(git status --porcelain -- ':(glob)app/**/*_templ.go')
+          if [ -n "$changed" ]; then
+            echo "$changed"
+            git --no-pager diff --stat -- ':(glob)app/**/*_templ.go'
+            echo "::error::Generated templ code is out of date. Run 'make templ' and commit the *_templ.go files."
+            exit 1
+          fi
+
+      - name: Build Tailwind CSS
+        run: make css
+
+      # The Docker image rebuilds the CSS itself, so a stale committed style.css is only a warning.
+      - name: Check compiled CSS is committed
+        run: |
+          if ! git diff --quiet -- app/static/css/style.css; then
+            echo "::warning file=app/static/css/style.css::style.css differs from a fresh build. Run 'make css' and commit it."
+          fi
+
+      - name: gofmt
+        working-directory: app
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "$unformatted"
+            echo "::error::These files are not gofmt-formatted. Run 'gofmt -w' on them."
+            exit 1
+          fi
+
+      - name: go vet
+        run: make vet
+
+      - name: Build
+        working-directory: app
+        run: go build ./...
+
+      - name: Test (unit + integration, race detector)
+        working-directory: app
+        run: go test -race -count=1 ./...
+
+  image:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build app image
+        run: docker build --file app/Dockerfile --tag dbplatform-app:ci app

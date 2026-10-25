@@ -163,3 +163,53 @@ func TestAdminConsole_ValidationAndSafety_Integration(t *testing.T) {
 		t.Errorf("baris admin sendiri tidak boleh menampilkan kontrol role/nonaktif")
 	}
 }
+
+// Connection failure through the admin console: the database is saved with status ERROR and
+// the reason (never the password), viewers get the "unavailable" state, and fixing the
+// credentials brings it back.
+func TestAdminConsole_ConnectionFailureAndRecovery_Integration(t *testing.T) {
+	env := newTestEnv(t, nil)
+	ctx := context.Background()
+	in, _ := dbmanager.TargetInputFromURL("Flaky DB", testutil.TestDatabaseURL(t))
+	admin := loggedIn(t, env.srv, "alice")
+
+	form := func(password string) url.Values {
+		return url.Values{
+			"name": {in.Name}, "host": {in.Host}, "port": {strconv.Itoa(in.Port)}, "db_name": {in.DBName},
+			"username": {in.Username}, "password": {password}, "ssl_mode": {"disable"},
+		}
+	}
+	const wrong = "definitely-wrong-pw-123"
+	rec := admin.post("/admin/databases", form(wrong))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "koneksi gagal") || strings.Contains(rec.Body.String(), wrong) {
+		t.Fatalf("wrong password: want saved with a failure reason and no password echo, got %d", rec.Code)
+	}
+	tgt, err := env.targets.List(ctx)
+	if err != nil || len(tgt) != 1 || tgt[0].Status != dbmanager.StatusError || tgt[0].LastError == "" {
+		t.Fatalf("target should be stored as ERROR: %+v %v", tgt, err)
+	}
+	id := tgt[0].ID
+
+	if rec := admin.post("/admin/grants", url.Values{"group_id": {groups.PublicGroupID}, "database_id": {id}, "level": {"VIEW_ONLY"}}); rec.Code != http.StatusOK {
+		t.Fatalf("grant: %d", rec.Code)
+	}
+	carol := loggedIn(t, env.srv, "carol")
+	if rec := carol.get("/dashboard?db_id=" + id); rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "Database tidak tersedia") {
+		t.Fatalf("viewer of a failed database: status %d", rec.Code)
+	}
+
+	if rec := admin.post("/admin/databases/"+id+"/test", nil); !strings.Contains(rec.Body.String(), "koneksi gagal") {
+		t.Errorf("re-test should still fail: %d", rec.Code)
+	}
+
+	rec = admin.post("/admin/databases/"+id, form(in.Password))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "berhasil terhubung") {
+		t.Fatalf("fixing the password: %d %s", rec.Code, rec.Body.String())
+	}
+	if got, _ := env.targets.Get(ctx, id); got.Status != dbmanager.StatusConnected || got.LastError != "" {
+		t.Errorf("target should be CONNECTED after the fix: %+v", got)
+	}
+	if code := carol.get("/dashboard?db_id=" + id).Code; code != http.StatusOK {
+		t.Errorf("viewer after the fix: status %d, want 200", code)
+	}
+}

@@ -3,15 +3,21 @@ package dbmanager
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
-	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"dbplatform/app/domain"
 )
 
-var validIdentifierRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var (
+	// ErrNoPool means the target has no live connection (never connected, or the last test failed).
+	ErrNoPool = errors.New("database belum terhubung ke platform")
+	// ErrTableNotFound means the table does not exist, is not a table, or lives in a system schema.
+	ErrTableNotFound = errors.New("tabel tidak ditemukan")
+)
 
 // ConnectionRegistry mengelola pool koneksi (*sql.DB) untuk setiap database target berdasarkan ID database
 type ConnectionRegistry struct {
@@ -110,135 +116,210 @@ func (r *ConnectionRegistry) ExecuteQueryOnDB(ctx context.Context, dbID, rawSQL 
 
 	db, ok := r.GetPool(dbID)
 	if !ok {
-		return nil, fmt.Errorf("pool koneksi aktif untuk database '%s' tidak tersedia", dbID)
+		return nil, ErrNoPool
 	}
 
 	res, err := ExecuteReadOnlyQuery(ctx, db, cleanedSQL, r.limits)
 	if err != nil {
 		return nil, err
 	}
+	res.DatabaseID = dbID
 	res.ExecutedQuery = cleanedSQL
-	res.TableName = fmt.Sprintf("Query Result (%s)", dbID)
+	res.TableName = "Hasil Query"
+	res.IsQueryResult = true
 	return res, nil
 }
 
-// ListTables mengambil daftar tabel pada skema public dari database PostgreSQL target
+// userSchemas filters pg_namespace n down to schemas a user created: no pg_catalog,
+// information_schema, pg_toast or temporary schemas (names starting with pg_ are reserved).
+const userSchemas = `n.nspname <> 'information_schema' AND n.nspname NOT LIKE 'pg\_%'`
+
+// ListTables returns the tables (plain and partitioned, not partitions) of every user schema,
+// ordered by schema then name.
 func (r *ConnectionRegistry) ListTables(ctx context.Context, dbID string) ([]domain.TableSummary, error) {
 	db, ok := r.GetPool(dbID)
 	if !ok {
-		return nil, fmt.Errorf("pool database '%s' belum terdaftar", dbID)
+		return nil, ErrNoPool
 	}
 
-	query := `
-		SELECT table_name
-		FROM information_schema.tables
-		WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-		ORDER BY table_name ASC
-	`
-	rows, err := db.QueryContext(ctx, query)
+	var tables []domain.TableSummary
+	err := withReadOnlyTx(ctx, db, r.limits, 1, func(ctx context.Context, tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `
+			SELECT n.nspname, c.relname
+			FROM pg_class c
+			JOIN pg_namespace n ON n.oid = c.relnamespace
+			WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition AND `+userSchemas+`
+			ORDER BY n.nspname, c.relname`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var t domain.TableSummary
+			if err := rows.Scan(&t.Schema, &t.Name); err != nil {
+				return err
+			}
+			tables = append(tables, t)
+		}
+		return rows.Err()
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var tables []domain.TableSummary
-	first := true
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		tables = append(tables, domain.TableSummary{
-			Name:       name,
-			Schema:     "public",
-			IsSelected: first,
-		})
-		first = false
-	}
-	return tables, rows.Err()
+	return tables, nil
 }
 
-// InspectTableDataAndSchema mengambil baris data, kolom, constraint, dan index langsung dari PostgreSQL target
-func (r *ConnectionRegistry) InspectTableDataAndSchema(ctx context.Context, dbID, tableName string, page, pageSize int) (*domain.TableDataResult, error) {
-	if !validIdentifierRe.MatchString(tableName) {
-		return nil, fmt.Errorf("nama tabel tidak valid: %s", tableName)
+// InspectTableDataAndSchema returns one page of rows plus the columns, constraints and indexes
+// of schema.table (an empty schema resolves through search_path). Rows are ordered by the primary key when there is one, so pages are stable.
+// Every query runs in one read-only transaction under the viewer's statement timeout.
+func (r *ConnectionRegistry) InspectTableDataAndSchema(ctx context.Context, dbID, schema, table string, page, pageSize int) (*domain.TableDataResult, error) {
+	if table == "" {
+		return nil, ErrTableNotFound
 	}
 	db, ok := r.GetPool(dbID)
 	if !ok {
-		return nil, fmt.Errorf("pool database '%s' belum terdaftar", dbID)
+		return nil, ErrNoPool
 	}
-
 	if page < 1 {
 		page = 1
 	}
 	if pageSize < 1 {
 		pageSize = 25
 	}
-	offset := (page - 1) * pageSize
+	pageSize = min(pageSize, r.limits.MaxRows)
 
-	// 1. Hitung total baris
-	var totalRows int64
-	countSQL := fmt.Sprintf(`SELECT COUNT(*) FROM "%s"`, tableName)
-	_ = db.QueryRowContext(ctx, countSQL).Scan(&totalRows)
+	var res *domain.TableDataResult
+	// count + page of rows + catalog lookups: allow two full timeouts in total
+	err := withReadOnlyTx(ctx, db, r.limits, 2, func(ctx context.Context, tx *sql.Tx) error {
+		meta, err := describeTable(ctx, tx, schema, table)
+		if err != nil {
+			return err
+		}
+		res = meta
+		qualified := quoteIdent(meta.SchemaName) + "." + quoteIdent(meta.TableName)
 
-	totalPages := int((totalRows + int64(pageSize) - 1) / int64(pageSize))
-	if totalPages < 1 {
-		totalPages = 1
-	}
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+qualified).Scan(&res.TotalRows); err != nil {
+			return fmt.Errorf("menghitung baris: %w", err)
+		}
+		res.TotalPages = max(1, int((res.TotalRows+int64(pageSize)-1)/int64(pageSize)))
+		res.CurrentPage = page
 
-	// 2. Ambil baris data dengan Read-Only Query
-	dataSQL := fmt.Sprintf(`SELECT * FROM "%s" LIMIT %d OFFSET %d`, tableName, pageSize, offset)
-	dataRes, err := ExecuteReadOnlyQuery(ctx, db, dataSQL, r.limits)
+		var orderBy []string
+		for _, c := range meta.ColumnsMeta {
+			if c.IsPK {
+				orderBy = append(orderBy, quoteIdent(c.Name))
+			}
+		}
+		dataSQL := `SELECT * FROM ` + qualified
+		if len(orderBy) > 0 {
+			dataSQL += ` ORDER BY ` + strings.Join(orderBy, ", ")
+		}
+		dataSQL += fmt.Sprintf(` LIMIT %d OFFSET %d`, pageSize, (page-1)*pageSize)
+
+		res.Columns, res.Rows, _, err = queryRows(ctx, tx, dataSQL, pageSize)
+		if err != nil {
+			return fmt.Errorf("membaca data: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
+	res.DatabaseID = dbID
+	maskSecretColumns(res)
+	return res, nil
+}
 
-	// Masking kolom password_hash jika sedang melihat tabel users agar aman di UI
-	for colIdx, colName := range dataRes.Columns {
-		if colName == "password_hash" || colName == "token_hash" || colName == "previous_token_hash" {
-			for rowIdx := range dataRes.Rows {
-				if len(dataRes.Rows[rowIdx][colIdx]) > 14 {
-					dataRes.Rows[rowIdx][colIdx] = dataRes.Rows[rowIdx][colIdx][:14] + "..."
-				}
-			}
-		}
+// DescribeTable returns the columns, constraints and indexes of a table without reading rows.
+// An empty schema resolves the name through the connection's search_path, as a query would.
+func (r *ConnectionRegistry) DescribeTable(ctx context.Context, dbID, schema, table string) (*domain.TableDataResult, error) {
+	if table == "" {
+		return nil, ErrTableNotFound
+	}
+	db, ok := r.GetPool(dbID)
+	if !ok {
+		return nil, ErrNoPool
+	}
+	var res *domain.TableDataResult
+	err := withReadOnlyTx(ctx, db, r.limits, 1, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		res, err = describeTable(ctx, tx, schema, table)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	res.DatabaseID = dbID
+	return res, nil
+}
+
+// describeTable resolves the table through the catalog (never by formatting the user's input
+// into SQL) and loads its metadata.
+func describeTable(ctx context.Context, tx *sql.Tx, schema, table string) (*domain.TableDataResult, error) {
+	name := quoteIdent(table)
+	if schema != "" {
+		name = quoteIdent(schema) + "." + name
+	}
+	res := &domain.TableDataResult{HasSchema: true}
+	err := tx.QueryRowContext(ctx, `
+		SELECT n.nspname, c.relname
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE c.oid = to_regclass($1) AND c.relkind IN ('r', 'p') AND `+userSchemas,
+		name).Scan(&res.SchemaName, &res.TableName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrTableNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("mencari tabel: %w", err)
 	}
 
-	// 3. Ambil metadata kolom (information_schema.columns + PK check)
-	colQuery := `
+	// From here on the table is addressed by its catalog name, cast to regclass by the server.
+	rel := quoteIdent(res.SchemaName) + "." + quoteIdent(res.TableName)
+	if res.ColumnsMeta, err = loadColumns(ctx, tx, rel); err != nil {
+		return nil, fmt.Errorf("membaca kolom: %w", err)
+	}
+	if res.Constraints, err = loadConstraints(ctx, tx, rel); err != nil {
+		return nil, fmt.Errorf("membaca constraint: %w", err)
+	}
+	if res.Indexes, err = loadIndexes(ctx, tx, rel); err != nil {
+		return nil, fmt.Errorf("membaca index: %w", err)
+	}
+	return res, nil
+}
+
+func loadColumns(ctx context.Context, tx *sql.Tx, rel string) ([]domain.ColumnInfo, error) {
+	rows, err := tx.QueryContext(ctx, `
 		SELECT
-			c.column_name,
-			UPPER(c.data_type) || CASE WHEN c.character_maximum_length IS NOT NULL THEN '(' || c.character_maximum_length || ')' ELSE '' END AS data_type,
-			c.is_nullable = 'YES' AS is_nullable,
-			COALESCE(c.column_default, '') AS column_default,
+			a.attname,
+			format_type(a.atttypid, a.atttypmod),
+			NOT a.attnotnull,
+			COALESCE(pg_get_expr(d.adbin, d.adrelid), ''),
 			EXISTS (
-				SELECT 1
-				FROM information_schema.table_constraints tc
-				JOIN information_schema.key_column_usage kcu
-				  ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
-				WHERE tc.constraint_type = 'PRIMARY KEY'
-				  AND tc.table_schema = 'public'
-				  AND tc.table_name = $1
-				  AND kcu.column_name = c.column_name
-			) AS is_pk
-		FROM information_schema.columns c
-		WHERE c.table_schema = 'public' AND c.table_name = $1
-		ORDER BY c.ordinal_position ASC
-	`
-	colRows, err := db.QueryContext(ctx, colQuery, tableName)
-	var colsMeta []domain.ColumnInfo
-	if err == nil {
-		defer colRows.Close()
-		for colRows.Next() {
-			var ci domain.ColumnInfo
-			if scanErr := colRows.Scan(&ci.Name, &ci.DataType, &ci.IsNullable, &ci.DefaultValue, &ci.IsPK); scanErr == nil {
-				colsMeta = append(colsMeta, ci)
-			}
-		}
+				SELECT 1 FROM pg_index i
+				WHERE i.indrelid = a.attrelid AND i.indisprimary AND a.attnum = ANY (i.indkey)
+			)
+		FROM pg_attribute a
+		LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+		WHERE a.attrelid = $1::text::regclass AND a.attnum > 0 AND NOT a.attisdropped
+		ORDER BY a.attnum`, rel)
+	if err != nil {
+		return nil, err
 	}
+	defer rows.Close()
+	var out []domain.ColumnInfo
+	for rows.Next() {
+		var c domain.ColumnInfo
+		if err := rows.Scan(&c.Name, &c.DataType, &c.IsNullable, &c.DefaultValue, &c.IsPK); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
 
-	// 4. Ambil daftar Constraints dari pg_constraint
-	cstQuery := `
+func loadConstraints(ctx context.Context, tx *sql.Tx, rel string) ([]domain.ConstraintInfo, error) {
+	rows, err := tx.QueryContext(ctx, `
 		SELECT
 			con.conname,
 			CASE con.contype
@@ -246,63 +327,77 @@ func (r *ConnectionRegistry) InspectTableDataAndSchema(ctx context.Context, dbID
 				WHEN 'f' THEN 'FOREIGN KEY'
 				WHEN 'u' THEN 'UNIQUE'
 				WHEN 'c' THEN 'CHECK'
+				WHEN 'x' THEN 'EXCLUDE'
+				WHEN 'n' THEN 'NOT NULL'
+				WHEN 't' THEN 'TRIGGER'
 				ELSE con.contype::text
-			END AS constraint_type,
-			pg_get_constraintdef(con.oid) AS definition
+			END,
+			pg_get_constraintdef(con.oid)
 		FROM pg_constraint con
-		JOIN pg_class rel ON rel.oid = con.conrelid
-		JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
-		WHERE nsp.nspname = 'public' AND rel.relname = $1
-		ORDER BY con.conname ASC
-	`
-	cstRows, err := db.QueryContext(ctx, cstQuery, tableName)
-	var constraints []domain.ConstraintInfo
-	if err == nil {
-		defer cstRows.Close()
-		for cstRows.Next() {
-			var cst domain.ConstraintInfo
-			if scanErr := cstRows.Scan(&cst.Name, &cst.Type, &cst.Definition); scanErr == nil {
-				constraints = append(constraints, cst)
-			}
-		}
+		WHERE con.conrelid = $1::text::regclass
+		ORDER BY con.conname`, rel)
+	if err != nil {
+		return nil, err
 	}
+	defer rows.Close()
+	var out []domain.ConstraintInfo
+	for rows.Next() {
+		var c domain.ConstraintInfo
+		if err := rows.Scan(&c.Name, &c.Type, &c.Definition); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
 
-	// 5. Ambil daftar Indexes dari pg_indexes
-	idxQuery := `
+func loadIndexes(ctx context.Context, tx *sql.Tx, rel string) ([]domain.IndexInfo, error) {
+	rows, err := tx.QueryContext(ctx, `
 		SELECT
-			indexname,
-			indexdef
-		FROM pg_indexes
-		WHERE schemaname = 'public' AND tablename = $1
-		ORDER BY indexname ASC
-	`
-	idxRows, err := db.QueryContext(ctx, idxQuery, tableName)
-	var indexes []domain.IndexInfo
-	if err == nil {
-		defer idxRows.Close()
-		for idxRows.Next() {
-			var idxName, idxDef string
-			if scanErr := idxRows.Scan(&idxName, &idxDef); scanErr == nil {
-				indexes = append(indexes, domain.IndexInfo{
-					Name:      idxName,
-					Columns:   idxDef,
-					IsUnique:  regexp.MustCompile(`(?i)\bUNIQUE\b`).MatchString(idxDef),
-					IndexType: "BTREE",
-				})
+			i.relname,
+			array_to_string(ARRAY(
+				SELECT pg_get_indexdef(x.indexrelid, k, true)
+				FROM generate_series(1, x.indnkeyatts) AS k
+				ORDER BY k
+			), ', '),
+			x.indisunique,
+			upper(am.amname),
+			pg_get_indexdef(x.indexrelid)
+		FROM pg_index x
+		JOIN pg_class i ON i.oid = x.indexrelid
+		JOIN pg_am am ON am.oid = i.relam
+		WHERE x.indrelid = $1::text::regclass
+		ORDER BY i.relname`, rel)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.IndexInfo
+	for rows.Next() {
+		var ix domain.IndexInfo
+		if err := rows.Scan(&ix.Name, &ix.Columns, &ix.IsUnique, &ix.IndexType, &ix.Definition); err != nil {
+			return nil, err
+		}
+		out = append(out, ix)
+	}
+	return out, rows.Err()
+}
+
+// quoteIdent quotes a PostgreSQL identifier, like quote_ident() but always quoted.
+func quoteIdent(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
+// maskSecretColumns shortens credential-looking values in the table view. It is a display
+// courtesy for targets that happen to store such columns, not a security boundary.
+func maskSecretColumns(res *domain.TableDataResult) {
+	for colIdx, colName := range res.Columns {
+		if colName == "password_hash" || colName == "token_hash" || colName == "previous_token_hash" {
+			for rowIdx := range res.Rows {
+				if len(res.Rows[rowIdx][colIdx]) > 14 {
+					res.Rows[rowIdx][colIdx] = res.Rows[rowIdx][colIdx][:14] + "..."
+				}
 			}
 		}
 	}
-
-	return &domain.TableDataResult{
-		SchemaName:  "public",
-		TableName:   tableName,
-		Columns:     dataRes.Columns,
-		Rows:        dataRes.Rows,
-		TotalRows:   totalRows,
-		CurrentPage: page,
-		TotalPages:  totalPages,
-		ColumnsMeta: colsMeta,
-		Constraints: constraints,
-		Indexes:     indexes,
-	}, nil
 }
