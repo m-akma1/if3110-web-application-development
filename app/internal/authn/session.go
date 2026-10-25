@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"dbplatform/app/internal/ids"
 	"dbplatform/app/internal/rbac"
 )
 
@@ -84,12 +85,9 @@ type SessionStore struct {
 	nowFunc func() time.Time
 }
 
-// NewSessionStore membuat SessionStore dengan MemoryRepository yang sudah di-seed untuk pengujian/fallback
-func NewSessionStore() *SessionStore {
-	repo := NewMemoryRepository()
-	s := NewSessionStoreWithRepo(repo, DefaultSessionConfig())
-	_ = s.SeedDefaultUsers(context.Background())
-	return s
+// NewMemorySessionStore membuat SessionStore kosong di atas MemoryRepository (khusus unit test).
+func NewMemorySessionStore() *SessionStore {
+	return NewSessionStoreWithRepo(NewMemoryRepository(), DefaultSessionConfig())
 }
 
 // NewPostgresSessionStore membuat SessionStore yang terhubung langsung ke PostgreSQL Internal
@@ -126,88 +124,42 @@ func (s *SessionStore) SetClock(clock func() time.Time) {
 	}
 }
 
-// SeedDefaultUsers mengisi pengguna awal dengan password yang di-hash menggunakan Argon2id
-func (s *SessionStore) SeedDefaultUsers(ctx context.Context) error {
-	defaultAccounts := []struct {
-		id       string
-		username string
-		email    string
-		password string
-		role     string
-	}{
-		{id: "usr-admin-001", username: "admin", email: "admin@email.com", password: "SuperSecretPass999!", role: RolePlatformAdmin},
-		{id: "usr-moreno-002", username: "moreno", email: "moreno@email.com", password: "Password123!", role: RolePlatformAdmin},
-		{id: "usr-akmal-003", username: "akmal", email: "akmal@email.com", password: "Password123!", role: RoleUser},
-		{id: "usr-dzaki-004", username: "dzaki", email: "dzaki@email.com", password: "Password123!", role: RoleUser},
-	}
-
-	now := s.nowFunc()
-	for _, acc := range defaultAccounts {
-		hash, err := HashPassword(acc.password)
-		if err != nil {
-			return err
-		}
-		u := &User{
-			ID:           acc.id,
-			Username:     acc.username,
-			Email:        acc.email,
-			PasswordHash: hash,
-			Role:         acc.role,
-			IsActive:     true,
-			CreatedAt:    now,
-		}
-		if err := s.repo.CreateUser(ctx, u); err != nil {
-			return err
-		}
-	}
-	return nil
+// RegisterInput adalah data pendaftaran principal baru.
+type RegisterInput struct {
+	Username string // wajib, unik (case-insensitive)
+	Email    string // opsional, unik jika diisi
+	Password string
+	Role     string // kosong berarti RoleUser
 }
 
-// RegisterUser mendaftarkan principal baru dengan password yang di-hash menggunakan Argon2id
-func (s *SessionStore) RegisterUser(ctx context.Context, permanentID, username, plainPassword, role string) (*User, error) {
-	email := ""
-	if strings.Contains(username, "@") {
-		email = strings.ToLower(username)
-	} else {
-		email = strings.ToLower(username) + "@email.com"
-	}
-	return s.RegisterUserWithEmail(ctx, permanentID, username, email, plainPassword, role)
-}
-
-// RegisterUserWithEmail mendaftarkan principal baru beserta alamat email dengan password yang di-hash menggunakan Argon2id
-func (s *SessionStore) RegisterUserWithEmail(ctx context.Context, permanentID, username, email, plainPassword, role string) (*User, error) {
-	hash, err := HashPassword(plainPassword)
-	if err != nil {
-		return nil, err
-	}
-	if permanentID == "" {
-		tok, err := GenerateOpaqueToken()
-		if err != nil {
-			return nil, err
-		}
-		permanentID = "usr-" + tok[:12]
-	}
+// RegisterUser memvalidasi input lalu mendaftarkan principal baru dengan UUID permanen dan password Argon2id.
+// Mengembalikan ErrInvalidUsername / ErrInvalidEmail / ErrWeakPassword / ErrUsernameTaken / ErrEmailTaken.
+func (s *SessionStore) RegisterUser(ctx context.Context, in RegisterInput) (*User, error) {
+	username := NormalizeUsername(in.Username)
+	email := NormalizeEmail(in.Email)
+	role := in.Role
 	if role == "" {
 		role = RoleUser
 	}
-	email = strings.TrimSpace(strings.ToLower(email))
-	if username == "" && email != "" {
-		localPart := strings.SplitN(email, "@", 2)[0]
-		if _, err := s.repo.GetUserByUsername(ctx, localPart); err != nil {
-			username = localPart
-		} else {
-			username = email
-		}
+	if err := ValidateUsername(username); err != nil {
+		return nil, err
 	}
-	if email == "" && username != "" {
-		if strings.Contains(username, "@") {
-			email = strings.ToLower(username)
-		} else {
-			email = strings.ToLower(username) + "@email.com"
-		}
+	if err := ValidateEmail(email); err != nil {
+		return nil, err
+	}
+	if err := ValidatePassword(in.Password); err != nil {
+		return nil, err
+	}
+	if err := ValidateRole(role); err != nil {
+		return nil, err
+	}
+
+	hash, err := HashPassword(in.Password)
+	if err != nil {
+		return nil, err
 	}
 	user := &User{
-		ID:           permanentID,
+		ID:           ids.New(),
 		Username:     username,
 		Email:        email,
 		PasswordHash: hash,
@@ -221,46 +173,32 @@ func (s *SessionStore) RegisterUserWithEmail(ctx context.Context, permanentID, u
 	return user, nil
 }
 
-// UserExists memeriksa apakah username atau email sudah terdaftar
-func (s *SessionStore) UserExists(ctx context.Context, identifier string) bool {
-	if identifier == "" {
-		return false
-	}
-	if _, err := s.repo.GetUserByEmail(ctx, identifier); err == nil {
-		return true
-	}
-	_, err := s.repo.GetUserByUsername(ctx, identifier)
-	return err == nil
+// GetUserByUsername memuat principal berdasarkan username (case-insensitive).
+func (s *SessionStore) GetUserByUsername(ctx context.Context, username string) (*User, error) {
+	return s.repo.GetUserByUsername(ctx, username)
 }
 
-// Authenticate memverifikasi email/username dan password menggunakan Argon2id, serta memuat unique identifier permanen pengguna
+// CountActiveAdmins menghitung Platform Admin yang masih aktif (dipakai saat bootstrap).
+func (s *SessionStore) CountActiveAdmins(ctx context.Context) (int, error) {
+	return s.repo.CountActiveAdmins(ctx)
+}
+
+// Authenticate memverifikasi username atau email beserta password (Argon2id), serta memuat UUID permanen pengguna
 func (s *SessionStore) Authenticate(ctx context.Context, identifier, plainPassword string) (*User, *AuthLayoutUser, error) {
 	if identifier == "" || plainPassword == "" {
 		return nil, nil, ErrInvalidCredentials
 	}
 
+	// Input berisi '@' dicocokkan ke email, selain itu ke username. Tidak ada tebakan lain.
 	var (
 		user *User
 		err  error
 	)
+	identifier = strings.TrimSpace(identifier)
 	if strings.Contains(identifier, "@") {
 		user, err = s.repo.GetUserByEmail(ctx, identifier)
-		if err != nil {
-			user, err = s.repo.GetUserByUsername(ctx, identifier)
-		}
-		if err != nil {
-			localPart := strings.SplitN(identifier, "@", 2)[0]
-			user, err = s.repo.GetUserByUsername(ctx, localPart)
-			if err != nil && len(localPart) > 0 {
-				titled := strings.ToUpper(localPart[:1]) + strings.ToLower(localPart[1:])
-				user, err = s.repo.GetUserByUsername(ctx, titled)
-			}
-		}
 	} else {
 		user, err = s.repo.GetUserByUsername(ctx, identifier)
-		if err != nil {
-			user, err = s.repo.GetUserByEmail(ctx, identifier)
-		}
 	}
 	if err != nil {
 		// Jalankan dummy hash verification untuk mencegah timing attack enumerasi username/email
@@ -307,17 +245,13 @@ func (s *SessionStore) CreateSessionForUser(ctx context.Context, userID string) 
 	if err != nil {
 		return "", nil, err
 	}
-	sessionID, err := GenerateOpaqueToken()
-	if err != nil {
-		return "", nil, err
-	}
 
 	now := s.nowFunc()
 	absExp := now.Add(s.cfg.AbsoluteExpiration)
 	idleExp := minTime(now.Add(s.cfg.IdleTimeout), absExp)
 
 	session := &Session{
-		ID:                "ses-" + sessionID[:16],
+		ID:                ids.New(),
 		UserID:            userID,
 		TokenHash:         HashOpaqueToken(rawToken),
 		CreatedAt:         now,
@@ -543,47 +477,6 @@ func (s *SessionStore) UpdateUserRole(ctx context.Context, userID, role string) 
 	return s.repo.UpdateUserRole(ctx, userID, role)
 }
 
-// --- Helper Kompatibilitas untuk Pemanggilan Sederhana ---
-
-func (s *SessionStore) Save(sessionID string, user *AuthLayoutUser) {
-	if user == nil || sessionID == "" {
-		return
-	}
-	now := s.nowFunc()
-	_ = s.repo.CreateUser(context.Background(), &User{
-		ID:           user.ID,
-		Username:     user.Username,
-		Email:        user.Email,
-		PasswordHash: dummyPasswordHash,
-		Role:         user.Role,
-		IsActive:     true,
-		CreatedAt:    now,
-	})
-	_ = s.repo.CreateSession(context.Background(), &Session{
-		ID:                "ses-" + HashOpaqueToken(sessionID)[:16],
-		UserID:            user.ID,
-		TokenHash:         HashOpaqueToken(sessionID),
-		CreatedAt:         now,
-		LastActivityAt:    now,
-		LastRotatedAt:     now,
-		IdleExpiresAt:     now.Add(s.cfg.IdleTimeout),
-		AbsoluteExpiresAt: now.Add(s.cfg.AbsoluteExpiration),
-		IsRevoked:         false,
-	})
-}
-
-func (s *SessionStore) Get(sessionID string) (*AuthLayoutUser, bool) {
-	res, err := s.ValidateAndRefresh(context.Background(), sessionID)
-	if err != nil || res == nil {
-		return nil, false
-	}
-	return res.User, true
-}
-
-func (s *SessionStore) Delete(sessionID string) {
-	_ = s.RevokeSession(context.Background(), sessionID)
-}
-
 // BuildUserProfileFromUser membentuk profil AuthLayoutUser dari entitas User permanen
 func BuildUserProfileFromUser(u *User) *AuthLayoutUser {
 	isAdmin := u.Role == RolePlatformAdmin
@@ -624,21 +517,6 @@ func BuildUserProfileFromUser(u *User) *AuthLayoutUser {
 		},
 		Databases: dbs,
 	}
-}
-
-// BuildUserProfile mempertahankan fungsi pembentuk profil berdasarkan username
-func BuildUserProfile(username string) *AuthLayoutUser {
-	isAdmin := username == "admin" || username == "Moreno"
-	role := RoleUser
-	if isAdmin {
-		role = RolePlatformAdmin
-	}
-	return BuildUserProfileFromUser(&User{
-		ID:       "usr-" + username,
-		Username: username,
-		Role:     role,
-		IsActive: true,
-	})
 }
 
 func minTime(a, b time.Time) time.Time {

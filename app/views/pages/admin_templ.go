@@ -604,14 +604,14 @@ func AdminFeedback(success bool, message string) templ.Component {
 		}
 		ctx = templ.ClearChildren(ctx)
 		if success {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<div class=\"p-3.5 rounded-xl bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs font-mono\">✓ ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<div class=\"p-3.5 rounded-xl bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs font-mono\">Success: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var26 string
 			templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 407, Col: 16}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 407, Col: 21}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 			if templ_7745c5c3_Err != nil {
@@ -622,14 +622,14 @@ func AdminFeedback(success bool, message string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "<div class=\"p-3.5 rounded-xl bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs font-mono\">✗ ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "<div class=\"p-3.5 rounded-xl bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs font-mono\">Failure: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var27 string
 			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 411, Col: 16}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 411, Col: 21}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 			if templ_7745c5c3_Err != nil {

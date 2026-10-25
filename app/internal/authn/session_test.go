@@ -8,19 +8,42 @@ import (
 	"time"
 
 	"dbplatform/app/internal/authn"
+	"dbplatform/app/internal/ids"
 )
 
-// 1. Menguji Identifikasi Principal: Argon2id Hashing & Pemuatan Unique Identifier Permanen
+// seedTestUsers mendaftarkan akun uji melalui RegisterUser (pengganti SeedDefaultUsers yang sudah dihapus)
+func seedTestUsers(t *testing.T, store *authn.SessionStore) {
+	t.Helper()
+	accounts := []authn.RegisterInput{
+		{Username: "admin", Email: "admin@email.com", Password: "SuperSecretPass999!", Role: authn.RolePlatformAdmin},
+		{Username: "moreno", Email: "moreno@email.com", Password: "Rahasia123", Role: authn.RolePlatformAdmin},
+		{Username: "dhia", Email: "dhia@email.com", Password: "PasswordDhia123!", Role: authn.RoleUser},
+		{Username: "caca", Password: "PasswordCaca123!", Role: authn.RoleUser},
+	}
+	for _, acc := range accounts {
+		if _, err := store.RegisterUser(context.Background(), acc); err != nil {
+			t.Fatalf("gagal mendaftarkan akun uji %s: %v", acc.Username, err)
+		}
+	}
+}
+
+// 1. Menguji Identifikasi Principal: Argon2id Hashing & Pemuatan Unique Identifier Permanen (UUID)
 func TestPrincipalIdentification_HashingAndPermanentID(t *testing.T) {
 	ctx := context.Background()
-	store := authn.NewSessionStore()
+	store := authn.NewMemorySessionStore()
 
-	permanentID := "usr-permanent-999"
 	rawPassword := "SangatRahasia#2026"
 
-	createdUser, err := store.RegisterUser(ctx, permanentID, "budi_santoso", rawPassword, authn.RoleUser)
+	createdUser, err := store.RegisterUser(ctx, authn.RegisterInput{Username: "budi_santoso", Password: rawPassword})
 	if err != nil {
 		t.Fatalf("gagal mendaftarkan user: %v", err)
+	}
+	permanentID := createdUser.ID
+	if !ids.IsValid(permanentID) {
+		t.Fatalf("ID user seharusnya UUID, dapat: %q", permanentID)
+	}
+	if createdUser.Role != authn.RoleUser {
+		t.Fatalf("role default seharusnya USER, dapat: %s", createdUser.Role)
 	}
 
 	if !strings.HasPrefix(createdUser.PasswordHash, "$argon2id$") {
@@ -66,7 +89,7 @@ func TestSessionLifecycle_IdleAndAbsoluteExpiration(t *testing.T) {
 
 	currentTime := time.Date(2026, 10, 25, 8, 0, 0, 0, time.UTC)
 	store.SetClock(func() time.Time { return currentTime })
-	_ = store.SeedDefaultUsers(ctx)
+	seedTestUsers(t, store)
 
 	// Skenario A: Idle Timeout
 	tokenIdle, _, err := store.Login(ctx, "admin", "SuperSecretPass999!", "")
@@ -124,7 +147,7 @@ func TestSessionLifecycle_RotationAndParallelGracePeriod(t *testing.T) {
 
 	currentTime := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 	store.SetClock(func() time.Time { return currentTime })
-	_ = store.SeedDefaultUsers(ctx)
+	seedTestUsers(t, store)
 
 	// 1. Login awal menghasilkan token_1
 	token1, _, err := store.Login(ctx, "dhia", "PasswordDhia123!", "")
@@ -211,7 +234,8 @@ func TestSessionLifecycle_RotationAndParallelGracePeriod(t *testing.T) {
 // 4. Menguji Penonaktifan Sesi Seketika (Logout & Pencabutan Akses Pengguna)
 func TestSessionLifecycle_InstantRevocationOnLogoutAndAccessRevoke(t *testing.T) {
 	ctx := context.Background()
-	store := authn.NewSessionStore()
+	store := authn.NewMemorySessionStore()
+	seedTestUsers(t, store)
 
 	// Skenario A: Logout menonaktifkan sesi seketika (termasuk token dalam grace period)
 	tokenA, _, err := store.Login(ctx, "caca", "PasswordCaca123!", "")

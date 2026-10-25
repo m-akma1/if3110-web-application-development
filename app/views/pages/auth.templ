@@ -4,17 +4,17 @@ import "dbplatform/app/views/layouts"
 
 // Struct untuk menampung pesan error & nilai input sebelumnya
 type AuthFormState struct {
-	Email         string
-	InviteCode    string
-	EmailError    string
-	PasswordError string
-	CodeError     string
-	GeneralError  string
+	Identifier      string // login: username atau email
+	Username        string // signup
+	Email           string // signup (opsional)
+	InviteCode      string // signup (opsional)
+	IdentifierError string
+	UsernameError   string
+	EmailError      string
+	PasswordError   string
+	CodeError       string
+	GeneralError    string
 }
-
-// ==========================================
-// 1. HALAMAN & FORM LOGIN
-// ==========================================
 
 templ LoginPage(csrfToken string, state AuthFormState) {
 	@layouts.Auth("Masuk", csrfToken) {
@@ -47,32 +47,35 @@ templ LoginForm(state AuthFormState) {
 
 		<!-- Form Login -->
 		<form hx-post="/auth/login" hx-target="#auth-form-container" hx-swap="innerHTML" class="space-y-5">
-			<!-- Input Email + Error di Samping Label -->
+			<!-- Input Username atau Email + Error di Samping Label -->
 			<div class="space-y-1.5">
 				<div class="flex items-center justify-between gap-2">
-					<label for="email" class="block text-xs font-semibold text-zinc-200">
-						Your email
+					<label for="identifier" class="block text-xs font-semibold text-zinc-200">
+						Username or email
 					</label>
-					if state.EmailError != "" {
+					if state.IdentifierError != "" {
 						<span class="text-xs font-medium text-[#ff8080] flex items-center gap-1 animate-pulse">
 							<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
 								<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
 							</svg>
-							{ state.EmailError }
+							{ state.IdentifierError }
 						</span>
 					}
 				</div>
 				<input
-					type="email"
-					id="email"
-					name="email"
-					value={ state.Email }
-					placeholder="nama@email.com"
+					type="text"
+					id="identifier"
+					name="identifier"
+					value={ state.Identifier }
+					placeholder="username atau nama@email.com"
+					autocomplete="username"
+					autocapitalize="none"
+					spellcheck="false"
 					required
 					autofocus
 					class={ "w-full px-3.5 py-2.5 text-sm rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
-						templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.EmailError != ""),
-						templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.EmailError == "") }
+						templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.IdentifierError != ""),
+						templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.IdentifierError == "") }
 				/>
 			</div>
 
@@ -97,6 +100,7 @@ templ LoginForm(state AuthFormState) {
 						id="password"
 						name="password"
 						placeholder="••••••••••"
+						autocomplete="current-password"
 						required
 						class={ "w-full pl-3.5 pr-10 py-2.5 text-sm rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
 							templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.PasswordError != ""),
@@ -156,10 +160,6 @@ templ LoginForm(state AuthFormState) {
 	</div>
 }
 
-// ==========================================
-// 2. HALAMAN & FORM SIGN UP
-// ==========================================
-
 templ SignupPage(csrfToken string, state AuthFormState) {
 	@layouts.Auth("Daftar Akun", csrfToken) {
 		@SignupForm(state)
@@ -179,7 +179,7 @@ templ SignupForm(state AuthFormState) {
 				Create an account
 			</h1>
 			<p class="text-xs sm:text-sm text-zinc-400 leading-relaxed">
-				Masukkan kode tim dari Platform Admin untuk bergabung dan mulai melihat database.
+				Daftar dengan username Anda. Kode tim bersifat opsional. Tanpa kode, Anda tetap dapat masuk dan Platform Admin dapat memberi akses nanti.
 			</p>
 		</div>
 
@@ -191,11 +191,45 @@ templ SignupForm(state AuthFormState) {
 
 		<!-- Form Sign Up -->
 		<form hx-post="/auth/signup" hx-target="#auth-form-container" hx-swap="innerHTML" class="space-y-4">
+			<!-- Input Username + Error di Samping Label -->
+			<div class="space-y-1.5">
+				<div class="flex items-center justify-between gap-2">
+					<label for="signup-username" class="block text-xs font-semibold text-zinc-200">
+						Username
+					</label>
+					if state.UsernameError != "" {
+						<span class="text-xs font-medium text-[#ff8080] flex items-center gap-1">
+							<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+								<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
+							</svg>
+							{ state.UsernameError }
+						</span>
+					}
+				</div>
+				<input
+					type="text"
+					id="signup-username"
+					name="username"
+					value={ state.Username }
+					placeholder="contoh: budi.santoso"
+					autocomplete="username"
+					autocapitalize="none"
+					spellcheck="false"
+					minlength="3"
+					maxlength="32"
+					required
+					autofocus
+					class={ "w-full px-3.5 py-2.5 text-sm rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
+						templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.UsernameError != ""),
+						templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.UsernameError == "") }
+				/>
+			</div>
+
 			<!-- Input Email + Error di Samping Label -->
 			<div class="space-y-1.5">
 				<div class="flex items-center justify-between gap-2">
 					<label for="signup-email" class="block text-xs font-semibold text-zinc-200">
-						Your email
+						Email <span class="font-normal text-zinc-500">(opsional)</span>
 					</label>
 					if state.EmailError != "" {
 						<span class="text-xs font-medium text-[#ff8080] flex items-center gap-1">
@@ -212,7 +246,7 @@ templ SignupForm(state AuthFormState) {
 					name="email"
 					value={ state.Email }
 					placeholder="nama@email.com"
-					required
+					autocomplete="email"
 					class={ "w-full px-3.5 py-2.5 text-sm rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
 						templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.EmailError != ""),
 						templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.EmailError == "") }
@@ -240,6 +274,7 @@ templ SignupForm(state AuthFormState) {
 						id="signup-password"
 						name="password"
 						placeholder="Minimal 8 karakter"
+						autocomplete="new-password"
 						required
 						class={ "w-full pl-3.5 pr-10 py-2.5 text-sm rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
 							templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.PasswordError != ""),
@@ -262,14 +297,14 @@ templ SignupForm(state AuthFormState) {
 				</div>
 			</div>
 
-			<!-- Input Kode Undangan Tim -->
+			<!-- Input Kode Undangan Tim (opsional) -->
 			<div class="space-y-1.5">
 				<div class="flex items-center justify-between gap-2">
 					<label
 						for="signup-invite-code"
 						class="block text-xs font-semibold text-zinc-200"
 					>
-						Team Invite Code
+						Team Invite Code <span class="font-normal text-zinc-500">(opsional)</span>
 					</label>
 					if state.CodeError != "" {
 						<span class="text-xs font-medium text-[#ff8080] flex items-center gap-1">
@@ -285,8 +320,7 @@ templ SignupForm(state AuthFormState) {
 					id="signup-invite-code"
 					name="invite_code"
 					value={ state.InviteCode }
-					placeholder="Masukkan kode tim"
-					required
+					placeholder="Kode Tim dari Platform Admin"
 					class={ "w-full px-3.5 py-2.5 text-sm font-mono rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
 						templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.CodeError != ""),
 						templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.CodeError == "") }

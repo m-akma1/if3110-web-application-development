@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
-	"sync"
 	"time"
+
+	"dbplatform/app/internal/ids"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Repository mengabstraksi penyimpanan Principal (User) dan Session di PostgreSQL Internal
@@ -17,6 +19,7 @@ type Repository interface {
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 	GetUserByID(ctx context.Context, userID string) (*User, error)
 	ListUsers(ctx context.Context) ([]*User, error)
+	CountActiveAdmins(ctx context.Context) (int, error)
 	SetUserActiveStatus(ctx context.Context, userID string, isActive bool) error
 	UpdateUserRole(ctx context.Context, userID string, role string) error
 
@@ -37,10 +40,8 @@ type Repository interface {
 	RevokeAllUserSessions(ctx context.Context, userID string) error
 }
 
-// ============================================================================
-// 1. Implementasi PostgreSQL Internal (Production)
-// ============================================================================
-
+// PostgresRepository adalah implementasi Repository di atas PostgreSQL Internal (production).
+// Skema tabelnya ada di internal/platformdb/migrations.
 type PostgresRepository struct {
 	db *sql.DB
 }
@@ -49,101 +50,76 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
+const userColumns = `id, username, email, password_hash, role, is_active, created_at`
+
+func scanUser(row interface{ Scan(...any) error }) (*User, error) {
+	var u User
+	var email sql.NullString
+	if err := row.Scan(&u.ID, &u.Username, &email, &u.PasswordHash, &u.Role, &u.IsActive, &u.CreatedAt); err != nil {
+		return nil, err
+	}
+	u.Email = email.String
+	return &u, nil
+}
+
+// CreateUser menyisipkan user baru. Username atau email yang sudah dipakai menghasilkan
+// ErrUsernameTaken / ErrEmailTaken; data yang sudah ada tidak pernah ditimpa.
 func (r *PostgresRepository) CreateUser(ctx context.Context, user *User) error {
-	email := user.Email
-	if email == "" {
-		if strings.Contains(user.Username, "@") {
-			email = strings.ToLower(user.Username)
-		} else {
-			email = strings.ToLower(user.Username) + "@email.com"
+	var email sql.NullString
+	if user.Email != "" {
+		email = sql.NullString{String: user.Email, Valid: true}
+	}
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO users (id, username, email, password_hash, role, is_active, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
+		user.ID, user.Username, email, user.PasswordHash, user.Role, user.IsActive, user.CreatedAt,
+	)
+	return mapUniqueViolation(err)
+}
+
+// mapUniqueViolation menerjemahkan pelanggaran unique index users menjadi error domain.
+func mapUniqueViolation(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		switch pgErr.ConstraintName {
+		case "users_username_key":
+			return ErrUsernameTaken
+		case "users_email_key":
+			return ErrEmailTaken
 		}
 	}
-	query := `
-		INSERT INTO users (id, username, email, password_hash, role, is_active, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
-		ON CONFLICT (username) DO UPDATE
-		SET email = EXCLUDED.email,
-		    password_hash = EXCLUDED.password_hash,
-		    role = EXCLUDED.role,
-		    is_active = EXCLUDED.is_active,
-		    updated_at = EXCLUDED.updated_at
-	`
-	_, err := r.db.ExecContext(ctx, query,
-		user.ID,
-		user.Username,
-		email,
-		user.PasswordHash,
-		user.Role,
-		user.IsActive,
-		user.CreatedAt,
-	)
 	return err
 }
 
-func (r *PostgresRepository) GetUserByUsername(ctx context.Context, username string) (*User, error) {
-	query := `
-		SELECT id, username, email, password_hash, role, is_active, created_at
-		FROM users
-		WHERE username = $1
-	`
-	var u User
-	err := r.db.QueryRowContext(ctx, query, username).Scan(
-		&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role, &u.IsActive, &u.CreatedAt,
-	)
+func (r *PostgresRepository) getUser(ctx context.Context, where string, arg any) (*User, error) {
+	u, err := scanUser(r.db.QueryRowContext(ctx, `SELECT `+userColumns+` FROM users WHERE `+where, arg))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrInvalidCredentials
+		return nil, ErrUserNotFound
 	}
-	if err != nil {
-		return nil, err
-	}
-	return &u, nil
+	return u, err
+}
+
+func (r *PostgresRepository) GetUserByUsername(ctx context.Context, username string) (*User, error) {
+	return r.getUser(ctx, `username = $1`, NormalizeUsername(username))
 }
 
 func (r *PostgresRepository) GetUserByEmail(ctx context.Context, email string) (*User, error) {
-	query := `
-		SELECT id, username, email, password_hash, role, is_active, created_at
-		FROM users
-		WHERE LOWER(email) = LOWER($1)
-	`
-	var u User
-	err := r.db.QueryRowContext(ctx, query, email).Scan(
-		&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role, &u.IsActive, &u.CreatedAt,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrInvalidCredentials
+	email = NormalizeEmail(email)
+	if email == "" {
+		return nil, ErrUserNotFound
 	}
-	if err != nil {
-		return nil, err
-	}
-	return &u, nil
+	return r.getUser(ctx, `email = $1`, email)
 }
 
 func (r *PostgresRepository) GetUserByID(ctx context.Context, userID string) (*User, error) {
-	query := `
-		SELECT id, username, email, password_hash, role, is_active, created_at
-		FROM users
-		WHERE id = $1
-	`
-	var u User
-	err := r.db.QueryRowContext(ctx, query, userID).Scan(
-		&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role, &u.IsActive, &u.CreatedAt,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrInvalidCredentials
+	if !ids.IsValid(userID) {
+		return nil, ErrUserNotFound
 	}
-	if err != nil {
-		return nil, err
-	}
-	return &u, nil
+	return r.getUser(ctx, `id = $1`, userID)
 }
 
 func (r *PostgresRepository) ListUsers(ctx context.Context) ([]*User, error) {
-	query := `
-		SELECT id, username, email, password_hash, role, is_active, created_at
-		FROM users
-		ORDER BY created_at ASC
-	`
-	rows, err := r.db.QueryContext(ctx, query)
+	rows, err := r.db.QueryContext(ctx, `SELECT `+userColumns+` FROM users ORDER BY created_at ASC, username ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -151,25 +127,45 @@ func (r *PostgresRepository) ListUsers(ctx context.Context) ([]*User, error) {
 
 	var list []*User
 	for rows.Next() {
-		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role, &u.IsActive, &u.CreatedAt); err != nil {
+		u, err := scanUser(rows)
+		if err != nil {
 			return nil, err
 		}
-		list = append(list, &u)
+		list = append(list, u)
 	}
 	return list, rows.Err()
 }
 
+func (r *PostgresRepository) CountActiveAdmins(ctx context.Context) (int, error) {
+	var n int
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM users WHERE role = $1 AND is_active`, RolePlatformAdmin).Scan(&n)
+	return n, err
+}
+
 func (r *PostgresRepository) SetUserActiveStatus(ctx context.Context, userID string, isActive bool) error {
-	query := `UPDATE users SET is_active = $2, updated_at = NOW() WHERE id = $1`
-	_, err := r.db.ExecContext(ctx, query, userID, isActive)
-	return err
+	return r.updateUser(ctx, `UPDATE users SET is_active = $2, updated_at = NOW() WHERE id = $1`, userID, isActive)
 }
 
 func (r *PostgresRepository) UpdateUserRole(ctx context.Context, userID string, role string) error {
-	query := `UPDATE users SET role = $2, updated_at = NOW() WHERE id = $1`
-	_, err := r.db.ExecContext(ctx, query, userID, role)
-	return err
+	if err := ValidateRole(role); err != nil {
+		return err
+	}
+	return r.updateUser(ctx, `UPDATE users SET role = $2, updated_at = NOW() WHERE id = $1`, userID, role)
+}
+
+func (r *PostgresRepository) updateUser(ctx context.Context, query, userID string, value any) error {
+	if !ids.IsValid(userID) {
+		return ErrUserNotFound
+	}
+	res, err := r.db.ExecContext(ctx, query, userID, value)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return ErrUserNotFound
+	}
+	return nil
 }
 
 func (r *PostgresRepository) CreateSession(ctx context.Context, s *Session) error {
@@ -243,7 +239,8 @@ func (r *PostgresRepository) TouchSession(ctx context.Context, sessionID string,
 	return err
 }
 
-// RotateSessionToken merotasi session identifier secara atomik tanpa memperpanjang absolute_expires_at
+// RotateSessionToken merotasi session identifier secara atomik (compare-and-swap pada token_hash)
+// tanpa memperpanjang absolute_expires_at.
 func (r *PostgresRepository) RotateSessionToken(
 	ctx context.Context,
 	sessionID string,
@@ -288,6 +285,9 @@ func (r *PostgresRepository) RevokeByTokenHash(ctx context.Context, tokenHash st
 }
 
 func (r *PostgresRepository) RevokeAllUserSessions(ctx context.Context, userID string) error {
+	if !ids.IsValid(userID) {
+		return nil
+	}
 	query := `
 		UPDATE sessions
 		SET is_revoked = TRUE,
@@ -296,222 +296,4 @@ func (r *PostgresRepository) RevokeAllUserSessions(ctx context.Context, userID s
 	`
 	_, err := r.db.ExecContext(ctx, query, userID)
 	return err
-}
-
-// ============================================================================
-// 2. Implementasi MemoryRepository (Untuk Unit Testing & Fallback Tanpa DB)
-// ============================================================================
-
-type MemoryRepository struct {
-	mu       sync.RWMutex
-	users    map[string]*User    // key: user.ID
-	byName   map[string]string   // key: username -> user.ID
-	byEmail  map[string]string   // key: lower(email) -> user.ID
-	sessions map[string]*Session // key: session.ID
-}
-
-func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{
-		users:    make(map[string]*User),
-		byName:   make(map[string]string),
-		byEmail:  make(map[string]string),
-		sessions: make(map[string]*Session),
-	}
-}
-
-func (m *MemoryRepository) CreateUser(_ context.Context, user *User) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	cp := *user
-	if cp.Email == "" {
-		if strings.Contains(cp.Username, "@") {
-			cp.Email = strings.ToLower(cp.Username)
-		} else {
-			cp.Email = strings.ToLower(cp.Username) + "@email.com"
-		}
-	}
-	m.users[cp.ID] = &cp
-	m.byName[cp.Username] = cp.ID
-	m.byEmail[strings.ToLower(cp.Email)] = cp.ID
-	return nil
-}
-
-func (m *MemoryRepository) GetUserByUsername(_ context.Context, username string) (*User, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	id, ok := m.byName[username]
-	if !ok {
-		return nil, ErrInvalidCredentials
-	}
-	u, ok := m.users[id]
-	if !ok {
-		return nil, ErrInvalidCredentials
-	}
-	cp := *u
-	return &cp, nil
-}
-
-func (m *MemoryRepository) GetUserByEmail(_ context.Context, email string) (*User, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	id, ok := m.byEmail[strings.ToLower(email)]
-	if !ok {
-		return nil, ErrInvalidCredentials
-	}
-	u, ok := m.users[id]
-	if !ok {
-		return nil, ErrInvalidCredentials
-	}
-	cp := *u
-	return &cp, nil
-}
-
-func (m *MemoryRepository) GetUserByID(_ context.Context, userID string) (*User, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	u, ok := m.users[userID]
-	if !ok {
-		return nil, ErrInvalidCredentials
-	}
-	cp := *u
-	return &cp, nil
-}
-
-func (m *MemoryRepository) ListUsers(_ context.Context) ([]*User, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	list := make([]*User, 0, len(m.users))
-	for _, u := range m.users {
-		cp := *u
-		list = append(list, &cp)
-	}
-	return list, nil
-}
-
-func (m *MemoryRepository) SetUserActiveStatus(_ context.Context, userID string, isActive bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	u, ok := m.users[userID]
-	if !ok {
-		return ErrInvalidCredentials
-	}
-	u.IsActive = isActive
-	return nil
-}
-
-func (m *MemoryRepository) UpdateUserRole(_ context.Context, userID string, role string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	u, ok := m.users[userID]
-	if !ok {
-		return ErrInvalidCredentials
-	}
-	u.Role = role
-	return nil
-}
-
-func (m *MemoryRepository) CreateSession(_ context.Context, session *Session) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	cp := *session
-	if session.GracePeriodExpiresAt != nil {
-		t := *session.GracePeriodExpiresAt
-		cp.GracePeriodExpiresAt = &t
-	}
-	m.sessions[cp.ID] = &cp
-	return nil
-}
-
-func (m *MemoryRepository) GetSessionByTokenHash(_ context.Context, tokenHash string) (*Session, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	for _, s := range m.sessions {
-		if s.TokenHash == tokenHash || (s.PreviousTokenHash != "" && s.PreviousTokenHash == tokenHash) {
-			cp := *s
-			if s.GracePeriodExpiresAt != nil {
-				t := *s.GracePeriodExpiresAt
-				cp.GracePeriodExpiresAt = &t
-			}
-			return &cp, nil
-		}
-	}
-	return nil, ErrSessionNotFound
-}
-
-func (m *MemoryRepository) TouchSession(_ context.Context, sessionID string, lastActivityAt, newIdleExpiresAt time.Time) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	s, ok := m.sessions[sessionID]
-	if !ok || s.IsRevoked {
-		return ErrSessionNotFound
-	}
-	s.LastActivityAt = lastActivityAt
-	s.IdleExpiresAt = newIdleExpiresAt
-	return nil
-}
-
-func (m *MemoryRepository) RotateSessionToken(
-	_ context.Context,
-	sessionID string,
-	expectedCurrentHash string,
-	newTokenHash string,
-	graceExpiresAt time.Time,
-	rotatedAt time.Time,
-	newIdleExpiresAt time.Time,
-) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	s, ok := m.sessions[sessionID]
-	if !ok || s.IsRevoked {
-		return false, nil
-	}
-	if s.TokenHash != expectedCurrentHash {
-		return false, nil
-	}
-	s.PreviousTokenHash = expectedCurrentHash
-	s.TokenHash = newTokenHash
-	g := graceExpiresAt
-	s.GracePeriodExpiresAt = &g
-	s.LastRotatedAt = rotatedAt
-	s.LastActivityAt = rotatedAt
-	s.IdleExpiresAt = newIdleExpiresAt
-	// Perhatikan: s.AbsoluteExpiresAt TIDAK PERNAH diubah!
-	return true, nil
-}
-
-func (m *MemoryRepository) RevokeByTokenHash(_ context.Context, tokenHash string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for _, s := range m.sessions {
-		if s.TokenHash == tokenHash || (s.PreviousTokenHash != "" && s.PreviousTokenHash == tokenHash) {
-			s.IsRevoked = true
-			s.GracePeriodExpiresAt = nil
-		}
-	}
-	return nil
-}
-
-func (m *MemoryRepository) RevokeAllUserSessions(_ context.Context, userID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for _, s := range m.sessions {
-		if s.UserID == userID {
-			s.IsRevoked = true
-			s.GracePeriodExpiresAt = nil
-		}
-	}
-	return nil
 }

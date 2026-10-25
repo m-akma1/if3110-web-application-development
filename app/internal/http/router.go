@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -37,18 +38,19 @@ type Server struct {
 	inviteCodes []domain.TeamInviteCodeItem
 }
 
-// menyusun router beserta rantai middleware (Logger -> CSRF -> Mux)
+// NewServer menyusun router di atas SessionStore in-memory yang kosong (khusus pengujian).
+// Aplikasi memakai NewServerWithSessions dengan SessionStore PostgreSQL.
 func NewServer(logOutput io.Writer) *Server {
-	return NewServerWithSessions(logOutput, authn.NewSessionStore())
+	return NewServerWithSessions(logOutput, authn.NewMemorySessionStore())
 }
 
-// NewServerWithSessions menyusun router dengan SessionStore yang terhubung ke PostgreSQL Internal
+// NewServerWithSessions menyusun router beserta rantai middleware (Logger -> CSRF -> Mux)
 func NewServerWithSessions(logOutput io.Writer, sessionStore *authn.SessionStore) *Server {
 	if logOutput == nil {
 		logOutput = os.Stdout
 	}
 	if sessionStore == nil {
-		sessionStore = authn.NewSessionStore()
+		panic("http: NewServerWithSessions requires a SessionStore")
 	}
 
 	logger := log.New(logOutput, "", log.LstdFlags)
@@ -258,20 +260,24 @@ func (s *Server) handleLoginHTMX(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	identifier := strings.TrimSpace(r.FormValue("email"))
+	// Field "identifier" berisi username atau email; "email"/"username" diterima untuk kompatibilitas.
+	identifier := strings.TrimSpace(r.FormValue("identifier"))
 	if identifier == "" {
 		identifier = strings.TrimSpace(r.FormValue("username"))
 	}
+	if identifier == "" {
+		identifier = strings.TrimSpace(r.FormValue("email"))
+	}
 	password := r.FormValue("password")
 
-	state := pages.AuthFormState{Email: identifier}
+	state := pages.AuthFormState{Identifier: identifier}
 	if identifier == "" {
-		state.EmailError = "Email wajib diisi"
+		state.IdentifierError = "Username atau email wajib diisi"
 	}
 	if password == "" {
 		state.PasswordError = "Password wajib diisi"
 	}
-	if state.EmailError != "" || state.PasswordError != "" {
+	if state.IdentifierError != "" || state.PasswordError != "" {
 		w.WriteHeader(http.StatusOK)
 		_ = pages.LoginForm(state).Render(r.Context(), w)
 		return
@@ -284,7 +290,7 @@ func (s *Server) handleLoginHTMX(w http.ResponseWriter, r *http.Request) {
 
 	opaqueSessionID, _, err := s.sessions.Login(r.Context(), identifier, password, prevToken)
 	if err != nil {
-		state.GeneralError = "Email atau password tidak valid!"
+		state.GeneralError = "Username/email atau password tidak valid!"
 		w.WriteHeader(http.StatusOK)
 		_ = pages.LoginForm(state).Render(r.Context(), w)
 		return
@@ -305,46 +311,59 @@ func (s *Server) handleSignupHTMX(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sign Up publik selalu membuat akun USER (Field account_type diabaikan)
-	email := strings.TrimSpace(r.FormValue("email"))
+	// Sign Up publik selalu membuat akun USER. Field account_type (jika dikirim) sengaja diabaikan.
+	username := authn.NormalizeUsername(r.FormValue("username"))
+	email := authn.NormalizeEmail(r.FormValue("email"))
 	password := r.FormValue("password")
 	inviteCode := strings.TrimSpace(r.FormValue("invite_code"))
 
 	state := pages.AuthFormState{
+		Username:   username,
 		Email:      email,
 		InviteCode: inviteCode,
 	}
-	if email == "" {
-		state.EmailError = "Email wajib diisi"
-	} else if !strings.Contains(email, "@") {
+	if username == "" {
+		state.UsernameError = "Username wajib diisi"
+	} else if err := authn.ValidateUsername(username); err != nil {
+		state.UsernameError = "3-32 karakter: a-z, 0-9, titik, _ atau -"
+	}
+	if err := authn.ValidateEmail(email); err != nil {
 		state.EmailError = "Format email tidak valid"
 	}
-
 	if password == "" {
 		state.PasswordError = "Password wajib diisi"
-	} else if len(password) < 8 {
-		state.PasswordError = "Minimal 8 karakter"
+	} else if err := authn.ValidatePassword(password); err != nil {
+		state.PasswordError = "8-128 karakter"
+	}
+	// Kode undangan opsional: kosong berarti hanya menjadi anggota group Public
+	if inviteCode != "" {
+		if _, err := authn.ValidateSignupCode(inviteCode); err != nil {
+			state.CodeError = "Kode tim tidak valid"
+		}
 	}
 
-	if _, codeErr := authn.ValidateSignupCode(inviteCode); codeErr != nil {
-		state.CodeError = "Kode tim tidak valid"
-	}
-
-	if state.EmailError != "" || state.PasswordError != "" || state.CodeError != "" {
+	if state.UsernameError != "" || state.EmailError != "" || state.PasswordError != "" || state.CodeError != "" {
 		w.WriteHeader(http.StatusOK)
 		_ = pages.SignupForm(state).Render(r.Context(), w)
 		return
 	}
 
-	if s.sessions.UserExists(r.Context(), email) {
+	_, err := s.sessions.RegisterUser(r.Context(), authn.RegisterInput{
+		Username: username,
+		Email:    email,
+		Password: password,
+		Role:     authn.RoleUser,
+	})
+	switch {
+	case errors.Is(err, authn.ErrUsernameTaken):
+		state.UsernameError = "Username sudah terdaftar"
+	case errors.Is(err, authn.ErrEmailTaken):
 		state.EmailError = "Email sudah terdaftar"
-		w.WriteHeader(http.StatusOK)
-		_ = pages.SignupForm(state).Render(r.Context(), w)
-		return
+	case err != nil:
+		state.GeneralError = "Gagal mendaftarkan akun, silakan coba lagi."
 	}
 
-	if _, err := s.sessions.RegisterUserWithEmail(r.Context(), "", "", email, password, authn.RoleUser); err != nil {
-		state.GeneralError = "Gagal mendaftarkan akun, silakan coba lagi."
+	if err != nil {
 		w.WriteHeader(http.StatusOK)
 		_ = pages.SignupForm(state).Render(r.Context(), w)
 		return
@@ -355,11 +374,13 @@ func (s *Server) handleSignupHTMX(w http.ResponseWriter, r *http.Request) {
 		prevToken = c.Value
 	}
 
-	opaqueSessionID, _, err := s.sessions.Login(r.Context(), email, password, prevToken)
+	opaqueSessionID, _, err := s.sessions.Login(r.Context(), username, password, prevToken)
 	if err != nil {
-		state.GeneralError = "Akun berhasil dibuat, silakan login."
 		w.WriteHeader(http.StatusOK)
-		_ = pages.LoginForm(state).Render(r.Context(), w)
+		_ = pages.LoginForm(pages.AuthFormState{
+			Identifier:   username,
+			GeneralError: "Akun berhasil dibuat, silakan login.",
+		}).Render(r.Context(), w)
 		return
 	}
 
@@ -769,7 +790,7 @@ func (s *Server) handleMigrationPage(w http.ResponseWriter, r *http.Request) {
 	dummyHistories := []domain.MigrationHistory{
 		{
 			ID:          "m-001",
-			Filename:    "0001_create_users_table.sql",
+			Filename:    "001_create_users_table.sql",
 			ExecutedAt:  time.Now().Add(-24 * time.Hour),
 			ExecutedBy:  user.Username,
 			Status:      "SUCCESS",
