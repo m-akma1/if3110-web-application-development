@@ -5,9 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -106,16 +104,9 @@ const (
 	defaultQueryMaxRows = 500
 )
 
-// DefaultQueryLimits membaca QUERY_TIMEOUT_MS dan QUERY_ROW_LIMIT dari environment (dengan nilai fallback).
+// DefaultQueryLimits returns the built-in limits. config.Load overrides them from QUERY_* env vars.
 func DefaultQueryLimits() QueryLimits {
-	limits := QueryLimits{Timeout: defaultQueryTimeout, MaxRows: defaultQueryMaxRows}
-	if v, err := strconv.Atoi(os.Getenv("QUERY_TIMEOUT_MS")); err == nil && v > 0 {
-		limits.Timeout = time.Duration(v) * time.Millisecond
-	}
-	if v, err := strconv.Atoi(os.Getenv("QUERY_ROW_LIMIT")); err == nil && v > 0 {
-		limits.MaxRows = v
-	}
-	return limits
+	return QueryLimits{Timeout: defaultQueryTimeout, MaxRows: defaultQueryMaxRows}
 }
 
 func (l QueryLimits) normalized() QueryLimits {

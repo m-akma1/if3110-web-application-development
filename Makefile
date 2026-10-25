@@ -8,7 +8,7 @@ TEST_DB_URL    ?= postgres://test:test@localhost:5433/dbplatform_test?sslmode=di
 
 help:
 	@echo "make gen               generate templ code and Tailwind CSS"
-	@echo "make dev               watch templ + Tailwind and run the app (needs DATABASE_URL etc. exported)"
+	@echo "make dev               watch templ + Tailwind and run the app (needs the .env variables exported)"
 	@echo "make vet               go vet"
 	@echo "make test              unit tests (integration tests skip without TEST_DATABASE_URL)"
 	@echo "make test-integration  start the test PostgreSQL and run every test against it"

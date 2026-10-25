@@ -20,10 +20,16 @@ type ConnectionRegistry struct {
 	limits QueryLimits
 }
 
+// NewConnectionRegistry uses DefaultQueryLimits.
 func NewConnectionRegistry() *ConnectionRegistry {
+	return NewConnectionRegistryWithLimits(DefaultQueryLimits())
+}
+
+// NewConnectionRegistryWithLimits applies limits to every read-only query run through the registry.
+func NewConnectionRegistryWithLimits(limits QueryLimits) *ConnectionRegistry {
 	return &ConnectionRegistry{
 		pools:  make(map[string]*sql.DB),
-		limits: DefaultQueryLimits(),
+		limits: limits.normalized(),
 	}
 }
 

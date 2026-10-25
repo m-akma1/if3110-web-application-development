@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -69,7 +70,7 @@ func isForeignKeyViolation(err error) bool {
 // Create adds a new (non-system) group.
 func (r *Repository) Create(ctx context.Context, name, description string) (*Group, error) {
 	name = strings.TrimSpace(name)
-	if n := len([]rune(name)); n < 2 || n > 64 {
+	if n := len([]rune(name)); n < MinGroupNameLength || n > MaxGroupNameLength {
 		return nil, ErrInvalidGroupName
 	}
 	g := &Group{ID: ids.New(), Name: name, Description: strings.TrimSpace(description)}
@@ -221,6 +222,20 @@ func (r *Repository) ResolveInviteCode(ctx context.Context, code string) (*Group
 func NormalizeCode(code string) string {
 	return strings.ToUpper(strings.TrimSpace(code))
 }
+
+// codeRe mirrors the CHECK constraint on invite_codes.code.
+var codeRe = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{3,63}$`)
+
+// IsValidCode reports whether a normalized invite code fits the stored format.
+func IsValidCode(code string) bool {
+	return codeRe.MatchString(code)
+}
+
+// Group names are 2-64 characters (see Create).
+const (
+	MinGroupNameLength = 2
+	MaxGroupNameLength = 64
+)
 
 // CreateInviteCode stores an active invite code for a group. An empty code generates a random one.
 // createdBy may be empty (seed data).

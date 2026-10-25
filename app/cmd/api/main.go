@@ -55,43 +55,35 @@ func main() {
 		log.Fatalf("%v", err)
 	}
 
-	sessionStore := authn.NewPostgresSessionStore(db, authn.DefaultSessionConfig())
+	sessionStore := authn.NewPostgresSessionStore(db, cfg.Session)
 	groupRepo := groups.NewRepository(db)
 	grantStore := rbac.NewPostgresGrantStore(db)
 	authorizer := rbac.NewAuthorizer(grantStore)
 	// Target pools: the viewer, the target manager and the migration engine share one registry.
-	registry := dbmanager.NewConnectionRegistry()
+	registry := dbmanager.NewConnectionRegistryWithLimits(cfg.Query)
 	defer registry.Close()
 	targets := dbmanager.NewManager(dbmanager.NewTargetRepository(db), cipher, registry)
 	adminService := admin.NewService(sessionStore, groupRepo, grantStore, targets)
-	migrationEngine := migration.NewEngine(db, registry, migration.Limits{
-		LockTimeout:      cfg.MigrationLockTimeout,
-		StatementTimeout: cfg.MigrationStatementTimeout,
-		QueueTimeout:     cfg.MigrationQueueTimeout,
-	})
+	migrationEngine := migration.NewEngine(db, registry, cfg.Migration)
 	migrations := migration.NewService(migration.NewRepository(db), migrationEngine, authorizer)
 
-	created, err := bootstrap.EnsureAdmin(ctx, sessionStore, bootstrap.AdminConfig{
-		Username: cfg.BootstrapAdminUsername,
-		Email:    cfg.BootstrapAdminEmail,
-		Password: cfg.BootstrapAdminPassword,
-	})
+	admins, err := bootstrap.EnsureAdmin(ctx, sessionStore, cfg.BootstrapAdmins)
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
-	if created {
-		log.Printf("Platform Admin awal dibuat: %s", cfg.BootstrapAdminUsername)
+	if len(admins) > 0 {
+		log.Printf("Platform Admin awal dibuat: %s", strings.Join(admins, ", "))
 	}
 
 	if cfg.SeedDemoData {
-		seeded, err := bootstrap.SeedDemo(ctx, sessionStore, groupRepo, bootstrap.DemoConfig{Password: cfg.SeedDemoPassword})
+		seeded, err := bootstrap.SeedDemo(ctx, sessionStore, groupRepo, cfg.DemoUsers, cfg.DemoGroups)
 		if err != nil {
 			log.Fatalf("gagal mengisi data demo: %v", err)
 		}
 		if len(seeded) > 0 {
 			log.Printf("Data demo dibuat: %s", strings.Join(seeded, ", "))
 		}
-		registered, err := bootstrap.SeedDemoTarget(ctx, targets, grantStore, groupRepo, cfg.DemoTargetURL)
+		registered, err := bootstrap.SeedDemoTarget(ctx, targets, grantStore, groupRepo, cfg.DemoTarget, cfg.DemoGroups)
 		if err != nil {
 			log.Fatalf("gagal mendaftarkan database demo: %v", err)
 		}

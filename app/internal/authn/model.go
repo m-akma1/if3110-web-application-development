@@ -2,8 +2,6 @@ package authn
 
 import (
 	"errors"
-	"os"
-	"strconv"
 	"time"
 )
 
@@ -50,31 +48,14 @@ type SessionConfig struct {
 	GracePeriod        time.Duration
 }
 
-// DefaultSessionConfig memuat konfigurasi dari environment variable (dengan nilai fallback standar)
+// DefaultSessionConfig returns the built-in session policy. config.Load overrides it from SESSION_* env vars.
 func DefaultSessionConfig() SessionConfig {
-	idleMin := getEnvInt("SESSION_IDLE_TIMEOUT_MINUTES", 30)
-	absHours := getEnvInt("SESSION_ABSOLUTE_EXPIRATION_HOURS", 12)
-	rotMin := getEnvInt("SESSION_ROTATION_INTERVAL_MINUTES", 15)
-	graceSec := getEnvInt("SESSION_GRACE_PERIOD_SECONDS", 15)
-
 	return SessionConfig{
-		IdleTimeout:        time.Duration(idleMin) * time.Minute,
-		AbsoluteExpiration: time.Duration(absHours) * time.Hour,
-		RotationInterval:   time.Duration(rotMin) * time.Minute,
-		GracePeriod:        time.Duration(graceSec) * time.Second,
+		IdleTimeout:        30 * time.Minute,
+		AbsoluteExpiration: 12 * time.Hour,
+		RotationInterval:   15 * time.Minute,
+		GracePeriod:        15 * time.Second,
 	}
-}
-
-func getEnvInt(key string, fallback int) int {
-	valStr := os.Getenv(key)
-	if valStr == "" {
-		return fallback
-	}
-	v, err := strconv.Atoi(valStr)
-	if err != nil || v <= 0 {
-		return fallback
-	}
-	return v
 }
 
 // ValidationResult menyimpan hasil validasi sesi beserta token baru apabila terjadi rotasi otomatis

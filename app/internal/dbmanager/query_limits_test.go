@@ -13,29 +13,6 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-func TestDefaultQueryLimits_FromEnv(t *testing.T) {
-	t.Setenv("QUERY_TIMEOUT_MS", "1500")
-	t.Setenv("QUERY_ROW_LIMIT", "42")
-
-	limits := dbmanager.DefaultQueryLimits()
-	if limits.Timeout != 1500*time.Millisecond {
-		t.Fatalf("timeout seharusnya 1500ms, dapat: %s", limits.Timeout)
-	}
-	if limits.MaxRows != 42 {
-		t.Fatalf("batas baris seharusnya 42, dapat: %d", limits.MaxRows)
-	}
-}
-
-func TestDefaultQueryLimits_InvalidEnvFallsBack(t *testing.T) {
-	t.Setenv("QUERY_TIMEOUT_MS", "bukan-angka")
-	t.Setenv("QUERY_ROW_LIMIT", "-5")
-
-	limits := dbmanager.DefaultQueryLimits()
-	if limits.Timeout <= 0 || limits.MaxRows <= 0 {
-		t.Fatalf("nilai env tidak valid seharusnya memakai fallback positif, dapat: %+v", limits)
-	}
-}
-
 // openTestDB membuka PostgreSQL khusus pengujian dari TEST_DATABASE_URL, atau melewati test jika tidak disetel
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
