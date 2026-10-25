@@ -20,6 +20,10 @@ type Config struct {
 
 	SeedDemoData     bool
 	SeedDemoPassword string
+	DemoTargetURL    string // DEMO_TARGET_URL: registered as "PostgreSQL Demo" by the demo seed
+
+	// TargetCredentialsKey seals target database passwords (AES-256-GCM, base64 of 32 bytes).
+	TargetCredentialsKey string
 }
 
 // Load reads the environment. It fails when a required value is missing or malformed.
@@ -35,6 +39,8 @@ func load(getenv func(string) string) (Config, error) {
 		BootstrapAdminEmail:    strings.TrimSpace(getenv("BOOTSTRAP_ADMIN_EMAIL")),
 		BootstrapAdminPassword: getenv("BOOTSTRAP_ADMIN_PASSWORD"),
 		SeedDemoPassword:       getenv("SEED_DEMO_PASSWORD"),
+		DemoTargetURL:          strings.TrimSpace(getenv("DEMO_TARGET_URL")),
+		TargetCredentialsKey:   strings.TrimSpace(getenv("TARGET_CREDENTIALS_KEY")),
 	}
 	if cfg.ListenAddr == "" {
 		cfg.ListenAddr = ":8080"
@@ -50,6 +56,9 @@ func load(getenv func(string) string) (Config, error) {
 			errs = append(errs, fmt.Errorf("SEED_DEMO_DATA must be true or false, got %q", raw))
 		}
 		cfg.SeedDemoData = v
+	}
+	if cfg.TargetCredentialsKey == "" {
+		errs = append(errs, errors.New("TARGET_CREDENTIALS_KEY is required (generate one with: openssl rand -base64 32)"))
 	}
 	if cfg.SeedDemoData && cfg.SeedDemoPassword == "" {
 		errs = append(errs, errors.New("SEED_DEMO_PASSWORD is required when SEED_DEMO_DATA=true"))

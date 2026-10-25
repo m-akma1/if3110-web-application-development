@@ -7,9 +7,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"dbplatform/app/internal/authn"
+	"dbplatform/app/internal/dbmanager"
 	"dbplatform/app/internal/groups"
+	"dbplatform/app/internal/rbac"
 )
 
 // ErrNoAdminConfigured means the platform has no active admin and BOOTSTRAP_ADMIN_* is not set.
@@ -72,12 +75,13 @@ type DemoGroup struct {
 	Description string
 	InviteCode  string
 	Members     []string // usernames from DemoUsers
+	DemoGrant   string   // level on the demo target database (see SeedDemoTarget)
 }
 
 // DemoGroups are created by SeedDemo when a groups repository is given.
 var DemoGroups = []DemoGroup{
-	{Name: "Engineers", Description: "Demo: tim yang boleh membuat dan menjalankan migrasi.", InviteCode: "ENGINEERS-DEMO", Members: []string{"akmal"}},
-	{Name: "Analysts", Description: "Demo: tim yang hanya melihat schema dan data.", InviteCode: "ANALYSTS-DEMO", Members: []string{"dzaki"}},
+	{Name: "Engineers", Description: "Demo: tim yang boleh membuat dan menjalankan migrasi.", InviteCode: "ENGINEERS-DEMO", Members: []string{"akmal"}, DemoGrant: "VIEW_EDIT"},
+	{Name: "Analysts", Description: "Demo: tim yang hanya melihat schema dan data.", InviteCode: "ANALYSTS-DEMO", Members: []string{"dzaki"}, DemoGrant: "VIEW_ONLY"},
 }
 
 // SeedDemo inserts demo data that does not exist yet and returns what it created.
@@ -129,4 +133,50 @@ func SeedDemo(ctx context.Context, store *authn.SessionStore, groupRepo *groups.
 		}
 	}
 	return created, nil
+}
+
+// DemoTargetName is the display name of the bundled demo database.
+const DemoTargetName = "PostgreSQL Demo"
+
+// SeedDemoTarget registers the demo database from DEMO_TARGET_URL (once, insert-only) and gives the
+// demo groups their DemoGrant on it. If a target with DemoTargetName already exists, nothing changes,
+// so an admin's edits, grant changes or deletion of the demo groups are never undone.
+func SeedDemoTarget(ctx context.Context, targets *dbmanager.Manager, grants *rbac.PostgresGrantStore, groupRepo *groups.Repository, demoURL string) (bool, error) {
+	if demoURL == "" {
+		return false, nil
+	}
+	in, err := dbmanager.TargetInputFromURL(DemoTargetName, demoURL)
+	if err != nil {
+		return false, fmt.Errorf("bootstrap: DEMO_TARGET_URL: %w", err)
+	}
+	existing, err := targets.List(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, t := range existing {
+		if strings.EqualFold(t.Name, DemoTargetName) {
+			return false, nil
+		}
+	}
+
+	t, err := targets.Create(ctx, in)
+	if err != nil {
+		return false, fmt.Errorf("bootstrap: register demo target: %w", err)
+	}
+	for _, dg := range DemoGroups {
+		if dg.DemoGrant == "" {
+			continue
+		}
+		g, err := groupRepo.GetByName(ctx, dg.Name)
+		if errors.Is(err, groups.ErrGroupNotFound) {
+			continue
+		}
+		if err != nil {
+			return true, err
+		}
+		if _, err := grants.SetGroupGrant(ctx, g.ID, t.ID, rbac.AccessLevel(dg.DemoGrant)); err != nil {
+			return true, fmt.Errorf("bootstrap: grant %s on demo target: %w", dg.Name, err)
+		}
+	}
+	return true, nil
 }
