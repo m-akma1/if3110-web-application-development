@@ -7,7 +7,9 @@ import (
 
 	"dbplatform/app/internal/authn"
 	"dbplatform/app/internal/bootstrap"
+	"dbplatform/app/internal/dbmanager"
 	"dbplatform/app/internal/groups"
+	"dbplatform/app/internal/rbac"
 	"dbplatform/app/internal/testutil"
 )
 
@@ -113,5 +115,59 @@ func TestSeedDemo_Groups_Integration(t *testing.T) {
 	eng, _ = repo.Get(ctx, eng.ID)
 	if eng.MemberCount != 0 {
 		t.Fatalf("seed ulang tidak boleh mengembalikan keanggotaan yang dihapus admin, anggota: %d", eng.MemberCount)
+	}
+}
+
+func TestSeedDemoTarget_Integration(t *testing.T) {
+	db := testutil.NewPlatformDB(t)
+	ctx := context.Background()
+	store := authn.NewPostgresSessionStore(db, authn.DefaultSessionConfig())
+	repo := groups.NewRepository(db)
+	grants := rbac.NewPostgresGrantStore(db)
+	cipher, _ := dbmanager.NewCredentialCipher(testutil.CredentialsKey(t))
+	reg := dbmanager.NewConnectionRegistry()
+	t.Cleanup(reg.Close)
+	targets := dbmanager.NewManager(dbmanager.NewTargetRepository(db), cipher, reg)
+
+	if _, err := bootstrap.SeedDemo(ctx, store, repo, bootstrap.DemoConfig{Password: "DemoPassword123"}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := bootstrap.SeedDemoTarget(ctx, targets, grants, repo, testutil.TestDatabaseURL(t))
+	if err != nil || !created {
+		t.Fatalf("database demo seharusnya didaftarkan: %v, %v", created, err)
+	}
+	list, _ := targets.List(ctx)
+	if len(list) != 1 || list[0].Name != bootstrap.DemoTargetName || list[0].Status != dbmanager.StatusConnected {
+		t.Fatalf("target demo seharusnya terdaftar dan terhubung: %+v", list)
+	}
+
+	authz := rbac.NewAuthorizer(grants)
+	akmal, _ := store.GetUserByUsername(ctx, "akmal")
+	dzaki, _ := store.GetUserByUsername(ctx, "dzaki")
+	if lvl, _ := authz.EffectiveLevel(ctx, akmal.ID, list[0].ID); lvl != rbac.AccessViewEdit {
+		t.Fatalf("akmal (Engineers) seharusnya VIEW_EDIT, dapat %s", lvl)
+	}
+	if lvl, _ := authz.EffectiveLevel(ctx, dzaki.ID, list[0].ID); lvl != rbac.AccessViewOnly {
+		t.Fatalf("dzaki (Analysts) seharusnya VIEW_ONLY, dapat %s", lvl)
+	}
+
+	// Admin removes the Engineers grant; restarting must not bring it back.
+	eng, _ := repo.GetByName(ctx, "Engineers")
+	if _, err := grants.SetGroupGrant(ctx, eng.ID, list[0].ID, rbac.AccessNone); err != nil {
+		t.Fatal(err)
+	}
+	created, err = bootstrap.SeedDemoTarget(ctx, targets, grants, repo, testutil.TestDatabaseURL(t))
+	if err != nil || created {
+		t.Fatalf("seed ulang tidak boleh membuat apa pun: %v, %v", created, err)
+	}
+	if lvl, _ := authz.EffectiveLevel(ctx, akmal.ID, list[0].ID); lvl != rbac.AccessNone {
+		t.Fatalf("grant yang dihapus admin tidak boleh kembali, dapat %s", lvl)
+	}
+
+	if _, err := bootstrap.SeedDemoTarget(ctx, targets, grants, repo, "bukan-url"); err == nil {
+		t.Fatalf("URL tidak valid seharusnya ditolak")
+	}
+	if created, err := bootstrap.SeedDemoTarget(ctx, targets, grants, repo, ""); err != nil || created {
+		t.Fatalf("URL kosong berarti tidak ada database demo: %v, %v", created, err)
 	}
 }

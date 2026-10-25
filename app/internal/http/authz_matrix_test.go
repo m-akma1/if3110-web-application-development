@@ -123,9 +123,9 @@ func TestAdminRoutes_ForbiddenForUsers_Integration(t *testing.T) {
 	if code := c.get("/admin").Code; code != http.StatusForbidden {
 		t.Errorf("GET /admin oleh USER: status %d, ingin 403", code)
 	}
-	rec := c.post("/admin/users/role", url.Values{"user_id": {userID(t, env.srv, "dhia")}, "role": {authn.RolePlatformAdmin}})
+	rec := c.post("/admin/users/"+userID(t, env.srv, "dhia")+"/role", url.Values{"role": {authn.RolePlatformAdmin}})
 	if rec.Code != http.StatusForbidden {
-		t.Errorf("POST /admin/users/role oleh USER: status %d, ingin 403", rec.Code)
+		t.Errorf("POST /admin/users/{id}/role oleh USER: status %d, ingin 403", rec.Code)
 	}
 	u, _ := env.sessions.GetUserByUsername(context.Background(), "dhia")
 	if u.Role != authn.RoleUser {

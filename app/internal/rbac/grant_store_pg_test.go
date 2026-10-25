@@ -2,6 +2,7 @@ package rbac_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"dbplatform/app/internal/accesstest"
@@ -68,5 +69,55 @@ func TestAuthorizer_Postgres_Integration(t *testing.T) {
 	}
 	if lvl, _ := az.EffectiveLevel(ctx, alice.ID, shared); lvl != rbac.AccessNone {
 		t.Fatalf("grant ke database yang dihapus seharusnya hilang, dapat %s", lvl)
+	}
+}
+
+func TestRaises(t *testing.T) {
+	cases := []struct {
+		old, new rbac.AccessLevel
+		want     bool
+	}{
+		{rbac.AccessNone, rbac.AccessViewOnly, true},
+		{rbac.AccessViewOnly, rbac.AccessViewEdit, true},
+		{rbac.AccessViewEdit, rbac.AccessViewOnly, false},
+		{rbac.AccessViewOnly, rbac.AccessViewOnly, false},
+		{rbac.AccessViewOnly, rbac.AccessNone, false},
+	}
+	for _, c := range cases {
+		if got := rbac.Raises(c.old, c.new); got != c.want {
+			t.Errorf("Raises(%s, %s) = %v", c.old, c.new, got)
+		}
+	}
+}
+
+func TestSetGroupGrant_Integration(t *testing.T) {
+	db := testutil.NewPlatformDB(t)
+	ctx := context.Background()
+	store := rbac.NewPostgresGrantStore(db)
+	gr := groups.NewRepository(db)
+	g, _ := gr.Create(ctx, "Ops", "")
+	target := accesstest.InsertTarget(t, db, "ops-db")
+
+	prev, err := store.SetGroupGrant(ctx, g.ID, target, rbac.AccessViewOnly)
+	if err != nil || prev != rbac.AccessNone {
+		t.Fatalf("grant pertama: prev=%s err=%v", prev, err)
+	}
+	prev, _ = store.SetGroupGrant(ctx, g.ID, target, rbac.AccessViewEdit)
+	if prev != rbac.AccessViewOnly {
+		t.Fatalf("level sebelumnya seharusnya VIEW_ONLY, dapat %s", prev)
+	}
+	all, _ := store.ListGrants(ctx)
+	if len(all) != 1 || all[0].Level != rbac.AccessViewEdit {
+		t.Fatalf("ListGrants salah: %+v", all)
+	}
+	prev, _ = store.SetGroupGrant(ctx, g.ID, target, rbac.AccessNone)
+	if all, _ := store.ListGrants(ctx); prev != rbac.AccessViewEdit || len(all) != 0 {
+		t.Fatalf("NONE seharusnya menghapus grant: prev=%s, sisa=%+v", prev, all)
+	}
+	if _, err := store.SetGroupGrant(ctx, g.ID, "00000000-0000-0000-0000-00000000beef", rbac.AccessViewOnly); !errors.Is(err, rbac.ErrUnknownGrantTarget) {
+		t.Fatalf("database tidak dikenal seharusnya ErrUnknownGrantTarget, dapat %v", err)
+	}
+	if _, err := store.SetGroupGrant(ctx, "bukan-uuid", target, rbac.AccessViewOnly); !errors.Is(err, rbac.ErrUnknownGrantTarget) {
+		t.Fatalf("group id tidak valid seharusnya ErrUnknownGrantTarget, dapat %v", err)
 	}
 }

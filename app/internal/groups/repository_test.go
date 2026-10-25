@@ -101,3 +101,67 @@ func TestRepository_Integration(t *testing.T) {
 		t.Fatalf("MemberGroupsByUser salah: %+v, %v", byUser, err)
 	}
 }
+
+func TestRepository_Management_Integration(t *testing.T) {
+	db := testutil.NewPlatformDB(t)
+	ctx := context.Background()
+	store := authn.NewPostgresSessionStore(db, authn.DefaultSessionConfig())
+	repo := groups.NewRepository(db)
+	u, _ := store.RegisterUser(ctx, authn.RegisterInput{Username: "anggota", Password: "PasswordAnggota1"})
+
+	g, _ := repo.Create(ctx, "Data", "lama")
+	other, _ := repo.Create(ctx, "Other", "")
+	if err := repo.Rename(ctx, g.ID, "Data Team", "baru"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := repo.Get(ctx, g.ID); got.Name != "Data Team" || got.Description != "baru" {
+		t.Fatalf("rename tidak tersimpan: %+v", got)
+	}
+	if err := repo.Rename(ctx, g.ID, "other", ""); !errors.Is(err, groups.ErrGroupNameTaken) {
+		t.Fatalf("rename ke nama yang dipakai seharusnya ditolak, dapat %v", err)
+	}
+	if err := repo.Rename(ctx, groups.PublicGroupID, "Semua", ""); !errors.Is(err, groups.ErrSystemGroup) {
+		t.Fatalf("nama Public tidak boleh diubah, dapat %v", err)
+	}
+	if err := repo.Rename(ctx, groups.PublicGroupID, "Public", "deskripsi baru"); err != nil {
+		t.Fatalf("deskripsi Public boleh diubah: %v", err)
+	}
+
+	_ = repo.AddMember(ctx, g.ID, u.ID)
+	if ids, _ := repo.MemberIDs(ctx, g.ID); len(ids) != 1 || ids[0] != u.ID {
+		t.Fatalf("MemberIDs salah: %v", ids)
+	}
+	if err := repo.RemoveMember(ctx, groups.PublicGroupID, u.ID); !errors.Is(err, groups.ErrSystemGroup) {
+		t.Fatalf("keanggotaan Public tidak boleh dihapus, dapat %v", err)
+	}
+	if err := repo.RemoveMember(ctx, g.ID, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if ids, _ := repo.MemberIDs(ctx, g.ID); len(ids) != 0 {
+		t.Fatalf("anggota seharusnya sudah keluar: %v", ids)
+	}
+
+	if _, err := repo.CreateInviteCode(ctx, "DATA-CODE", g.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetInviteCodeActive(ctx, "data-code", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ResolveInviteCode(ctx, "DATA-CODE"); !errors.Is(err, groups.ErrInvalidInviteCode) {
+		t.Fatalf("kode nonaktif tidak boleh dipakai, dapat %v", err)
+	}
+	if err := repo.SetInviteCodeActive(ctx, "TIDAK-ADA", true); !errors.Is(err, groups.ErrInvalidInviteCode) {
+		t.Fatalf("kode tidak dikenal seharusnya ditolak, dapat %v", err)
+	}
+
+	if err := repo.Delete(ctx, groups.PublicGroupID); !errors.Is(err, groups.ErrSystemGroup) {
+		t.Fatalf("Public tidak boleh dihapus, dapat %v", err)
+	}
+	if err := repo.Delete(ctx, g.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ResolveInviteCode(ctx, "DATA-CODE"); !errors.Is(err, groups.ErrInvalidInviteCode) {
+		t.Fatalf("kode undangan ikut terhapus bersama group")
+	}
+	_ = other
+}

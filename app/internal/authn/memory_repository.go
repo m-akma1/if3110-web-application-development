@@ -143,6 +143,30 @@ func (m *MemoryRepository) UpdateUserRole(_ context.Context, userID string, role
 	return nil
 }
 
+func (m *MemoryRepository) UpdatePasswordHash(_ context.Context, userID string, passwordHash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	u, ok := m.users[userID]
+	if !ok {
+		return ErrUserNotFound
+	}
+	u.PasswordHash = passwordHash
+	return nil
+}
+
+func (m *MemoryRepository) MarkSessionsForRotation(_ context.Context, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, s := range m.sessions {
+		if s.UserID == userID && !s.IsRevoked {
+			s.LastRotatedAt = time.Unix(0, 0).UTC()
+		}
+	}
+	return nil
+}
+
 func (m *MemoryRepository) CreateSession(_ context.Context, session *Session) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -109,14 +109,14 @@ func TestAdminPage_ListsGroupsAndChangesRole_Integration(t *testing.T) {
 	}
 
 	dhiaID := userID(t, env.srv, "dhia")
-	rec := admin.post("/admin/users/role", url.Values{"user_id": {dhiaID}, "role": {authn.RolePlatformAdmin}})
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "berhasil diperbarui") {
+	rec := admin.post("/admin/users/"+dhiaID+"/role", url.Values{"role": {authn.RolePlatformAdmin}})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Role diperbarui") {
 		t.Fatalf("ubah role gagal: %d %s", rec.Code, rec.Body.String())
 	}
 	if u, _ := env.sessions.GetUserByUsername(ctx, "dhia"); u.Role != authn.RolePlatformAdmin {
 		t.Fatalf("role dhia seharusnya PLATFORM_ADMIN, dapat %s", u.Role)
 	}
-	rec = admin.post("/admin/users/role", url.Values{"user_id": {dhiaID}, "role": {"ROOT"}})
+	rec = admin.post("/admin/users/"+dhiaID+"/role", url.Values{"role": {"ROOT"}})
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("role tidak valid seharusnya 422, dapat %d", rec.Code)
 	}

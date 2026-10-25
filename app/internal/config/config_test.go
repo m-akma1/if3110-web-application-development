@@ -18,9 +18,10 @@ func TestLoad_RequiresDatabaseURL(t *testing.T) {
 
 func TestLoad_DefaultsAndSeed(t *testing.T) {
 	cfg, err := load(envOf(map[string]string{
-		"DATABASE_URL":       "postgres://x",
-		"SEED_DEMO_DATA":     "true",
-		"SEED_DEMO_PASSWORD": "DemoPassword123!",
+		"DATABASE_URL":           "postgres://x",
+		"SEED_DEMO_DATA":         "true",
+		"SEED_DEMO_PASSWORD":     "DemoPassword123!",
+		"TARGET_CREDENTIALS_KEY": "a2V5",
 	}))
 	if err != nil {
 		t.Fatalf("konfigurasi valid seharusnya lolos: %v", err)
@@ -41,5 +42,12 @@ func TestLoad_InvalidBool(t *testing.T) {
 	_, err := load(envOf(map[string]string{"DATABASE_URL": "postgres://x", "SEED_DEMO_DATA": "maybe"}))
 	if err == nil || !strings.Contains(err.Error(), "SEED_DEMO_DATA") {
 		t.Fatalf("nilai boolean tidak valid seharusnya gagal, dapat: %v", err)
+	}
+}
+
+func TestLoad_RequiresCredentialsKey(t *testing.T) {
+	_, err := load(envOf(map[string]string{"DATABASE_URL": "postgres://x"}))
+	if err == nil || !strings.Contains(err.Error(), "TARGET_CREDENTIALS_KEY") {
+		t.Fatalf("tanpa TARGET_CREDENTIALS_KEY seharusnya gagal, dapat: %v", err)
 	}
 }

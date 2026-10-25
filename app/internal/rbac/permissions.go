@@ -52,6 +52,11 @@ func rank(l AccessLevel) int {
 	}
 }
 
+// Raises reports whether moving from old to new grants more access (used to rotate sessions).
+func Raises(old, new AccessLevel) bool {
+	return rank(new) > rank(old)
+}
+
 // Max returns the more permissive of two levels.
 func Max(a, b AccessLevel) AccessLevel {
 	if rank(b) > rank(a) {

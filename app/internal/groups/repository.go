@@ -295,3 +295,82 @@ func RandomCode() string {
 	}
 	return string(out)
 }
+
+// Rename changes a group's name and description. System groups keep their name.
+func (r *Repository) Rename(ctx context.Context, groupID, name, description string) error {
+	g, err := r.Get(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	name = strings.TrimSpace(name)
+	if g.IsSystem && name != g.Name {
+		return ErrSystemGroup
+	}
+	if n := len([]rune(name)); n < 2 || n > 64 {
+		return ErrInvalidGroupName
+	}
+	_, err = r.db.ExecContext(ctx, `UPDATE groups SET name = $2, description = $3 WHERE id = $1`,
+		groupID, name, strings.TrimSpace(description))
+	if isUniqueViolation(err, "groups_name_key") {
+		return ErrGroupNameTaken
+	}
+	return err
+}
+
+// Delete removes a non-system group with its memberships, grants and invite codes.
+func (r *Repository) Delete(ctx context.Context, groupID string) error {
+	g, err := r.Get(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if g.IsSystem {
+		return ErrSystemGroup
+	}
+	_, err = r.db.ExecContext(ctx, `DELETE FROM groups WHERE id = $1`, groupID)
+	return err
+}
+
+// RemoveMember removes a user from a group. Public membership cannot be removed.
+func (r *Repository) RemoveMember(ctx context.Context, groupID, userID string) error {
+	if groupID == PublicGroupID {
+		return ErrSystemGroup
+	}
+	if !ids.IsValid(groupID) || !ids.IsValid(userID) {
+		return ErrGroupNotFound
+	}
+	_, err := r.db.ExecContext(ctx, `DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`, groupID, userID)
+	return err
+}
+
+// MemberIDs returns the ids of every member of a group.
+func (r *Repository) MemberIDs(ctx context.Context, groupID string) ([]string, error) {
+	if !ids.IsValid(groupID) {
+		return nil, ErrGroupNotFound
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT user_id FROM group_members WHERE group_id = $1`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// SetInviteCodeActive enables or disables an invite code.
+func (r *Repository) SetInviteCodeActive(ctx context.Context, code string, active bool) error {
+	res, err := r.db.ExecContext(ctx, `UPDATE invite_codes SET is_active = $2 WHERE code = $1`, NormalizeCode(code), active)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrInvalidInviteCode
+	}
+	return nil
+}

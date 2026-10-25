@@ -22,6 +22,7 @@ type Repository interface {
 	CountActiveAdmins(ctx context.Context) (int, error)
 	SetUserActiveStatus(ctx context.Context, userID string, isActive bool) error
 	UpdateUserRole(ctx context.Context, userID string, role string) error
+	UpdatePasswordHash(ctx context.Context, userID string, passwordHash string) error
 
 	// Operasi Siklus Hidup Sesi
 	CreateSession(ctx context.Context, session *Session) error
@@ -38,6 +39,8 @@ type Repository interface {
 	) (bool, error)
 	RevokeByTokenHash(ctx context.Context, tokenHash string) error
 	RevokeAllUserSessions(ctx context.Context, userID string) error
+	// MarkSessionsForRotation makes every live session of the user rotate on its next request.
+	MarkSessionsForRotation(ctx context.Context, userID string) error
 }
 
 // PostgresRepository adalah implementasi Repository di atas PostgreSQL Internal (production).
@@ -152,6 +155,10 @@ func (r *PostgresRepository) UpdateUserRole(ctx context.Context, userID string, 
 		return err
 	}
 	return r.updateUser(ctx, `UPDATE users SET role = $2, updated_at = NOW() WHERE id = $1`, userID, role)
+}
+
+func (r *PostgresRepository) UpdatePasswordHash(ctx context.Context, userID string, passwordHash string) error {
+	return r.updateUser(ctx, `UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1`, userID, passwordHash)
 }
 
 func (r *PostgresRepository) updateUser(ctx context.Context, query, userID string, value any) error {
@@ -295,5 +302,17 @@ func (r *PostgresRepository) RevokeAllUserSessions(ctx context.Context, userID s
 		WHERE user_id = $1
 	`
 	_, err := r.db.ExecContext(ctx, query, userID)
+	return err
+}
+
+// MarkSessionsForRotation sets last_rotated_at far in the past, so ValidateAndRefresh rotates the
+// session identifier on the next request (rotation on privilege increase).
+func (r *PostgresRepository) MarkSessionsForRotation(ctx context.Context, userID string) error {
+	if !ids.IsValid(userID) {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE sessions SET last_rotated_at = 'epoch'
+		WHERE user_id = $1 AND is_revoked = FALSE`, userID)
 	return err
 }
