@@ -54,18 +54,18 @@ func TestSignupJoinsGroups_AndNavbarShowsAccess_Integration(t *testing.T) {
 		t.Fatalf("bob seharusnya melihat database dengan akses View + Edit dan menu Migration")
 	}
 	mig := bob.get("/migration").Body.String()
-	if !strings.Contains(mig, `name="db_id"`) || !strings.Contains(mig, "Terapkan Migrasi") {
-		t.Fatalf("editor seharusnya melihat form migrasi dengan db_id")
+	if !strings.Contains(mig, `name="db_id"`) || !strings.Contains(mig, "Simpan Draft") {
+		t.Fatalf("editor seharusnya melihat form draft migrasi dengan db_id")
 	}
 
 	// 3. Grant downgraded to VIEW_ONLY: effective immediately, the editor disappears.
 	accesstest.Grant(t, env.db, eng.ID, target, "VIEW_ONLY")
 	mig = bob.get("/migration").Body.String()
-	if strings.Contains(mig, "Terapkan Migrasi") || !strings.Contains(mig, "View Only") {
-		t.Fatalf("setelah grant diturunkan, tombol migrasi harus hilang")
+	if strings.Contains(mig, "Simpan Draft") || !strings.Contains(mig, "View Only") {
+		t.Fatalf("setelah grant diturunkan, editor migrasi harus hilang")
 	}
-	if code := bob.post("/migration/apply", url.Values{"db_id": {target}, "sql_script": {"SELECT 1"}}).Code; code != http.StatusForbidden {
-		t.Fatalf("apply setelah grant diturunkan: status %d, ingin 403", code)
+	if code := bob.post("/migration/drafts", url.Values{"db_id": {target}, "name": {"x"}, "sql_script": {"SELECT 1"}}).Code; code != http.StatusForbidden {
+		t.Fatalf("membuat draft setelah grant diturunkan: status %d, ingin 403", code)
 	}
 
 	// 4. /api/auth/me reports groups and effective access.
