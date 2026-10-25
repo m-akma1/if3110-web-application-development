@@ -3,7 +3,9 @@ package testutil
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"os"
@@ -94,4 +96,14 @@ func withSearchPath(dsn, schema string) (string, error) {
 	q.Set("search_path", schema)
 	u.RawQuery = q.Encode()
 	return u.String(), nil
+}
+
+// CredentialsKey returns a random TARGET_CREDENTIALS_KEY for a test.
+func CredentialsKey(t testing.TB) string {
+	t.Helper()
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(b)
 }

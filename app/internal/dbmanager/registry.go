@@ -36,6 +36,42 @@ func (r *ConnectionRegistry) RegisterPool(dbID string, db *sql.DB) {
 	r.pools[dbID] = db
 }
 
+// Replace registers db under dbID and closes the pool it replaces, if any.
+func (r *ConnectionRegistry) Replace(dbID string, db *sql.DB) {
+	if dbID == "" || db == nil {
+		return
+	}
+	r.mu.Lock()
+	old := r.pools[dbID]
+	r.pools[dbID] = db
+	r.mu.Unlock()
+	if old != nil && old != db {
+		_ = old.Close()
+	}
+}
+
+// Remove unregisters and closes the pool for dbID.
+func (r *ConnectionRegistry) Remove(dbID string) {
+	r.mu.Lock()
+	old := r.pools[dbID]
+	delete(r.pools, dbID)
+	r.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+}
+
+// Close closes every pool (on shutdown).
+func (r *ConnectionRegistry) Close() {
+	r.mu.Lock()
+	pools := r.pools
+	r.pools = make(map[string]*sql.DB)
+	r.mu.Unlock()
+	for _, p := range pools {
+		_ = p.Close()
+	}
+}
+
 func (r *ConnectionRegistry) GetPool(dbID string) (*sql.DB, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
