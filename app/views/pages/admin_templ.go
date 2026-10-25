@@ -55,7 +55,7 @@ func Admin(
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\" x-data=\"{ activeTab: 'databases' }\"><!-- Header --><div class=\"flex flex-wrap items-center justify-between gap-4\"><div><h1 class=\"text-2xl font-bold text-white tracking-tight\">Platform Administration</h1><p class=\"text-slate-400 mt-1 text-xs\">Kelola kode undangan database, koneksi target database, serta berikan hak akses kepada masing-masing pengguna.</p></div><div class=\"px-3 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs text-blue-400 flex items-center gap-2\"><span class=\"font-semibold\">Owner Passcode:</span> <code class=\"font-mono font-bold text-white\">OWNER-SECRET-2026</code></div></div><!-- Tab Navigation --><div class=\"flex gap-2 border-b border-slate-700/80 pb-3\"><button type=\"button\" @click=\"activeTab = 'databases'\" :class=\"activeTab === 'databases' ? 'bg-blue-600 text-white font-semibold shadow' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'\" class=\"px-4 py-2 rounded-lg text-xs transition cursor-pointer\">Kode Akses &amp; Target Databases</button> <button type=\"button\" @click=\"activeTab = 'users'\" :class=\"activeTab === 'users' ? 'bg-blue-600 text-white font-semibold shadow' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'\" class=\"px-4 py-2 rounded-lg text-xs transition cursor-pointer flex items-center gap-2\"><span>Pengguna &amp; Pemberian Hak Akses</span> <span class=\"px-1.5 py-0.5 rounded bg-slate-800 text-slate-200 text-[10px] font-mono\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"space-y-6\" x-data=\"{ activeTab: 'databases' }\"><!-- Header --><div class=\"flex flex-wrap items-center justify-between gap-4\"><div><h1 class=\"text-2xl font-bold text-white tracking-tight\">Platform Administration</h1><p class=\"text-zinc-400 mt-1 text-xs\">Kelola kode undangan database, koneksi target database, serta berikan hak akses kepada masing-masing pengguna.</p></div><div class=\"px-3 py-1.5 rounded-lg bg-[#ceafa3]/10 border border-[#ceafa3]/20 text-xs text-[#ceafa3] flex items-center gap-2\"><span class=\"font-semibold\">Owner Passcode:</span> <code class=\"font-mono font-bold text-white\">OWNER-SECRET-2026</code></div></div><!-- Tab Navigation --><div class=\"flex gap-2 border-b border-[#333138] pb-3\"><button type=\"button\" @click=\"activeTab = 'databases'\" :class=\"activeTab === 'databases' ? 'bg-[#ceafa3] text-[#121212] font-bold' : 'text-zinc-400 hover:bg-[#252429] hover:text-zinc-200'\" class=\"px-4 py-2 rounded-xl text-xs transition cursor-pointer\">Kode Akses &amp; Target Databases</button> <button type=\"button\" @click=\"activeTab = 'users'\" :class=\"activeTab === 'users' ? 'bg-[#ceafa3] text-[#121212] font-bold' : 'text-zinc-400 hover:bg-[#252429] hover:text-zinc-200'\" class=\"px-4 py-2 rounded-xl text-xs transition cursor-pointer flex items-center gap-2\"><span>Pengguna &amp; Pemberian Hak Akses</span> <span class=\"px-1.5 py-0.5 rounded bg-[#2c2a30] text-zinc-200 text-[10px] font-mono\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -76,32 +76,32 @@ func Admin(
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<!-- Form Tambah DB Instance Card --><div class=\"bg-slate-800/80 border border-slate-700/60 rounded-xl p-6 space-y-4 shadow-xl\"><h3 class=\"text-xs font-bold text-slate-300 uppercase tracking-wider\">Daftarkan Instance Database Baru</h3><form id=\"add-db-form\" hx-post=\"/admin/db/add\" hx-target=\"#admin-feedback\" hx-swap=\"innerHTML\" class=\"grid grid-cols-1 md:grid-cols-3 gap-4\"><div><label class=\"block text-xs font-medium text-slate-300 mb-1\">Nama Tampilan</label> <input type=\"text\" name=\"name\" required placeholder=\"e.g. Postgres Staging\" class=\"w-full px-3 py-2 bg-slate-900/90 border border-slate-700 rounded-lg text-xs text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none\"></div><div><label class=\"block text-xs font-medium text-slate-300 mb-1\">DBMS</label> <select name=\"dbms\" class=\"w-full px-3 py-2 bg-slate-900/90 border border-slate-700 rounded-lg text-xs text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none\"><option value=\"POSTGRESQL\">PostgreSQL</option> <option value=\"MYSQL\">MySQL</option> <option value=\"MARIADB\">MariaDB</option></select></div><div><label class=\"block text-xs font-medium text-slate-300 mb-1\">Host / IP</label> <input type=\"text\" name=\"host\" required placeholder=\"localhost\" class=\"w-full px-3 py-2 bg-slate-900/90 border border-slate-700 rounded-lg text-xs text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none\"></div><div><label class=\"block text-xs font-medium text-slate-300 mb-1\">Port</label> <input type=\"number\" name=\"port\" value=\"5432\" class=\"w-full px-3 py-2 bg-slate-900/90 border border-slate-700 rounded-lg text-xs text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none\"></div><div><label class=\"block text-xs font-medium text-slate-300 mb-1\">Nama Database Target</label> <input type=\"text\" name=\"db_name\" required placeholder=\"app_db\" class=\"w-full px-3 py-2 bg-slate-900/90 border border-slate-700 rounded-lg text-xs text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none\"></div><div class=\"flex items-end\"><button type=\"submit\" class=\"w-full py-2 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition shadow-md cursor-pointer\">+ Uji &amp; Simpan Koneksi</button></div></form></div><div id=\"admin-feedback\"></div><!-- Tabel Daftar Database --><div class=\"bg-slate-800/80 border border-slate-700/60 rounded-xl overflow-hidden shadow-xl\"><div class=\"px-4 py-3 bg-slate-900/90 border-b border-slate-700 flex items-center justify-between\"><span class=\"text-xs font-bold text-white uppercase tracking-wider\">Daftar Instance Database Terdaftar</span> <span class=\"text-[10px] text-slate-400\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<!-- Form Tambah DB Instance Card --><div class=\"bg-[#222126] border border-[#333138] rounded-2xl p-6 space-y-4 shadow-xl\"><h3 class=\"text-xs font-bold text-zinc-300 uppercase tracking-wider\">Daftarkan Instance Database Baru</h3><form id=\"add-db-form\" hx-post=\"/admin/db/add\" hx-target=\"#admin-feedback\" hx-swap=\"innerHTML\" class=\"grid grid-cols-1 md:grid-cols-3 gap-4\"><div><label class=\"block text-xs font-medium text-zinc-300 mb-1\">Nama Tampilan</label> <input type=\"text\" name=\"name\" required placeholder=\"e.g. Postgres Staging\" class=\"w-full px-3 py-2 bg-[#18171b] border border-[#333138] rounded-xl text-xs text-white focus:ring-2 focus:ring-[#ceafa3]/50 focus:border-[#ceafa3] focus:outline-none\"></div><div><label class=\"block text-xs font-medium text-zinc-300 mb-1\">DBMS</label> <select name=\"dbms\" class=\"w-full px-3 py-2 bg-[#18171b] border border-[#333138] rounded-xl text-xs text-white focus:ring-2 focus:ring-[#ceafa3]/50 focus:border-[#ceafa3] focus:outline-none\"><option value=\"POSTGRESQL\">PostgreSQL</option> <option value=\"MYSQL\">MySQL</option> <option value=\"MARIADB\">MariaDB</option></select></div><div><label class=\"block text-xs font-medium text-zinc-300 mb-1\">Host / IP</label> <input type=\"text\" name=\"host\" required placeholder=\"localhost\" class=\"w-full px-3 py-2 bg-[#18171b] border border-[#333138] rounded-xl text-xs text-white focus:ring-2 focus:ring-[#ceafa3]/50 focus:border-[#ceafa3] focus:outline-none\"></div><div><label class=\"block text-xs font-medium text-zinc-300 mb-1\">Port</label> <input type=\"number\" name=\"port\" value=\"5432\" class=\"w-full px-3 py-2 bg-[#18171b] border border-[#333138] rounded-xl text-xs text-white focus:ring-2 focus:ring-[#ceafa3]/50 focus:border-[#ceafa3] focus:outline-none\"></div><div><label class=\"block text-xs font-medium text-zinc-300 mb-1\">Nama Database Target</label> <input type=\"text\" name=\"db_name\" required placeholder=\"app_db\" class=\"w-full px-3 py-2 bg-[#18171b] border border-[#333138] rounded-xl text-xs text-white focus:ring-2 focus:ring-[#ceafa3]/50 focus:border-[#ceafa3] focus:outline-none\"></div><div class=\"flex items-end\"><button type=\"submit\" class=\"w-full py-2 px-4 rounded-xl bg-[#ceafa3] hover:bg-[#c2a195] text-[#121212] text-xs font-bold transition shadow-md cursor-pointer\">+ Uji &amp; Simpan Koneksi</button></div></form></div><div id=\"admin-feedback\"></div><!-- Tabel Daftar Database --><div class=\"bg-[#222126] border border-[#333138] rounded-2xl overflow-hidden shadow-xl\"><div class=\"px-4 py-3 bg-[#18171b] border-b border-[#333138] flex items-center justify-between\"><span class=\"text-xs font-bold text-white uppercase tracking-wider\">Daftar Instance Database Terdaftar</span> <span class=\"text-[10px] text-zinc-400\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d Database", len(instances)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 139, Col: 91}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 139, Col: 90}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</span></div><div class=\"overflow-x-auto\"><table class=\"w-full text-left text-sm text-slate-300\"><thead class=\"bg-slate-900/60 text-xs uppercase tracking-wider text-slate-400 border-b border-slate-700\"><tr><th class=\"px-4 py-3 font-semibold\">ID / Kode DB</th><th class=\"px-4 py-3 font-semibold\">Nama Instance</th><th class=\"px-4 py-3 font-semibold\">Kode Tim Default</th><th class=\"px-4 py-3 font-semibold\">DBMS</th><th class=\"px-4 py-3 font-semibold\">Host &amp; Port</th><th class=\"px-4 py-3 font-semibold\">Database Target</th><th class=\"px-4 py-3 font-semibold\">Status</th></tr></thead> <tbody class=\"divide-y divide-slate-700/60\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</span></div><div class=\"overflow-x-auto\"><table class=\"w-full text-left text-sm text-zinc-300\"><thead class=\"bg-[#18171b] text-xs uppercase tracking-wider text-zinc-400 border-b border-[#333138]\"><tr><th class=\"px-4 py-3 font-semibold\">ID / Kode DB</th><th class=\"px-4 py-3 font-semibold\">Nama Instance</th><th class=\"px-4 py-3 font-semibold\">Kode Tim Default</th><th class=\"px-4 py-3 font-semibold\">DBMS</th><th class=\"px-4 py-3 font-semibold\">Host &amp; Port</th><th class=\"px-4 py-3 font-semibold\">Database Target</th><th class=\"px-4 py-3 font-semibold\">Status</th></tr></thead> <tbody class=\"divide-y divide-[#333138]\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, db := range instances {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<tr class=\"hover:bg-slate-700/30 transition\"><td class=\"px-4 py-3 font-mono text-xs text-slate-400\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<tr class=\"hover:bg-[#2c2a30]/50 transition\"><td class=\"px-4 py-3 font-mono text-xs text-zinc-400\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(db.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 157, Col: 72}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 157, Col: 71}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -120,7 +120,7 @@ func Admin(
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</td><td class=\"px-4 py-3\"><span class=\"px-2.5 py-1 rounded-md text-xs font-mono font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</td><td class=\"px-4 py-3\"><span class=\"px-2.5 py-1 rounded-md text-xs font-mono font-bold bg-[#ceafa3]/10 text-[#ceafa3] border border-[#ceafa3]/20\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -133,14 +133,14 @@ func Admin(
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</span></td><td class=\"px-4 py-3 font-mono text-xs text-blue-400\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</span></td><td class=\"px-4 py-3 font-mono text-xs text-[#87d1ff]\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(db.DBMS)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 164, Col: 73}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 164, Col: 74}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
@@ -177,12 +177,12 @@ func Admin(
 					return templ_7745c5c3_Err
 				}
 				if db.Status == "CONNECTED" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<span class=\"px-2.5 py-1 rounded-md text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20\">CONNECTED</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<span class=\"px-2.5 py-1 rounded-md text-[10px] font-bold bg-[#7dff95]/10 text-[#7dff95] border border-[#7dff95]/20\">CONNECTED</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<span class=\"px-2.5 py-1 rounded-md text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/30\">ERROR</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<span class=\"px-2.5 py-1 rounded-md text-[10px] font-bold bg-[#ff8080]/10 text-[#ff8080] border border-[#ff8080]/30\">ERROR</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -235,12 +235,12 @@ func AdminCodesSection(codes []domain.TeamInviteCodeItem, instances []domain.DBI
 			templ_7745c5c3_Var11 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<div id=\"admin-codes-container\" class=\"bg-slate-800/80 border border-slate-700/60 rounded-xl p-6 space-y-5 shadow-xl\"><div class=\"flex flex-wrap items-center justify-between gap-2\"><div><h3 class=\"text-xs font-bold text-white uppercase tracking-wider\">Kode Undangan Database &amp; Tim (Sign Up Codes)</h3><p class=\"text-xs text-slate-400 mt-0.5\">Bagikan kode ini kepada anggota tim saat melakukan Sign Up agar mereka otomatis mendapatkan akses database sesuai grupnya.</p></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<div id=\"admin-codes-container\" class=\"bg-[#222126] border border-[#333138] rounded-2xl p-6 space-y-5 shadow-xl\"><div class=\"flex flex-wrap items-center justify-between gap-2\"><div><h3 class=\"text-xs font-bold text-white uppercase tracking-wider\">Kode Undangan Database &amp; Tim (Sign Up Codes)</h3><p class=\"text-xs text-zinc-400 mt-0.5\">Bagikan kode ini kepada anggota tim saat melakukan Sign Up agar mereka otomatis mendapatkan akses database sesuai grupnya.</p></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if feedbackMsg != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<div class=\"p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium\">✓ ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<div class=\"p-3 rounded-lg bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs font-medium\">✓ ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -263,27 +263,27 @@ func AdminCodesSection(codes []domain.TeamInviteCodeItem, instances []domain.DBI
 			return templ_7745c5c3_Err
 		}
 		for _, item := range codes {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<div class=\"p-4 rounded-xl bg-slate-900/90 border border-slate-700 flex flex-col justify-between space-y-3\" x-data=\"{ copied: false }\"><div class=\"flex items-start justify-between gap-2\"><div><span class=\"text-[10px] uppercase tracking-wider text-slate-400 font-semibold\">Grup: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<div class=\"p-4 rounded-xl bg-[#18171b] border border-[#333138] flex flex-col justify-between space-y-3\" x-data=\"{ copied: false }\"><div class=\"flex items-start justify-between gap-2\"><div><span class=\"text-[10px] uppercase tracking-wider text-zinc-400 font-semibold\">Grup: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var13 string
 			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(item.GroupName)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 217, Col: 109}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 217, Col: 108}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</span><div class=\"text-base font-mono font-bold text-blue-400 mt-0.5\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</span><div class=\"text-base font-mono font-bold text-[#ceafa3] mt-0.5\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var14 string
 			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(item.Code)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 218, Col: 82}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 218, Col: 83}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 			if templ_7745c5c3_Err != nil {
@@ -302,14 +302,14 @@ func AdminCodesSection(codes []domain.TeamInviteCodeItem, instances []domain.DBI
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" class=\"px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-600 text-[10px] font-semibold text-slate-200 transition cursor-pointer\"><span x-show=\"!copied\">Salin Kode</span> <span x-show=\"copied\" x-cloak class=\"text-emerald-400\">Tersalin!</span></button></div><div class=\"pt-2 border-t border-slate-800 flex items-center justify-between text-xs\"><span class=\"text-slate-400 truncate\">DB: <strong class=\"text-slate-200\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" class=\"px-2.5 py-1 rounded-md bg-[#2c2a30] hover:bg-[#252429] border border-[#3f3c45] text-[10px] font-semibold text-zinc-200 transition cursor-pointer\"><span x-show=\"!copied\">Salin Kode</span> <span x-show=\"copied\" x-cloak class=\"text-[#7dff95]\">Tersalin!</span></button></div><div class=\"pt-2 border-t border-[#333138] flex items-center justify-between text-xs\"><span class=\"text-zinc-400 truncate\">DB: <strong class=\"text-zinc-200\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(item.DatabaseName)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 230, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 230, Col: 96}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 			if templ_7745c5c3_Err != nil {
@@ -320,12 +320,12 @@ func AdminCodesSection(codes []domain.TeamInviteCodeItem, instances []domain.DBI
 				return templ_7745c5c3_Err
 			}
 			if item.DefaultAccess == "VIEW_EDIT" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<span class=\"px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20\">VIEW_EDIT</span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<span class=\"px-2 py-0.5 rounded text-[10px] font-bold bg-[#7dff95]/10 text-[#7dff95] border border-[#7dff95]/20\">VIEW_EDIT</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<span class=\"px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20\">VIEW_ONLY</span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<span class=\"px-2 py-0.5 rounded text-[10px] font-bold bg-[#ffbc5e]/10 text-[#ffbc5e] border border-[#ffbc5e]/20\">VIEW_ONLY</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -335,7 +335,7 @@ func AdminCodesSection(codes []domain.TeamInviteCodeItem, instances []domain.DBI
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "</div><!-- Form Buat Kode Undangan Baru --><form hx-post=\"/admin/codes/generate\" hx-target=\"#admin-codes-container\" hx-swap=\"outerHTML\" class=\"pt-4 border-t border-slate-700/60 grid grid-cols-1 md:grid-cols-4 gap-3 items-end\"><div><label class=\"block text-xs font-medium text-slate-300 mb-1\">Kode Undangan Baru</label> <input type=\"text\" name=\"code\" required placeholder=\"e.g. TEAM-DEVOPS\" class=\"w-full px-3 py-2 bg-slate-900/90 border border-slate-700 rounded-lg text-xs font-mono text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none uppercase\"></div><div><label class=\"block text-xs font-medium text-slate-300 mb-1\">Nama Grup / Tim</label> <input type=\"text\" name=\"group_name\" required placeholder=\"e.g. DevOps-Engineers\" class=\"w-full px-3 py-2 bg-slate-900/90 border border-slate-700 rounded-lg text-xs text-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none\"></div><div><label class=\"block text-xs font-medium text-slate-300 mb-1\">Database &amp; Hak Akses Default</label><div class=\"flex gap-2\"><select name=\"database_id\" class=\"w-1/2 px-2.5 py-2 bg-slate-900/90 border border-slate-700 rounded-lg text-xs text-white focus:outline-none\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "</div><!-- Form Buat Kode Undangan Baru --><form hx-post=\"/admin/codes/generate\" hx-target=\"#admin-codes-container\" hx-swap=\"outerHTML\" class=\"pt-4 border-t border-[#333138] grid grid-cols-1 md:grid-cols-4 gap-3 items-end\"><div><label class=\"block text-xs font-medium text-zinc-300 mb-1\">Kode Undangan Baru</label> <input type=\"text\" name=\"code\" required placeholder=\"e.g. TEAM-DEVOPS\" class=\"w-full px-3 py-2 bg-[#18171b] border border-[#333138] rounded-xl text-xs font-mono text-white focus:ring-2 focus:ring-[#ceafa3]/50 focus:border-[#ceafa3] focus:outline-none uppercase\"></div><div><label class=\"block text-xs font-medium text-zinc-300 mb-1\">Nama Grup / Tim</label> <input type=\"text\" name=\"group_name\" required placeholder=\"e.g. DevOps-Engineers\" class=\"w-full px-3 py-2 bg-[#18171b] border border-[#333138] rounded-xl text-xs text-white focus:ring-2 focus:ring-[#ceafa3]/50 focus:border-[#ceafa3] focus:outline-none\"></div><div><label class=\"block text-xs font-medium text-zinc-300 mb-1\">Database &amp; Hak Akses Default</label><div class=\"flex gap-2\"><select name=\"database_id\" class=\"w-1/2 px-2.5 py-2 bg-[#18171b] border border-[#333138] rounded-xl text-xs text-white focus:outline-none\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -371,7 +371,7 @@ func AdminCodesSection(codes []domain.TeamInviteCodeItem, instances []domain.DBI
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</select> <select name=\"default_access\" class=\"w-1/2 px-2.5 py-2 bg-slate-900/90 border border-slate-700 rounded-lg text-xs text-white focus:outline-none\"><option value=\"VIEW_ONLY\">VIEW_ONLY</option> <option value=\"VIEW_EDIT\">VIEW_EDIT</option></select></div></div><div><button type=\"submit\" class=\"w-full py-2 px-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition cursor-pointer\">+ Tambah Kode Tim</button></div></form></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</select> <select name=\"default_access\" class=\"w-1/2 px-2.5 py-2 bg-[#18171b] border border-[#333138] rounded-xl text-xs text-white focus:outline-none\"><option value=\"VIEW_ONLY\">VIEW_ONLY</option> <option value=\"VIEW_EDIT\">VIEW_EDIT</option></select></div></div><div><button type=\"submit\" class=\"w-full py-2 px-4 rounded-xl bg-[#ceafa3] hover:bg-[#c2a195] text-[#121212] text-xs font-bold transition cursor-pointer\">+ Tambah Kode Tim</button></div></form></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -405,7 +405,7 @@ func AdminUsersTable(users []domain.UserManagementItem, feedbackMsg string) temp
 			return templ_7745c5c3_Err
 		}
 		if feedbackMsg != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<div class=\"p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium\">✓ ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<div class=\"p-3.5 rounded-xl bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs font-medium\">✓ ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -423,12 +423,12 @@ func AdminUsersTable(users []domain.UserManagementItem, feedbackMsg string) temp
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<div class=\"bg-slate-800/80 border border-slate-700/60 rounded-xl overflow-hidden shadow-xl\"><div class=\"px-4 py-3 bg-slate-900/90 border-b border-slate-700 flex items-center justify-between\"><span class=\"text-xs font-bold text-white uppercase tracking-wider\">Manajemen Hak Akses Pengguna per Database</span> <span class=\"text-[10px] text-slate-400\">Perubahan langsung diterapkan ke sesi pengguna</span></div><div class=\"overflow-x-auto\"><table class=\"w-full text-left text-xs text-slate-300\"><thead class=\"bg-slate-900/60 uppercase tracking-wider text-slate-400 border-b border-slate-700\"><tr><th class=\"px-4 py-3 font-semibold\">Pengguna (Username &amp; Email)</th><th class=\"px-4 py-3 font-semibold\">Peran Sistem (Role)</th><th class=\"px-4 py-3 font-semibold\">Akses PostgreSQL Utama (db-1)</th><th class=\"px-4 py-3 font-semibold\">Akses MySQL Production (db-2)</th><th class=\"px-4 py-3 font-semibold text-right\">Aksi</th></tr></thead> <tbody class=\"divide-y divide-slate-700/60\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<div class=\"bg-[#222126] border border-[#333138] rounded-2xl overflow-hidden shadow-xl\"><div class=\"px-4 py-3 bg-[#18171b] border-b border-[#333138] flex items-center justify-between\"><span class=\"text-xs font-bold text-white uppercase tracking-wider\">Manajemen Hak Akses Pengguna per Database</span> <span class=\"text-[10px] text-zinc-400\">Perubahan langsung diterapkan ke sesi pengguna</span></div><div class=\"overflow-x-auto\"><table class=\"w-full text-left text-xs text-zinc-300\"><thead class=\"bg-[#18171b] uppercase tracking-wider text-zinc-400 border-b border-[#333138]\"><tr><th class=\"px-4 py-3 font-semibold\">Pengguna (Username &amp; Email)</th><th class=\"px-4 py-3 font-semibold\">Peran Sistem (Role)</th><th class=\"px-4 py-3 font-semibold\">Akses PostgreSQL Utama (db-1)</th><th class=\"px-4 py-3 font-semibold\">Akses MySQL Production (db-2)</th><th class=\"px-4 py-3 font-semibold text-right\">Aksi</th></tr></thead> <tbody class=\"divide-y divide-[#333138]\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, u := range users {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<tr class=\"hover:bg-slate-700/30 transition\"><td class=\"px-4 py-3\"><div class=\"font-bold text-white text-xs\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<tr class=\"hover:bg-[#2c2a30]/50 transition\"><td class=\"px-4 py-3\"><div class=\"font-bold text-white text-xs\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -441,27 +441,27 @@ func AdminUsersTable(users []domain.UserManagementItem, feedbackMsg string) temp
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</div><div class=\"font-mono text-[11px] text-slate-400\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</div><div class=\"font-mono text-[11px] text-zinc-400\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var22 string
 			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(u.Email)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 333, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 333, Col: 67}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</div><div class=\"font-mono text-[10px] text-slate-500 mt-0.5\">ID: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</div><div class=\"font-mono text-[10px] text-zinc-500 mt-0.5\">ID: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(u.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 334, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/admin.templ`, Line: 334, Col: 75}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 			if templ_7745c5c3_Err != nil {
@@ -480,7 +480,7 @@ func AdminUsersTable(users []domain.UserManagementItem, feedbackMsg string) temp
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\"><!-- Role Selector --><div><select name=\"role\" class=\"w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:border-blue-500 focus:outline-none\"><option value=\"USER\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\"><!-- Role Selector --><div><select name=\"role\" class=\"w-full px-2.5 py-1.5 bg-[#18171b] border border-[#333138] rounded-xl text-xs text-white focus:border-[#ceafa3] focus:outline-none\"><option value=\"USER\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -500,7 +500,7 @@ func AdminUsersTable(users []domain.UserManagementItem, feedbackMsg string) temp
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, ">PLATFORM_ADMIN (Owner)</option></select></div><!-- Grant DB 1 --><div><select name=\"access_db_1\" class=\"w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs font-mono text-white focus:border-blue-500 focus:outline-none\"><option value=\"VIEW_EDIT\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, ">PLATFORM_ADMIN (Owner)</option></select></div><!-- Grant DB 1 --><div><select name=\"access_db_1\" class=\"w-full px-2.5 py-1.5 bg-[#18171b] border border-[#333138] rounded-xl text-xs font-mono text-white focus:border-[#ceafa3] focus:outline-none\"><option value=\"VIEW_EDIT\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -530,7 +530,7 @@ func AdminUsersTable(users []domain.UserManagementItem, feedbackMsg string) temp
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, ">NONE (Tanpa Akses)</option></select></div><!-- Grant DB 2 --><div><select name=\"access_db_2\" class=\"w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs font-mono text-white focus:border-blue-500 focus:outline-none\"><option value=\"VIEW_EDIT\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, ">NONE (Tanpa Akses)</option></select></div><!-- Grant DB 2 --><div><select name=\"access_db_2\" class=\"w-full px-2.5 py-1.5 bg-[#18171b] border border-[#333138] rounded-xl text-xs font-mono text-white focus:border-[#ceafa3] focus:outline-none\"><option value=\"VIEW_EDIT\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -560,7 +560,7 @@ func AdminUsersTable(users []domain.UserManagementItem, feedbackMsg string) temp
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, ">NONE (Tanpa Akses)</option></select></div><!-- Submit Button --><div class=\"flex justify-end\"><button type=\"submit\" class=\"px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition cursor-pointer\">Simpan Hak Akses</button></div></form></td></tr>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, ">NONE (Tanpa Akses)</option></select></div><!-- Submit Button --><div class=\"flex justify-end\"><button type=\"submit\" class=\"px-3.5 py-1.5 rounded-xl bg-[#ceafa3] hover:bg-[#c2a195] text-[#121212] text-xs font-bold transition cursor-pointer\">Simpan Hak Akses</button></div></form></td></tr>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -604,7 +604,7 @@ func AdminFeedback(success bool, message string) templ.Component {
 		}
 		ctx = templ.ClearChildren(ctx)
 		if success {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<div class=\"p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono\">✓ ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<div class=\"p-3.5 rounded-xl bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs font-mono\">✓ ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -622,7 +622,7 @@ func AdminFeedback(success bool, message string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "<div class=\"p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-mono\">✗ ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "<div class=\"p-3.5 rounded-xl bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs font-mono\">✗ ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

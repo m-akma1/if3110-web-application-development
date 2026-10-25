@@ -1,0 +1,129 @@
+package pages
+
+import (
+	"fmt"
+	"dbplatform/app/domain"
+	"dbplatform/app/internal/authn"
+	"dbplatform/app/views/layouts"
+)
+
+templ Migration(user *authn.AuthLayoutUser, activeDBID string, histories []domain.MigrationHistory, csrfToken string) {
+	@layouts.Dashboard("Migration Editor", user, activeDBID, "migration", csrfToken) {
+		<div class="space-y-6" x-data="{ query: 'CREATE TABLE example (\n    id SERIAL PRIMARY KEY,\n    name VARCHAR(255) NOT NULL\n);' }">
+			<div>
+				<h1 class="text-2xl font-bold text-zinc-100">Migration Editor</h1>
+				<p class="text-zinc-400 mt-1">Tulis dan eksekusi skrip DDL/SQL untuk memperbarui skema database terhubung.</p>
+			</div>
+
+			<div class="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-6 space-y-4 shadow-xl">
+				<form id="migration-form">
+					<div class="flex justify-between items-center mb-4">
+						<label class="text-xs font-bold text-zinc-400 uppercase tracking-wider">
+							Skrip SQL Migrasi
+						</label>
+						<div class="flex gap-2">
+							<button 
+								type="button"
+								@click="query = ''"
+								class="px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-400 hover:bg-[#252525] transition"
+							>
+								Bersihkan
+							</button>
+							<button 
+								type="button"
+								hx-post="/migration/dry-run"
+								hx-target="#migration-feedback"
+								hx-include="#migration-form"
+								class="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#252525] hover:bg-[#333] text-white transition"
+							>
+								Simulasi (Dry Run)
+							</button>
+							<button 
+								type="button"
+								hx-post="/migration/apply"
+								hx-target="#migration-feedback"
+								hx-include="#migration-form"
+								class="px-4 py-1.5 rounded-lg text-xs font-bold bg-[#ceafa3] hover:bg-[#c09f93] text-[#121212] transition shadow-md"
+							>
+								Terapkan Migrasi
+							</button>
+						</div>
+					</div>
+
+					<div class="relative">
+						<textarea 
+							id="sql_script"
+							name="sql_script" 
+							x-model="query"
+							rows="8"
+							class="w-full p-4 bg-[#121212] border border-[#2a2a2a] rounded-lg font-mono text-xs text-[#87d1ff] focus:outline-none focus:ring-2 focus:ring-[#ceafa3]/50 leading-relaxed resize-y"
+							placeholder="-- Tulis perintah SQL di sini..."
+						></textarea>
+					</div>
+				</form>
+
+				<div id="migration-feedback"></div>
+			</div>
+
+			<div class="space-y-3">
+				<h3 class="text-xs font-bold text-zinc-400 uppercase tracking-wider px-1">Riwayat Eksekusi Migrasi</h3>
+				<div class="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl">
+					<table class="w-full text-left text-sm text-zinc-300">
+						<thead class="bg-[#121212] text-xs uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]">
+							<tr>
+								<th class="px-4 py-3 font-semibold">ID</th>
+								<th class="px-4 py-3 font-semibold">Nama File / Skrip</th>
+								<th class="px-4 py-3 font-semibold">Waktu Eksekusi</th>
+								<th class="px-4 py-3 font-semibold">Oleh</th>
+								<th class="px-4 py-3 font-semibold">Durasi</th>
+								<th class="px-4 py-3 font-semibold">Status</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-[#2a2a2a]">
+							if len(histories) > 0 {
+								for _, h := range histories {
+									<tr class="hover:bg-[#252525]/50 transition">
+										<td class="px-4 py-3 font-mono text-xs">{ h.ID }</td>
+										<td class="px-4 py-3 font-mono text-xs font-semibold text-zinc-200">{ h.Filename }</td>
+										<td class="px-4 py-3 text-xs">{ h.ExecutedAt.Format("2006-01-02 15:04:05") }</td>
+										<td class="px-4 py-3 text-xs">{ h.ExecutedBy }</td>
+										<td class="px-4 py-3 font-mono text-xs">{ fmt.Sprintf("%d ms", h.ExecutionMs) }</td>
+										<td class="px-4 py-3 text-xs">
+											if h.Status == "SUCCESS" {
+												<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-[#7dff95]/15 text-[#7dff95] border border-[#7dff95]/30">
+													SUCCESS
+												</span>
+											} else {
+												<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-[#ff8080]/15 text-[#ff8080] border border-[#ff8080]/30">
+													FAILED
+												</span>
+											}
+										</td>
+									</tr>
+								}
+							} else {
+								<tr>
+									<td colspan="6" class="px-4 py-8 text-center text-zinc-500 text-xs">
+										Belum ada riwayat migrasi pada database ini.
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			</div>
+		</div>
+	}
+}
+
+templ MigrationFeedback(success bool, message string) {
+	if success {
+		<div class="p-3 rounded-lg bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs font-mono">
+			✓ { message }
+		</div>
+	} else {
+		<div class="p-3 rounded-lg bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs font-mono">
+			✗ { message }
+		</div>
+	}
+}

@@ -6,7 +6,7 @@ templ Login(csrfToken string, errorMessage string) {
 
 // Partial Component untuk respon error login via HTMX
 templ LoginError(message string) {
-	<div class="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+	<div class="p-3 rounded-xl bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs font-medium">
 		{ message }
 	</div>
 }

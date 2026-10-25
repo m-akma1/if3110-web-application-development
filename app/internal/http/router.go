@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"dbplatform/app/domain"
 	"dbplatform/app/internal/authn"
@@ -113,6 +114,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /dashboard/select-db", s.handleDashboardPage)
 	s.mux.HandleFunc("GET /dashboard/table", s.handleDashboardTable)
 	s.mux.HandleFunc("POST /dashboard/query", s.handleDashboardQuery)
+	s.mux.HandleFunc("GET /migration", s.handleMigrationPage)
+	s.mux.HandleFunc("POST /migration/dry-run", s.handleMigrationDryRun)
+	s.mux.HandleFunc("POST /migration/apply", s.handleMigrationApply)
 	s.mux.HandleFunc("GET /admin", s.handleAdminPage)
 	s.mux.HandleFunc("POST /admin/db/add", s.handleAdminAddDB)
 	s.mux.HandleFunc("POST /admin/codes/generate", s.handleAdminGenerateCode)
@@ -635,8 +639,8 @@ func buildTableDataAndSchema(tableName string) domain.TableDataResult {
 			Columns:    []string{"id", "username", "email", "role", "created_at"},
 			Rows: [][]string{
 				{"usr-101", "moreno", "moreno@email.com", "PLATFORM_ADMIN", "2026-08-01 10:00"},
-				{"usr-102", "dhia", "dhia@email.com", "USER", "2026-08-02 11:30"},
-				{"usr-103", "caca", "caca@email.com", "USER", "2026-08-03 14:15"},
+				{"usr-102", "akmal", "akmal@email.com", "USER", "2026-08-02 11:30"},
+				{"usr-103", "dzaki", "dzaki@email.com", "USER", "2026-08-03 14:15"},
 			},
 			TotalRows:   150,
 			CurrentPage: 1,
@@ -744,6 +748,56 @@ func (s *Server) handleDashboardQuery(w http.ResponseWriter, r *http.Request) {
 	resultData.ExecutedQuery = fmt.Sprintf("[%s] %s", dbID, cleanedSQL)
 	w.WriteHeader(http.StatusOK)
 	_ = components.DataGrid(resultData).Render(r.Context(), w)
+}
+
+// --- Migration Editor Handlers ---
+
+func (s *Server) handleMigrationPage(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.validateRequestSession(w, r)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+
+	csrfToken, err := s.ensureCSRFToken(w, r)
+	if err != nil {
+		http.Error(w, "Gagal membuat token CSRF", http.StatusInternalServerError)
+		return
+	}
+
+	activeDBID := r.URL.Query().Get("db_id")
+	if activeDBID == "" && len(user.Databases) > 0 {
+		activeDBID = user.Databases[0].DatabaseID
+	}
+
+	dummyHistories := []domain.MigrationHistory{
+		{
+			ID:          "m-001",
+			Filename:    "0001_create_users_table.sql",
+			ExecutedAt:  time.Now().Add(-24 * time.Hour),
+			ExecutedBy:  user.Username,
+			Status:      "SUCCESS",
+			ExecutionMs: 45,
+		},
+	}
+
+	templ.Handler(pages.Migration(user, activeDBID, dummyHistories, csrfToken)).ServeHTTP(w, r)
+}
+
+func (s *Server) handleMigrationDryRun(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.validateRequestSession(w, r); !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	_ = pages.MigrationFeedback(true, "Simulasi DDL Valid: 1 tabel akan dibuat tanpa error.").Render(r.Context(), w)
+}
+
+func (s *Server) handleMigrationApply(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.validateRequestSession(w, r); !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	_ = pages.MigrationFeedback(true, "Migrasi berhasil dieksekusi ke PostgreSQL Target dalam 18ms.").Render(r.Context(), w)
 }
 
 func (s *Server) handleLogoutHTMX(w http.ResponseWriter, r *http.Request) {
