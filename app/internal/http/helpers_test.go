@@ -15,6 +15,7 @@ import (
 	"dbplatform/app/internal/dbmanager"
 	"dbplatform/app/internal/groups"
 	apphttp "dbplatform/app/internal/http"
+	"dbplatform/app/internal/migration"
 	"dbplatform/app/internal/rbac"
 	"dbplatform/app/internal/testutil"
 )
@@ -37,13 +38,14 @@ var testPasswords = func() map[string]string {
 
 // testEnv is a server on a schema-isolated platform DB (integration: skipped without TEST_DATABASE_URL).
 type testEnv struct {
-	srv      *apphttp.Server
-	db       *sql.DB
-	sessions *authn.SessionStore
-	groups   *groups.Repository
-	grants   *rbac.PostgresGrantStore
-	targets  *dbmanager.Manager
-	registry *dbmanager.ConnectionRegistry
+	srv        *apphttp.Server
+	db         *sql.DB
+	sessions   *authn.SessionStore
+	groups     *groups.Repository
+	grants     *rbac.PostgresGrantStore
+	targets    *dbmanager.Manager
+	registry   *dbmanager.ConnectionRegistry
+	migrations *migration.Repository
 }
 
 func newTestEnv(t *testing.T, logOutput io.Writer) *testEnv {
@@ -57,6 +59,7 @@ func newTestEnv(t *testing.T, logOutput io.Writer) *testEnv {
 	}
 	gr := groups.NewRepository(db)
 	grants := rbac.NewPostgresGrantStore(db)
+	authorizer := rbac.NewAuthorizer(grants)
 	cipher, err := dbmanager.NewCredentialCipher(testutil.CredentialsKey(t))
 	if err != nil {
 		t.Fatal(err)
@@ -64,14 +67,16 @@ func newTestEnv(t *testing.T, logOutput io.Writer) *testEnv {
 	registry := dbmanager.NewConnectionRegistry()
 	t.Cleanup(registry.Close)
 	targets := dbmanager.NewManager(dbmanager.NewTargetRepository(db), cipher, registry)
+	migrations := migration.NewRepository(db)
 	srv := apphttp.NewServer(logOutput, apphttp.Deps{
-		Sessions: store,
-		Groups:   gr,
-		Access:   rbac.NewAuthorizer(grants),
-		Admin:    admin.NewService(store, gr, grants, targets),
-		Registry: registry,
+		Sessions:   store,
+		Groups:     gr,
+		Access:     authorizer,
+		Admin:      admin.NewService(store, gr, grants, targets),
+		Registry:   registry,
+		Migrations: migration.NewService(migrations, migration.NewEngine(db, registry, migration.Limits{}), authorizer),
 	})
-	return &testEnv{srv: srv, db: db, sessions: store, groups: gr, grants: grants, targets: targets, registry: registry}
+	return &testEnv{srv: srv, db: db, sessions: store, groups: gr, grants: grants, targets: targets, registry: registry, migrations: migrations}
 }
 
 // newTestServer is newTestEnv when only the server is needed.
@@ -151,4 +156,13 @@ func loggedIn(t *testing.T, srv *apphttp.Server, username string) *client {
 	c := newClient(t, srv)
 	c.login(username, testPasswords[username])
 	return c
+}
+
+// connectTarget gives a registered target database a live pool: an empty schema of TEST_DATABASE_URL.
+// It returns that pool so tests can inspect what migrations did.
+func (env *testEnv) connectTarget(t *testing.T, targetID string) *sql.DB {
+	t.Helper()
+	pool := testutil.NewSchemaDB(t)
+	env.registry.RegisterPool(targetID, pool)
+	return pool
 }

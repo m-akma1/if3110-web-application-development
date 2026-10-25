@@ -16,6 +16,7 @@ import (
 	"dbplatform/app/internal/dbmanager"
 	"dbplatform/app/internal/groups"
 	apphttp "dbplatform/app/internal/http"
+	"dbplatform/app/internal/migration"
 	"dbplatform/app/internal/platformdb"
 	"dbplatform/app/internal/rbac"
 
@@ -58,10 +59,17 @@ func main() {
 	groupRepo := groups.NewRepository(db)
 	grantStore := rbac.NewPostgresGrantStore(db)
 	authorizer := rbac.NewAuthorizer(grantStore)
+	// Target pools: the viewer, the target manager and the migration engine share one registry.
 	registry := dbmanager.NewConnectionRegistry()
 	defer registry.Close()
 	targets := dbmanager.NewManager(dbmanager.NewTargetRepository(db), cipher, registry)
 	adminService := admin.NewService(sessionStore, groupRepo, grantStore, targets)
+	migrationEngine := migration.NewEngine(db, registry, migration.Limits{
+		LockTimeout:      cfg.MigrationLockTimeout,
+		StatementTimeout: cfg.MigrationStatementTimeout,
+		QueueTimeout:     cfg.MigrationQueueTimeout,
+	})
+	migrations := migration.NewService(migration.NewRepository(db), migrationEngine, authorizer)
 
 	created, err := bootstrap.EnsureAdmin(ctx, sessionStore, bootstrap.AdminConfig{
 		Username: cfg.BootstrapAdminUsername,
@@ -104,11 +112,12 @@ func main() {
 
 	// The platform DB (users, sessions, groups) is never registered as a viewer target.
 	srv := apphttp.NewServer(os.Stdout, apphttp.Deps{
-		Sessions: sessionStore,
-		Groups:   groupRepo,
-		Access:   authorizer,
-		Admin:    adminService,
-		Registry: registry,
+		Sessions:   sessionStore,
+		Groups:     groupRepo,
+		Access:     authorizer,
+		Admin:      adminService,
+		Registry:   registry,
+		Migrations: migrations,
 	})
 
 	log.Printf("Backend API berjalan pada %s", cfg.ListenAddr)

@@ -12,13 +12,13 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"dbplatform/app/domain"
 	"dbplatform/app/internal/admin"
 	"dbplatform/app/internal/authn"
 	"dbplatform/app/internal/dbmanager"
 	"dbplatform/app/internal/groups"
+	"dbplatform/app/internal/migration"
 	"dbplatform/app/internal/rbac"
 	"dbplatform/app/views/components"
 	"dbplatform/app/views/pages"
@@ -36,6 +36,7 @@ type Server struct {
 	groups     *groups.Repository
 	access     *rbac.Authorizer
 	admin      *admin.Service
+	migrations *migration.Service
 	dbRegistry *dbmanager.ConnectionRegistry
 }
 
@@ -45,8 +46,10 @@ type Deps struct {
 	Groups   *groups.Repository  // groups, membership, invite codes
 	Access   *rbac.Authorizer    // every database authorization decision
 	Admin    *admin.Service      // platform admin console (users, groups, grants, codes, targets)
-	// Registry holds live pools to target databases; shared with the target manager. Nil creates an empty one.
-	Registry *dbmanager.ConnectionRegistry
+	// Registry holds live pools to target databases; shared by the viewer, the target manager
+	// and the migration engine. Nil creates an empty one.
+	Registry   *dbmanager.ConnectionRegistry
+	Migrations *migration.Service // drafts, dry runs, execution and history of target migrations
 }
 
 // NewServer menyusun router beserta rantai middleware (Logger -> CSRF -> Mux)
@@ -65,6 +68,7 @@ func NewServer(logOutput io.Writer, deps Deps) *Server {
 		groups:     deps.Groups,
 		access:     deps.Access,
 		admin:      deps.Admin,
+		migrations: deps.Migrations,
 		dbRegistry: deps.Registry,
 	}
 	if s.dbRegistry == nil {
@@ -116,9 +120,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /dashboard/select-db", s.handleDashboardPage)
 	s.mux.HandleFunc("GET /dashboard/table", s.handleDashboardTable)
 	s.mux.HandleFunc("POST /dashboard/query", s.handleDashboardQuery)
-	s.mux.HandleFunc("GET /migration", s.handleMigrationPage)
-	s.mux.HandleFunc("POST /migration/dry-run", s.handleMigrationDryRun)
-	s.mux.HandleFunc("POST /migration/apply", s.handleMigrationApply)
+	s.registerMigrationRoutes()
 	s.mux.HandleFunc("GET /admin", s.handleAdminPage)
 	s.mux.HandleFunc("POST /admin/users", s.handleAdminCreateUser)
 	s.mux.HandleFunc("POST /admin/users/{id}/role", s.handleAdminSetUserRole)
@@ -755,75 +757,6 @@ func (s *Server) handleDashboardQuery(w http.ResponseWriter, r *http.Request) {
 	resultData.ExecutedQuery = fmt.Sprintf("[%s] %s", dbID, cleanedSQL)
 	w.WriteHeader(http.StatusOK)
 	_ = components.DataGrid(resultData).Render(r.Context(), w)
-}
-
-// --- Migration Editor Handlers ---
-
-func (s *Server) handleMigrationPage(w http.ResponseWriter, r *http.Request) {
-	user, layout, ok := s.requireSession(w, r)
-	if !ok {
-		return
-	}
-
-	csrfToken, err := s.ensureCSRFToken(w, r)
-	if err != nil {
-		http.Error(w, "Gagal membuat token CSRF", http.StatusInternalServerError)
-		return
-	}
-
-	activeDBID := resolveDBID(r, layout)
-	if activeDBID == "" {
-		templ.Handler(pages.Migration(layout, "", false, nil, csrfToken)).ServeHTTP(w, r)
-		return
-	}
-	level, err := s.authorizeDB(r.Context(), user, activeDBID, rbac.ActionViewMigration)
-	if err != nil {
-		s.renderForbiddenPage(w, r, layout, csrfToken, "migration", err)
-		return
-	}
-	canEdit := rbac.IsAllowed(level, rbac.ActionExecuteMigration)
-
-	dummyHistories := []domain.MigrationHistory{
-		{
-			ID:          "m-001",
-			Filename:    "001_create_users_table.sql",
-			ExecutedAt:  time.Now().Add(-24 * time.Hour),
-			ExecutedBy:  user.Username,
-			Status:      "SUCCESS",
-			ExecutionMs: 45,
-		},
-	}
-
-	templ.Handler(pages.Migration(layout, activeDBID, canEdit, dummyHistories, csrfToken)).ServeHTTP(w, r)
-}
-
-func (s *Server) handleMigrationDryRun(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeMigrationWrite(w, r, rbac.ActionCreateMigration) {
-		return
-	}
-	_ = pages.MigrationFeedback(true, "Simulasi DDL Valid: 1 tabel akan dibuat tanpa error.").Render(r.Context(), w)
-}
-
-func (s *Server) handleMigrationApply(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeMigrationWrite(w, r, rbac.ActionExecuteMigration) {
-		return
-	}
-	_ = pages.MigrationFeedback(true, "Migrasi berhasil dieksekusi ke PostgreSQL Target dalam 18ms.").Render(r.Context(), w)
-}
-
-// authorizeMigrationWrite memastikan user memiliki VIEW_EDIT (melalui group) pada database target migrasi.
-func (s *Server) authorizeMigrationWrite(w http.ResponseWriter, r *http.Request, action rbac.Action) bool {
-	user, layout, ok := s.requireSession(w, r)
-	if !ok {
-		return false
-	}
-	dbID := resolveDBID(r, layout)
-	if _, err := s.authorizeDB(r.Context(), user, dbID, action); err != nil {
-		writeFragmentStatus(w, err)
-		_ = pages.MigrationFeedback(false, accessDeniedMessage(err)).Render(r.Context(), w)
-		return false
-	}
-	return true
 }
 
 func (s *Server) handleLogoutHTMX(w http.ResponseWriter, r *http.Request) {

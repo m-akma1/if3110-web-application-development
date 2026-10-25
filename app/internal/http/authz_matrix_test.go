@@ -9,6 +9,7 @@ import (
 
 	"dbplatform/app/internal/accesstest"
 	"dbplatform/app/internal/authn"
+	"dbplatform/app/internal/migration"
 )
 
 // Every DB-scoped route × every kind of principal. The backend must enforce this,
@@ -46,19 +47,42 @@ func TestAuthorizationMatrix_Integration(t *testing.T) {
 	register("both", authn.RoleUser, viewers.ID, editors.ID) // most permissive wins
 	register("adminnogrant", authn.RolePlatformAdmin)        // admin is not a DB access level
 
+	// Migration routes need a live target, an executed migration (history) and, per principal,
+	// a draft of their own so one principal's execute does not affect the next.
+	env.connectTarget(t, target)
+	engine := migration.NewEngine(env.db, env.registry, migration.Limits{})
+	newDraft := func() string {
+		d, err := env.migrations.CreateDraft(ctx, migration.NewDraft{DatabaseID: target, Name: "matrix", SQL: "SELECT 1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d.ID
+	}
+	executed, _, err := engine.Execute(ctx, newDraft(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	type route struct {
 		name   string
 		method string
 		path   string
 		form   url.Values
 	}
-	routes := []route{
-		{"viewer page", http.MethodGet, "/dashboard?db_id=" + target, nil},
-		{"table fragment", http.MethodGet, "/dashboard/table?db_id=" + target + "&name=customers", nil},
-		{"read-only query", http.MethodPost, "/dashboard/query", url.Values{"db_id": {target}, "sql_query": {"SELECT 1"}}},
-		{"migration page", http.MethodGet, "/migration?db_id=" + target, nil},
-		{"migration dry-run", http.MethodPost, "/migration/dry-run", url.Values{"db_id": {target}, "sql_script": {"SELECT 1"}}},
-		{"migration apply", http.MethodPost, "/migration/apply", url.Values{"db_id": {target}, "sql_script": {"SELECT 1"}}},
+	routesFor := func(draft string) []route {
+		script := url.Values{"name": {"matrix"}, "sql_script": {"SELECT 1"}}
+		return []route{
+			{"viewer page", http.MethodGet, "/dashboard?db_id=" + target, nil},
+			{"table fragment", http.MethodGet, "/dashboard/table?db_id=" + target + "&name=customers", nil},
+			{"read-only query", http.MethodPost, "/dashboard/query", url.Values{"db_id": {target}, "sql_query": {"SELECT 1"}}},
+			{"migration page", http.MethodGet, "/migration?db_id=" + target, nil},
+			{"migration detail", http.MethodGet, "/migration/" + executed.ID, nil},
+			{"create draft", http.MethodPost, "/migration/drafts", url.Values{"db_id": {target}, "name": {"x"}, "sql_script": {"SELECT 1"}}},
+			{"save draft", http.MethodPost, "/migration/" + draft, script},
+			{"dry run", http.MethodPost, "/migration/" + draft + "/dry-run", script},
+			{"execute", http.MethodPost, "/migration/" + draft + "/execute", script},
+			{"duplicate", http.MethodPost, "/migration/" + executed.ID + "/duplicate", nil},
+		}
 	}
 
 	const (
@@ -67,17 +91,17 @@ func TestAuthorizationMatrix_Integration(t *testing.T) {
 	)
 	// expected status per principal, in the order of routes above
 	expect := map[string][]int{
-		"nogrant":      {denied, denied, denied, denied, denied, denied},
-		"adminnogrant": {denied, denied, denied, denied, denied, denied},
-		"viewer":       {ok, ok, ok, ok, denied, denied},
-		"editor":       {ok, ok, ok, ok, ok, ok},
-		"both":         {ok, ok, ok, ok, ok, ok},
+		"nogrant":      {denied, denied, denied, denied, denied, denied, denied, denied, denied, denied},
+		"adminnogrant": {denied, denied, denied, denied, denied, denied, denied, denied, denied, denied},
+		"viewer":       {ok, ok, ok, ok, ok, denied, denied, denied, denied, denied},
+		"editor":       {ok, ok, ok, ok, ok, ok, ok, ok, ok, ok},
+		"both":         {ok, ok, ok, ok, ok, ok, ok, ok, ok, ok},
 	}
 
 	for principal, statuses := range expect {
 		c := newClient(t, env.srv)
 		c.login(principal, "Password-"+principal)
-		for i, rt := range routes {
+		for i, rt := range routesFor(newDraft()) {
 			t.Run(fmt.Sprintf("%s/%s", principal, rt.name), func(t *testing.T) {
 				var code int
 				if rt.method == http.MethodGet {
@@ -94,7 +118,7 @@ func TestAuthorizationMatrix_Integration(t *testing.T) {
 
 	// No session at all: pages redirect to /login, HTMX posts get 401 + HX-Redirect.
 	anon := newClient(t, env.srv)
-	for _, rt := range routes {
+	for _, rt := range routesFor(newDraft()) {
 		var code int
 		if rt.method == http.MethodGet {
 			code = anon.get(rt.path).Code
