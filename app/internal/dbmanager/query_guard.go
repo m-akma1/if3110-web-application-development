@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"dbplatform/app/domain"
 )
@@ -92,8 +95,42 @@ func ValidateReadOnlySQL(rawSQL string) (string, string, error) {
 	return cleaned, "", nil
 }
 
+// QueryLimits membatasi biaya satu kueri Read-Only pada database target.
+type QueryLimits struct {
+	Timeout time.Duration // dikirim sebagai SET LOCAL statement_timeout
+	MaxRows int           // baris setelah batas ini tidak dibaca, hasil ditandai Truncated
+}
+
+const (
+	defaultQueryTimeout = 5 * time.Second
+	defaultQueryMaxRows = 500
+)
+
+// DefaultQueryLimits membaca QUERY_TIMEOUT_MS dan QUERY_ROW_LIMIT dari environment (dengan nilai fallback).
+func DefaultQueryLimits() QueryLimits {
+	limits := QueryLimits{Timeout: defaultQueryTimeout, MaxRows: defaultQueryMaxRows}
+	if v, err := strconv.Atoi(os.Getenv("QUERY_TIMEOUT_MS")); err == nil && v > 0 {
+		limits.Timeout = time.Duration(v) * time.Millisecond
+	}
+	if v, err := strconv.Atoi(os.Getenv("QUERY_ROW_LIMIT")); err == nil && v > 0 {
+		limits.MaxRows = v
+	}
+	return limits
+}
+
+func (l QueryLimits) normalized() QueryLimits {
+	if l.Timeout <= 0 {
+		l.Timeout = defaultQueryTimeout
+	}
+	if l.MaxRows <= 0 {
+		l.MaxRows = defaultQueryMaxRows
+	}
+	return l
+}
+
 // ExecuteReadOnlyQuery mengeksekusi kueri di dalam Read-Only Transaction pada database target (Lapis 3: Database Read-Only Transaction).
-func ExecuteReadOnlyQuery(ctx context.Context, db *sql.DB, rawSQL string) (*domain.TableDataResult, error) {
+// Kueri dibatasi statement_timeout dan jumlah baris maksimum sesuai limits.
+func ExecuteReadOnlyQuery(ctx context.Context, db *sql.DB, rawSQL string, limits QueryLimits) (*domain.TableDataResult, error) {
 	cleanedSQL, _, err := ValidateReadOnlySQL(rawSQL)
 	if err != nil {
 		return nil, err
@@ -102,6 +139,12 @@ func ExecuteReadOnlyQuery(ctx context.Context, db *sql.DB, rawSQL string) (*doma
 		return nil, errors.New("koneksi database belum tersedia")
 	}
 
+	limits = limits.normalized()
+
+	// Batas waktu di sisi klien sebagai cadangan apabila statement_timeout tidak berlaku
+	ctx, cancel := context.WithTimeout(ctx, limits.Timeout+time.Second)
+	defer cancel()
+
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
@@ -109,6 +152,11 @@ func ExecuteReadOnlyQuery(ctx context.Context, db *sql.DB, rawSQL string) (*doma
 	defer func() {
 		_ = tx.Rollback()
 	}()
+
+	// SET tidak menerima parameter bind; nilai berupa integer milidetik sehingga aman disisipkan
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("SET LOCAL statement_timeout = %d", limits.Timeout.Milliseconds())); err != nil {
+		return nil, err
+	}
 
 	rows, err := tx.QueryContext(ctx, cleanedSQL)
 	if err != nil {
@@ -122,7 +170,12 @@ func ExecuteReadOnlyQuery(ctx context.Context, db *sql.DB, rawSQL string) (*doma
 	}
 
 	var resultRows [][]string
+	truncated := false
 	for rows.Next() {
+		if len(resultRows) >= limits.MaxRows {
+			truncated = true
+			break
+		}
 		vals := make([]any, len(cols))
 		ptrs := make([]any, len(cols))
 		for i := range vals {
@@ -155,5 +208,6 @@ func ExecuteReadOnlyQuery(ctx context.Context, db *sql.DB, rawSQL string) (*doma
 		TotalRows:   int64(len(resultRows)),
 		CurrentPage: 1,
 		TotalPages:  1,
+		Truncated:   truncated,
 	}, nil
 }

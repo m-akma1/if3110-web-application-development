@@ -41,4 +41,5 @@ type TableDataResult struct {
 	Indexes       []IndexInfo      `json:"indexes,omitempty"`
 	ExecutedQuery string           `json:"executed_query,omitempty"`
 	QueryError    string           `json:"query_error,omitempty"`
+	Truncated     bool             `json:"truncated,omitempty"` // true jika hasil kueri dipotong oleh batas jumlah baris
 }

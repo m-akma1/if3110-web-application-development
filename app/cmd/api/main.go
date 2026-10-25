@@ -16,10 +16,7 @@ import (
 )
 
 func main() {
-	var (
-		sessionStore *authn.SessionStore
-		coreDB       *sql.DB
-	)
+	var sessionStore *authn.SessionStore
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL != "" {
@@ -28,7 +25,6 @@ func main() {
 			log.Fatalf("gagal membuka koneksi PostgreSQL Internal: %v", err)
 		}
 		defer db.Close()
-		coreDB = db
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -52,8 +48,19 @@ func main() {
 	}
 
 	srv := apphttp.NewServerWithSessions(os.Stdout, sessionStore)
-	if coreDB != nil {
-		srv.RegisterDatabasePool("db-1", coreDB)
+
+	// Database platform (users, sessions) bukan target viewer.
+	// Target untuk demo dipisah sebagai "db-1" untuk sementara
+	if demoURL := os.Getenv("DEMO_TARGET_URL"); demoURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := srv.ConnectDatabase(ctx, "db-1", demoURL); err != nil {
+			log.Printf("peringatan: gagal terhubung ke database target demo: %v", err)
+		} else {
+			log.Println("Terhubung ke database target demo sebagai db-1")
+		}
+		cancel()
+	} else {
+		log.Println("DEMO_TARGET_URL tidak disetel, tidak ada database target live yang terdaftar")
 	}
 
 	log.Println("Backend API berjalan pada :8080")
