@@ -1,5 +1,4 @@
 # Developer shortcuts. Run from the repository root.
-APP_DIR        := app
 TEMPL          := go run github.com/a-h/templ/cmd/templ@v0.3.1070
 TAILWIND       := npx --no-install @tailwindcss/cli -i ./assets/css/input.css -o ./static/css/style.css
 TEST_DB_URL    ?= postgres://test:test@localhost:5433/dbplatform_test?sslmode=disable
@@ -17,28 +16,28 @@ help:
 gen: templ css
 
 templ:
-	cd $(APP_DIR) && $(TEMPL) generate
+	$(TEMPL) generate
 
 css:
-	cd $(APP_DIR) && $(TAILWIND)
+	$(TAILWIND)
 
 dev:
 	$(MAKE) -j3 dev-templ dev-css dev-go
 
 dev-templ:
-	cd $(APP_DIR) && $(TEMPL) generate --watch
+	$(TEMPL) generate --watch
 
 dev-css:
-	cd $(APP_DIR) && $(TAILWIND) --watch
+	$(TAILWIND) --watch
 
 dev-go:
-	cd $(APP_DIR) && go run ./cmd/api
+	go run .
 
 vet:
-	cd $(APP_DIR) && go vet ./...
+	go vet ./...
 
 test:
-	cd $(APP_DIR) && go test ./...
+	go test ./...
 
 test-db-up:
 	docker compose --profile test up -d --wait postgres-test
@@ -47,4 +46,4 @@ test-db-down:
 	docker compose --profile test rm -sf postgres-test
 
 test-integration: test-db-up
-	cd $(APP_DIR) && TEST_DATABASE_URL='$(TEST_DB_URL)' go test -count=1 ./...
+	TEST_DATABASE_URL='$(TEST_DB_URL)' go test -count=1 ./...

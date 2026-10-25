@@ -1,0 +1,120 @@
+package pages
+
+import "dbplatform/domain"
+
+templ adminUsersSection(actorID string, ov domain.AdminOverview) {
+	<div class="space-y-6">
+		@adminCard("Tambah Pengguna", "Pengguna baru otomatis menjadi anggota Public") {
+			<form method="post" hx-post="/admin/users" class="p-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+				<div>
+					<label class={ adminLabel } for="new-username">Username</label>
+					<input id="new-username" name="username" required minlength="3" maxlength="32" autocomplete="off" class={ adminInput } placeholder="budi.santoso"/>
+				</div>
+				<div>
+					<label class={ adminLabel } for="new-email">Email (opsional)</label>
+					<input id="new-email" name="email" type="email" autocomplete="off" class={ adminInput } placeholder="budi@example.com"/>
+				</div>
+				<div>
+					<label class={ adminLabel } for="new-password">Password awal</label>
+					<input id="new-password" name="password" type="password" required minlength="8" autocomplete="new-password" class={ adminInput }/>
+				</div>
+				<div>
+					<label class={ adminLabel } for="new-role">Role</label>
+					<select id="new-role" name="role" class={ adminInput }>
+						<option value="USER">USER</option>
+						<option value="PLATFORM_ADMIN">PLATFORM_ADMIN</option>
+					</select>
+				</div>
+				<fieldset class="md:col-span-3">
+					<legend class={ adminLabel }>Group tambahan</legend>
+					<div class="flex flex-wrap gap-3">
+						for _, g := range ov.Groups {
+							if !g.IsSystem {
+								<label class="flex items-center gap-1.5 text-xs text-zinc-300">
+									<input type="checkbox" name="group_ids" value={ g.ID } class="accent-brand-primary"/>
+									{ g.Name }
+								</label>
+							}
+						}
+					</div>
+				</fieldset>
+				<div class="flex items-end">
+					<button type="submit" class={ btnPrimary + " w-full" }>+ Buat Pengguna</button>
+				</div>
+			</form>
+		}
+
+		@adminCard("Pengguna Platform", "Mengubah role, status, atau password langsung berlaku pada sesi pengguna") {
+			<table class="w-full text-left text-sm text-zinc-300">
+				<thead class="bg-app-input text-xs uppercase tracking-wider text-zinc-400 border-b border-app-border">
+					<tr>
+						<th class="px-4 py-3 font-semibold">Pengguna</th>
+						<th class="px-4 py-3 font-semibold">Group</th>
+						<th class="px-4 py-3 font-semibold">Role</th>
+						<th class="px-4 py-3 font-semibold">Status</th>
+						<th class="px-4 py-3 font-semibold">Reset Password</th>
+					</tr>
+				</thead>
+				<tbody class="divide-y divide-app-border">
+					for _, u := range ov.Users {
+						<tr class="align-top">
+							<td class="px-4 py-3">
+								<div class="text-xs font-semibold text-zinc-100">
+									{ u.Username }
+									if u.ID == actorID {
+										<span class="ml-1 text-[10px] text-brand-primary">(Anda)</span>
+									}
+								</div>
+								if u.Email != "" {
+									<div class="text-[11px] text-zinc-500">{ u.Email }</div>
+								}
+							</td>
+							<td class="px-4 py-3">
+								<div class="flex flex-wrap gap-1">
+									for _, g := range u.Groups {
+										<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-app-input border border-app-border text-zinc-300">{ g.Name }</span>
+									}
+								</div>
+							</td>
+							<td class="px-4 py-3">
+								if u.ID == actorID {
+									<span class="text-xs font-mono">{ u.Role }</span>
+								} else {
+									<form method="post" hx-post={ "/admin/users/" + u.ID + "/role" } class="flex items-center gap-2">
+										<select name="role" aria-label={ "Role " + u.Username } class={ adminSelect }>
+											<option value="USER" selected?={ u.Role == "USER" }>USER</option>
+											<option value="PLATFORM_ADMIN" selected?={ u.Role == "PLATFORM_ADMIN" }>PLATFORM_ADMIN</option>
+										</select>
+										<button type="submit" class={ btnSmall }>Simpan</button>
+									</form>
+								}
+							</td>
+							<td class="px-4 py-3">
+								if u.IsActive {
+									<span class="text-xs text-sem-success mr-2">Aktif</span>
+									if u.ID != actorID {
+										<button
+											hx-post={ "/admin/users/" + u.ID + "/active" }
+											hx-vals='{"active":"false"}'
+											hx-confirm={ "Nonaktifkan " + u.Username + "? Semua sesinya akan langsung dicabut." }
+											class={ btnDanger }
+										>Nonaktifkan</button>
+									}
+								} else {
+									<span class="text-xs text-zinc-500 mr-2">Nonaktif</span>
+									<button hx-post={ "/admin/users/" + u.ID + "/active" } hx-vals='{"active":"true"}' class={ btnSmall }>Aktifkan</button>
+								}
+							</td>
+							<td class="px-4 py-3">
+								<form method="post" hx-post={ "/admin/users/" + u.ID + "/password" } class="flex items-center gap-2">
+									<input name="password" type="password" required minlength="8" autocomplete="new-password" aria-label={ "Password baru " + u.Username } placeholder="password baru" class={ adminInput + " w-36" }/>
+									<button type="submit" class={ btnSmall }>Reset</button>
+								</form>
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+	</div>
+}

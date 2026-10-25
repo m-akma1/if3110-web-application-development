@@ -1,0 +1,136 @@
+package components
+
+import (
+	"fmt"
+	"dbplatform/domain"
+)
+
+func fmtMs(ms float64) string {
+	if ms < 1 {
+		return fmt.Sprintf("%.3f ms", ms)
+	}
+	return fmt.Sprintf("%.1f ms", ms)
+}
+
+func fmtRows(r float64) string {
+	if r == float64(int64(r)) {
+		return fmt.Sprintf("%d", int64(r))
+	}
+	return fmt.Sprintf("%.2f", r)
+}
+
+func planIndent(depth int) string {
+	return fmt.Sprintf("padding-left: %dpx", 12+depth*20)
+}
+
+func stepBadgeClass(kind string) string {
+	switch kind {
+	case "EXPLAINED":
+		return "bg-sem-info/15 text-sem-info border-sem-info/30"
+	case "FAILED":
+		return "bg-sem-danger/15 text-sem-danger border-sem-danger/30"
+	case "SKIPPED":
+		return "bg-zinc-500/10 text-zinc-500 border-zinc-500/30"
+	default:
+		return "bg-sem-success/10 text-sem-success border-sem-success/30"
+	}
+}
+
+func stepLabel(kind string) string {
+	switch kind {
+	case "EXPLAINED":
+		return "EXPLAIN ANALYZE"
+	case "EXECUTED":
+		return "DIJALANKAN · tidak dapat di-EXPLAIN"
+	case "FAILED":
+		return "GAGAL"
+	case "SKIPPED":
+		return "DILEWATI"
+	}
+	return kind
+}
+
+// DryRunReport shows the outcome of a dry run: overall status, then each statement with its
+// EXPLAIN ANALYZE plan (DML) or a note that it was run as is (DDL and others).
+templ DryRunReport(v domain.DryRunView) {
+	<div class="space-y-3">
+		if v.OK {
+			<div class="p-3 rounded-lg bg-sem-success/10 border border-sem-success/30 text-sem-success text-xs font-mono">
+				✓ Dry run berhasil: { fmt.Sprint(v.Statements) } statement dijalankan dalam { fmtMs(v.DurationMs) }, lalu di-ROLLBACK. Database target tidak berubah.
+			</div>
+		} else {
+			<div class="p-3 rounded-lg bg-sem-danger/10 border border-sem-danger/30 text-sem-danger text-xs font-mono whitespace-pre-wrap">✗ Dry run gagal (seluruh perubahan di-ROLLBACK):
+{ v.Error }</div>
+		}
+		for _, st := range v.Steps {
+			<div class="bg-app-bg border border-app-border rounded-lg overflow-hidden">
+				<div class="flex items-start justify-between gap-3 px-3 py-2 border-b border-app-border">
+					<pre class="font-mono text-[11px] text-zinc-300 whitespace-pre-wrap break-all flex-1"><span class="text-zinc-500">{ fmt.Sprintf("#%d  ", st.Index) }</span>{ st.SQL }</pre>
+					<div class="flex items-center gap-2 shrink-0">
+						if st.Kind != "SKIPPED" {
+							<span class="text-[10px] font-mono text-zinc-500">{ fmtMs(st.DurationMs) }</span>
+						}
+						<span class={ "px-2 py-0.5 rounded text-[10px] font-bold border", stepBadgeClass(st.Kind) }>{ stepLabel(st.Kind) }</span>
+					</div>
+				</div>
+				if len(st.Nodes) > 0 {
+					<div class="overflow-x-auto">
+						<table class="w-full text-left text-[11px] text-zinc-300">
+							<thead class="text-[10px] uppercase tracking-wider text-zinc-500 border-b border-app-border">
+								<tr>
+									<th class="px-3 py-1.5 font-semibold">Node</th>
+									<th class="px-3 py-1.5 font-semibold text-right">Rows est.</th>
+									<th class="px-3 py-1.5 font-semibold text-right">Rows actual</th>
+									<th class="px-3 py-1.5 font-semibold text-right">Loops</th>
+									<th class="px-3 py-1.5 font-semibold text-right">Cost</th>
+									<th class="px-3 py-1.5 font-semibold text-right">Actual time</th>
+									<th class="px-3 py-1.5 font-semibold text-right">Buffers hit/read</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-app-border/60">
+								for _, n := range st.Nodes {
+									<tr class={ templ.KV("opacity-50", n.NeverExecuted) }>
+										<td class="py-1.5 pr-3" style={ planIndent(n.Depth) }>
+											<div class="font-mono font-semibold text-zinc-100">
+												if n.Depth > 0 {
+													<span class="text-zinc-600">→ </span>
+												}
+												{ n.Title }
+												if n.JoinType != "" {
+													<span class="ml-1 text-[10px] text-brand-primary">{ n.JoinType } join</span>
+												}
+												if n.NeverExecuted {
+													<span class="ml-1 text-[10px] text-zinc-500">(never executed)</span>
+												}
+											</div>
+											for _, c := range n.Conditions {
+												<div class="font-mono text-[10px] text-zinc-500 break-all">{ c }</div>
+											}
+											if n.RowsRemoved > 0 {
+												<div class="font-mono text-[10px] text-zinc-500">Rows Removed by Filter: { fmtRows(n.RowsRemoved) }</div>
+											}
+										</td>
+										<td class="px-3 py-1.5 font-mono text-right">{ fmtRows(n.EstRows) }</td>
+										<td class={ "px-3 py-1.5 font-mono text-right", templ.KV("text-sem-warning font-bold", n.Misestimated) }>
+											{ fmtRows(n.ActualRows) }
+											if n.Misestimated {
+												<span title="Estimasi planner meleset 10x atau lebih">⚠</span>
+											}
+										</td>
+										<td class="px-3 py-1.5 font-mono text-right">{ fmtRows(n.Loops) }</td>
+										<td class="px-3 py-1.5 font-mono text-right">{ fmt.Sprintf("%.2f..%.2f", n.StartupCost, n.TotalCost) }</td>
+										<td class="px-3 py-1.5 font-mono text-right">{ fmtMs(n.ActualMs) }</td>
+										<td class="px-3 py-1.5 font-mono text-right">{ fmt.Sprintf("%d / %d", n.SharedHit, n.SharedRead) }</td>
+									</tr>
+								}
+							</tbody>
+						</table>
+					</div>
+					<div class="px-3 py-1.5 border-t border-app-border text-[10px] font-mono text-zinc-500">
+						Planning { fmtMs(st.PlanningMs) } · Execution { fmtMs(st.ExecutionMs) }
+					</div>
+				}
+			</div>
+		}
+	</div>
+}

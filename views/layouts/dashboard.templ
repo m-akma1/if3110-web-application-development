@@ -1,0 +1,45 @@
+package layouts
+
+import (
+	"dbplatform/domain"
+	"dbplatform/views/components"
+)
+
+templ Dashboard(title string, user *domain.AuthLayoutUser, activeDBID string, activeTab string, csrfToken string) {
+	<!DOCTYPE html>
+	<html lang="id" class="h-full bg-app-bg">
+	<head>
+		<meta charset="UTF-8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+		<meta name="csrf-token" content={ csrfToken }/>
+		<!-- Swap 403/404/422/503 too: the backend answers with "access denied", "not found",
+			     "invalid input" and "database unavailable" fragments that must be shown -->
+		<meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"403","swap":true,"error":false},{"code":"404","swap":true,"error":false},{"code":"422","swap":true,"error":false},{"code":"503","swap":true,"error":false},{"code":"[45]..","swap":false,"error":true}]}'/>
+		<title>{ title } - Platform Manajemen Database</title>
+		<link href="/static/css/style.css" rel="stylesheet"/>
+		<script src="/static/js/htmx.min.js"></script>
+		<script defer src="/static/js/alpine.min.js"></script>
+		<script>
+			document.addEventListener('htmx:configRequest', function(evt) {
+				var meta = document.querySelector('meta[name="csrf-token"]');
+				if (meta && meta.content) {
+					evt.detail.headers['X-CSRF-Token'] = meta.content;
+				}
+			});
+		</script>
+	</head>
+	<body class="h-full text-zinc-100 bg-app-bg font-sans antialiased">
+		<div class="flex h-screen overflow-hidden p-3 gap-3 bg-app-bg">
+			@components.Sidebar(user, activeTab)
+
+			<div class="flex-1 flex flex-col min-w-0 overflow-hidden bg-app-sidebar rounded-2xl border border-app-border">
+				@components.Navbar(user, activeDBID, activeTab)
+
+				<main class="flex-1 overflow-y-auto p-6 bg-app-sidebar">
+					{ children... }
+				</main>
+			</div>
+		</div>
+	</body>
+	</html>
+}

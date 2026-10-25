@@ -1,0 +1,10 @@
+.env
+.env.*
+.git
+.github
+.local
+node_modules
+docker
+docker-compose.yml
+Caddyfile
+*.md

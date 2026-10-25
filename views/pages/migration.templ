@@ -1,0 +1,253 @@
+package pages
+
+import (
+	"fmt"
+	"net/url"
+	"time"
+	"dbplatform/domain"
+	"dbplatform/views/components"
+	"dbplatform/views/layouts"
+)
+
+func draftField(d *domain.MigrationView, sql bool) string {
+	switch {
+	case d == nil:
+		return ""
+	case sql:
+		return d.SQL
+	default:
+		return d.Name
+	}
+}
+
+func migrationPageURL(dbID, draftID string) string {
+	q := url.Values{"db_id": {dbID}}
+	if draftID != "" {
+		q.Set("draft", draftID)
+	}
+	return "/migration?" + q.Encode()
+}
+
+func fmtTime(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	return t.Format("2006-01-02 15:04:05")
+}
+
+templ MigrationStatusBadge(status string) {
+	switch status {
+		case "SUCCESS":
+			<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-success/15 text-sem-success border border-sem-success/30">SUCCESS</span>
+		case "FAILED":
+			<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-danger/15 text-sem-danger border border-sem-danger/30">FAILED</span>
+		default:
+			<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30">DRAFT</span>
+	}
+}
+
+// Migration shows history to View Only users; drafts, the editor and the run buttons only to
+// View + Edit users. The backend checks the same rule on every request; hiding is a convenience.
+templ Migration(user *domain.AuthLayoutUser, page domain.MigrationPageView, csrfToken string) {
+	@layouts.Dashboard("Migration Editor", user, page.DatabaseID, "migration", csrfToken) {
+		if page.DatabaseID == "" {
+			@components.NoDatabaseAccess(user)
+		} else {
+			<div class="space-y-6">
+				<div class="flex flex-wrap items-end justify-between gap-4">
+					<div>
+						<h1 class="text-2xl font-bold text-zinc-100">Migration Editor</h1>
+						<p class="text-zinc-400 mt-1 text-sm">
+							Setiap script dijalankan dalam satu transaksi: COMMIT jika semua statement berhasil, ROLLBACK jika ada yang gagal.
+						</p>
+					</div>
+					if page.DatabaseName != "" {
+						<span class="px-2.5 py-1 rounded-lg text-xs font-mono bg-app-input text-zinc-300 border border-app-border">
+							Database: { page.DatabaseName }
+						</span>
+					}
+				</div>
+
+				if page.CanEdit {
+					<div class="grid grid-cols-1 lg:grid-cols-[16rem_1fr] gap-4">
+						@migrationDraftList(page)
+						@MigrationEditor(page.DatabaseID, page.Editing)
+					</div>
+				} else {
+					<div class="p-4 rounded-xl bg-app-input border border-app-border text-xs text-zinc-400">
+						Anda memiliki akses <span class="font-semibold text-zinc-200">View Only</span> pada database ini:
+						riwayat migrasi dapat dilihat, tetapi membuat dan menjalankan migrasi membutuhkan akses View + Edit melalui group.
+					</div>
+				}
+
+				@migrationHistory(page.History)
+			</div>
+		}
+	}
+}
+
+templ migrationDraftList(page domain.MigrationPageView) {
+	<div class="bg-app-card border border-app-border rounded-xl p-3 space-y-2 h-fit">
+		<div class="flex items-center justify-between px-1">
+			<h3 class="text-xs font-bold text-zinc-400 uppercase tracking-wider">Draft</h3>
+			<a href={ templ.SafeURL(migrationPageURL(page.DatabaseID, "")) } class="text-[11px] font-semibold text-brand-primary hover:underline">+ Draft baru</a>
+		</div>
+		if len(page.Drafts) == 0 {
+			<p class="px-1 py-2 text-[11px] text-zinc-500">Belum ada draft.</p>
+		}
+		for _, d := range page.Drafts {
+			<a
+				href={ templ.SafeURL(migrationPageURL(page.DatabaseID, d.ID)) }
+				class={ "block px-3 py-2 rounded-lg border text-xs transition",
+					templ.KV("bg-app-active border-app-border-strong text-zinc-100", page.Editing != nil && page.Editing.ID == d.ID),
+					templ.KV("border-transparent text-zinc-300 hover:bg-app-hover", page.Editing == nil || page.Editing.ID != d.ID) }
+			>
+				<div class="font-semibold truncate">{ d.Name }</div>
+				<div class="text-[10px] text-zinc-500 mt-0.5">{ d.CreatedByName } · { fmtTime(d.UpdatedAt) }</div>
+			</a>
+		}
+	</div>
+}
+
+// MigrationEditor edits one draft (draft != nil) or creates a new one.
+// The script can be typed or loaded from a .sql file (read in the browser into the textarea).
+templ MigrationEditor(dbID string, draft *domain.MigrationView) {
+	<div id="migration-editor" class="bg-app-card border border-app-border rounded-xl p-5 space-y-4 shadow-xl" x-data="{}">
+		<!-- All actions are htmx buttons; Enter in the name field must not submit the form natively -->
+		<form id="migration-form" class="space-y-3" @submit.prevent>
+			<input type="hidden" name="db_id" value={ dbID }/>
+			<div class="flex flex-wrap items-center gap-3">
+				<input
+					type="text"
+					name="name"
+					x-ref="name"
+					required
+					maxlength="200"
+					placeholder="Nama migration, mis. tambah tabel orders"
+					value={ draftField(draft, false) }
+					class="flex-1 min-w-[12rem] px-3 py-2 bg-app-bg border border-app-border rounded-lg text-xs text-zinc-100 focus:outline-none focus:ring-2 focus:ring-brand-primary/50"
+				/>
+				<label class="px-3 py-2 rounded-lg text-xs font-medium bg-app-active hover:bg-app-border-strong text-zinc-200 cursor-pointer transition">
+					Muat file .sql
+					<input
+						type="file"
+						accept=".sql,text/plain"
+						class="hidden"
+						x-on:change="const f = $event.target.files[0]; if (f) { f.text().then(t => { $refs.sql.value = t; if (!$refs.name.value) { $refs.name.value = f.name.replace(/\.sql$/i, '') } }) }"
+					/>
+				</label>
+			</div>
+			<textarea
+				id="sql_script"
+				name="sql_script"
+				x-ref="sql"
+				rows="12"
+				spellcheck="false"
+				class="w-full p-4 bg-app-bg border border-app-border rounded-lg font-mono text-xs text-sem-info focus:outline-none focus:ring-2 focus:ring-brand-primary/50 leading-relaxed resize-y"
+				placeholder="-- Tulis perintah SQL di sini. Jangan tulis BEGIN/COMMIT: platform yang mengelola transaksi."
+			>{ draftField(draft, true) }</textarea>
+			<div class="flex flex-wrap items-center justify-between gap-2">
+				if draft == nil {
+					<span class="text-[11px] text-zinc-500">Simpan sebagai draft dulu, lalu jalankan Dry Run sebelum eksekusi.</span>
+					<button
+						type="button"
+						hx-post="/migration/drafts"
+						hx-include="#migration-form"
+						hx-target="#migration-feedback"
+						class="px-4 py-1.5 rounded-lg text-xs font-bold bg-brand-primary hover:bg-brand-primary-hover text-app-bg transition shadow-md"
+					>
+						Simpan Draft
+					</button>
+				} else {
+					<button
+						type="button"
+						hx-post={ fmt.Sprintf("/migration/%s/delete", draft.ID) }
+						hx-confirm="Hapus draft ini?"
+						hx-target="#migration-feedback"
+						class="px-3 py-1.5 rounded-lg text-xs font-medium text-sem-danger hover:bg-sem-danger/10 transition"
+					>
+						Hapus Draft
+					</button>
+					<div class="flex flex-wrap gap-2">
+						<button
+							type="button"
+							hx-post={ fmt.Sprintf("/migration/%s", draft.ID) }
+							hx-include="#migration-form"
+							hx-target="#migration-feedback"
+							class="px-3 py-1.5 rounded-lg text-xs font-medium bg-app-active hover:bg-app-border-strong text-white transition"
+						>
+							Simpan
+						</button>
+						<button
+							type="button"
+							hx-post={ fmt.Sprintf("/migration/%s/dry-run", draft.ID) }
+							hx-include="#migration-form"
+							hx-target="#migration-feedback"
+							class="px-3 py-1.5 rounded-lg text-xs font-medium bg-app-active hover:bg-app-border-strong text-white transition"
+						>
+							Dry Run + EXPLAIN
+						</button>
+						<button
+							type="button"
+							hx-post={ fmt.Sprintf("/migration/%s/execute", draft.ID) }
+							hx-include="#migration-form"
+							hx-target="#migration-feedback"
+							hx-confirm="Simpan dan eksekusi migration ini pada database target? Hasilnya (COMMIT atau ROLLBACK) dicatat permanen di riwayat."
+							class="px-4 py-1.5 rounded-lg text-xs font-bold bg-brand-primary hover:bg-brand-primary-hover text-app-bg transition shadow-md"
+						>
+							Eksekusi Migration
+						</button>
+					</div>
+				}
+			</div>
+		</form>
+		<div id="migration-feedback"></div>
+	</div>
+}
+
+templ migrationHistory(history []domain.MigrationView) {
+	<div class="space-y-3">
+		<h3 class="text-xs font-bold text-zinc-400 uppercase tracking-wider px-1">Riwayat Eksekusi Migrasi</h3>
+		<div class="bg-app-card border border-app-border rounded-xl overflow-hidden shadow-xl">
+			<table class="w-full text-left text-sm text-zinc-300">
+				<thead class="bg-app-bg text-xs uppercase tracking-wider text-zinc-400 border-b border-app-border">
+					<tr>
+						<th class="px-4 py-3 font-semibold">Versi</th>
+						<th class="px-4 py-3 font-semibold">Nama</th>
+						<th class="px-4 py-3 font-semibold">Waktu Eksekusi</th>
+						<th class="px-4 py-3 font-semibold">Oleh</th>
+						<th class="px-4 py-3 font-semibold">Durasi</th>
+						<th class="px-4 py-3 font-semibold">Status</th>
+					</tr>
+				</thead>
+				<tbody class="divide-y divide-app-border">
+					if len(history) == 0 {
+						<tr>
+							<td colspan="6" class="px-4 py-8 text-center text-zinc-500 text-xs">Belum ada riwayat migrasi pada database ini.</td>
+						</tr>
+					}
+					for _, h := range history {
+						<tr class="hover:bg-app-active/50 transition">
+							<td class="px-4 py-3 font-mono text-xs">{ h.VersionLabel() }</td>
+							<td class="px-4 py-3 text-xs font-semibold">
+								<a href={ templ.SafeURL("/migration/" + h.ID) } class="text-zinc-200 hover:text-brand-primary hover:underline">{ h.Name }</a>
+							</td>
+							<td class="px-4 py-3 text-xs">{ fmtTime(h.ExecutedAt) }</td>
+							<td class="px-4 py-3 text-xs">{ h.ExecutedByName }</td>
+							<td class="px-4 py-3 font-mono text-xs">{ fmt.Sprintf("%d ms", h.DurationMs) }</td>
+							<td class="px-4 py-3 text-xs">@MigrationStatusBadge(h.Status)</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	</div>
+}
+
+templ MigrationFeedback(success bool, message string) {
+	if success {
+		<div class="p-3 rounded-lg bg-sem-success/10 border border-sem-success/30 text-sem-success text-xs font-mono whitespace-pre-wrap">✓ { message }</div>
+	} else {
+		<div class="p-3 rounded-lg bg-sem-danger/10 border border-sem-danger/30 text-sem-danger text-xs font-mono whitespace-pre-wrap">✗ { message }</div>
+	}
+}
