@@ -1,7 +1,6 @@
 package http
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -13,12 +12,13 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"dbplatform/app/domain"
 	"dbplatform/app/internal/authn"
 	"dbplatform/app/internal/dbmanager"
+	"dbplatform/app/internal/groups"
+	"dbplatform/app/internal/rbac"
 	"dbplatform/app/views/components"
 	"dbplatform/app/views/pages"
 
@@ -28,29 +28,26 @@ import (
 var fromTableRe = regexp.MustCompile(`(?i)\bFROM\s+["` + "`" + `]?([A-Za-z_][A-Za-z0-9_]*)["` + "`" + `]?`)
 
 type Server struct {
-	mux         *http.ServeMux
-	handler     http.Handler
-	logger      *log.Logger
-	sessions    *authn.SessionStore
-	dbRegistry  *dbmanager.ConnectionRegistry
-	adminMu     sync.RWMutex
-	instances   []domain.DBInstance
-	inviteCodes []domain.TeamInviteCodeItem
+	mux        *http.ServeMux
+	handler    http.Handler
+	logger     *log.Logger
+	sessions   *authn.SessionStore
+	groups     *groups.Repository
+	access     *rbac.Authorizer
+	dbRegistry *dbmanager.ConnectionRegistry
 }
 
-// NewServer menyusun router di atas SessionStore in-memory yang kosong (khusus pengujian).
-// Aplikasi memakai NewServerWithSessions dengan SessionStore PostgreSQL.
-func NewServer(logOutput io.Writer) *Server {
-	return NewServerWithSessions(logOutput, authn.NewMemorySessionStore())
+// Deps are the services the HTTP layer needs. All are backed by the platform PostgreSQL in production.
+type Deps struct {
+	Sessions *authn.SessionStore // identity and session lifecycle
+	Groups   *groups.Repository  // groups, membership, invite codes
+	Access   *rbac.Authorizer    // every database authorization decision
 }
 
-// NewServerWithSessions menyusun router beserta rantai middleware (Logger -> CSRF -> Mux)
-func NewServerWithSessions(logOutput io.Writer, sessionStore *authn.SessionStore) *Server {
+// NewServer menyusun router beserta rantai middleware (Logger -> CSRF -> Mux)
+func NewServer(logOutput io.Writer, deps Deps) *Server {
 	if logOutput == nil {
 		logOutput = os.Stdout
-	}
-	if sessionStore == nil {
-		panic("http: NewServerWithSessions requires a SessionStore")
 	}
 
 	logger := log.New(logOutput, "", log.LstdFlags)
@@ -59,16 +56,10 @@ func NewServerWithSessions(logOutput io.Writer, sessionStore *authn.SessionStore
 	s := &Server{
 		mux:        mux,
 		logger:     logger,
-		sessions:   sessionStore,
+		sessions:   deps.Sessions,
+		groups:     deps.Groups,
+		access:     deps.Access,
 		dbRegistry: dbmanager.NewConnectionRegistry(),
-		instances: []domain.DBInstance{
-			{ID: "db-1", InviteCode: "TEAM-BACKEND", Name: "PostgreSQL Demo", DBMS: "POSTGRESQL", Host: "target-postgres", Port: 5432, DBName: "demo_target", Status: "CONNECTED"},
-			{ID: "db-2", InviteCode: "TEAM-ANALYST", Name: "MySQL Production", DBMS: "MYSQL", Host: "mysql-prod.internal", Port: 3306, DBName: "analytics_db", Status: "CONNECTED"},
-		},
-		inviteCodes: []domain.TeamInviteCodeItem{
-			{Code: "TEAM-BACKEND", GroupName: "Backend-Engineers", DatabaseID: "db-1", DatabaseName: "PostgreSQL Demo", DefaultAccess: "VIEW_EDIT"},
-			{Code: "TEAM-ANALYST", GroupName: "Data-Analysts", DatabaseID: "db-2", DatabaseName: "MySQL Production", DefaultAccess: "VIEW_ONLY"},
-		},
 	}
 	s.registerRoutes()
 
@@ -86,12 +77,7 @@ func (s *Server) Sessions() *authn.SessionStore {
 	return s.sessions
 }
 
-// ConnectDatabase membuka koneksi ke database target, melakukan Ping, lalu mendaftarkannya ke registry
-func (s *Server) ConnectDatabase(ctx context.Context, dbID, dsn string) error {
-	return s.dbRegistry.ConnectAndRegister(ctx, dbID, dsn)
-}
-
-// RegisterDatabasePool mendaftarkan koneksi *sql.DB untuk database target tertentu (misal "db-1")
+// RegisterDatabasePool mendaftarkan koneksi *sql.DB untuk database target tertentu
 func (s *Server) RegisterDatabasePool(dbID string, db *sql.DB) {
 	if s.dbRegistry != nil {
 		s.dbRegistry.RegisterPool(dbID, db)
@@ -125,9 +111,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /migration/dry-run", s.handleMigrationDryRun)
 	s.mux.HandleFunc("POST /migration/apply", s.handleMigrationApply)
 	s.mux.HandleFunc("GET /admin", s.handleAdminPage)
-	s.mux.HandleFunc("POST /admin/db/add", s.handleAdminAddDB)
-	s.mux.HandleFunc("POST /admin/codes/generate", s.handleAdminGenerateCode)
-	s.mux.HandleFunc("POST /admin/users/access", s.handleAdminUpdateUserAccess)
+	s.mux.HandleFunc("POST /admin/users/role", s.handleAdminUpdateUserRole)
 	s.mux.HandleFunc("POST /logout", s.handleLogoutHTMX)
 
 	// JSON API Routes
@@ -138,8 +122,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
 }
 
-// validateRequestSession memeriksa idle timeout, absolute expiration, dan rotasi sesi otomatis pada setiap request
-func (s *Server) validateRequestSession(w http.ResponseWriter, r *http.Request) (*authn.AuthLayoutUser, bool) {
+// validateRequestSession memeriksa idle timeout, absolute expiration, dan rotasi sesi otomatis pada setiap request.
+// Hanya mengidentifikasi principal; hak akses diperiksa terpisah lewat rbac (lihat authz.go).
+func (s *Server) validateRequestSession(w http.ResponseWriter, r *http.Request) (*authn.User, bool) {
 	sidCookie, err := r.Cookie(authn.SessionCookieName)
 	if err != nil || sidCookie.Value == "" {
 		return nil, false
@@ -335,10 +320,14 @@ func (s *Server) handleSignupHTMX(w http.ResponseWriter, r *http.Request) {
 	} else if err := authn.ValidatePassword(password); err != nil {
 		state.PasswordError = "8-128 karakter"
 	}
-	// Kode undangan opsional: kosong berarti hanya menjadi anggota group Public
+	// Kode undangan opsional: kosong berarti hanya menjadi anggota group Public (otomatis untuk semua user)
+	var inviteGroup *groups.Group
 	if inviteCode != "" {
-		if _, err := authn.ValidateSignupCode(inviteCode); err != nil {
+		g, err := s.groups.ResolveInviteCode(r.Context(), inviteCode)
+		if err != nil {
 			state.CodeError = "Kode tim tidak valid"
+		} else {
+			inviteGroup = g
 		}
 	}
 
@@ -348,7 +337,7 @@ func (s *Server) handleSignupHTMX(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := s.sessions.RegisterUser(r.Context(), authn.RegisterInput{
+	newUser, err := s.sessions.RegisterUser(r.Context(), authn.RegisterInput{
 		Username: username,
 		Email:    email,
 		Password: password,
@@ -362,11 +351,17 @@ func (s *Server) handleSignupHTMX(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		state.GeneralError = "Gagal mendaftarkan akun, silakan coba lagi."
 	}
-
 	if err != nil {
 		w.WriteHeader(http.StatusOK)
 		_ = pages.SignupForm(state).Render(r.Context(), w)
 		return
+	}
+
+	if inviteGroup != nil {
+		if err := s.groups.AddMember(r.Context(), inviteGroup.ID, newUser.ID); err != nil {
+			// Akun tetap dibuat (anggota Public); admin dapat menambahkan group secara manual
+			s.logger.Printf("[SIGNUP] gagal menambahkan user ke group %s: %v", inviteGroup.ID, err)
+		}
 	}
 
 	var prevToken string
@@ -391,35 +386,25 @@ func (s *Server) handleSignupHTMX(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.validateRequestSession(w, r)
+	user, layout, ok := s.requireSession(w, r)
 	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	csrfToken, err := s.ensureCSRFToken(w, r)
+	if err != nil {
+		http.Error(w, "Gagal membuat token CSRF", http.StatusInternalServerError)
 		return
 	}
 
-	var csrfToken string
-	if c, err := r.Cookie(CSRFCookieName); err == nil && c.Value != "" {
-		csrfToken = c.Value
-	} else {
-		tok, err := GenerateCSRFToken()
-		if err != nil {
-			http.Error(w, "Gagal membuat token CSRF", http.StatusInternalServerError)
-			return
-		}
-		csrfToken = tok
-		http.SetCookie(w, &http.Cookie{
-			Name:     CSRFCookieName,
-			Value:    csrfToken,
-			Path:     "/",
-			HttpOnly: true,
-			Secure:   true,
-			SameSite: http.SameSiteLaxMode,
-		})
+	activeDBID := resolveDBID(r, layout)
+	if activeDBID == "" {
+		// Tidak ada database yang dapat diakses: tampilkan empty state
+		templ.Handler(pages.Dashboard(layout, "", nil, domain.TableDataResult{}, csrfToken)).ServeHTTP(w, r)
+		return
 	}
-
-	activeDBID := r.URL.Query().Get("db_id")
-	if activeDBID == "" && len(user.Databases) > 0 {
-		activeDBID = user.Databases[0].DatabaseID
+	if _, err := s.authorizeDB(r.Context(), user, activeDBID, rbac.ActionViewSchema); err != nil {
+		s.renderForbiddenPage(w, r, layout, csrfToken, "viewer", err)
+		return
 	}
 
 	var (
@@ -442,22 +427,20 @@ func (s *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
 		selectedData = buildTableDataAndSchemaForDB(activeDBID, firstTbl)
 	}
 
-	templ.Handler(pages.Dashboard(user, activeDBID, tables, selectedData, csrfToken)).ServeHTTP(w, r)
+	templ.Handler(pages.Dashboard(layout, activeDBID, tables, selectedData, csrfToken)).ServeHTTP(w, r)
 }
 
 func (s *Server) handleDashboardTable(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.validateRequestSession(w, r)
+	user, layout, ok := s.requireSession(w, r)
 	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 
-	dbID := strings.TrimSpace(r.URL.Query().Get("db_id"))
-	if dbID == "" && len(user.Databases) > 0 {
-		dbID = user.Databases[0].DatabaseID
-	}
-	if dbID == "" {
-		dbID = "db-1"
+	dbID := resolveDBID(r, layout)
+	if _, err := s.authorizeDB(r.Context(), user, dbID, rbac.ActionViewData); err != nil {
+		writeFragmentStatus(w, err)
+		_ = components.DataGridError(accessDeniedMessage(err)).Render(r.Context(), w)
+		return
 	}
 
 	tableName := r.URL.Query().Get("name")
@@ -686,33 +669,16 @@ func buildTableDataAndSchema(tableName string) domain.TableDataResult {
 }
 
 func (s *Server) handleDashboardQuery(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.validateRequestSession(w, r)
+	user, layout, ok := s.requireSession(w, r)
 	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 
-	dbID := strings.TrimSpace(r.FormValue("db_id"))
-	if dbID == "" && len(user.Databases) > 0 {
-		dbID = user.Databases[0].DatabaseID
-	}
-	if dbID == "" {
-		dbID = "db-1"
-	}
-
-	// Cek otorisasi akses pengguna terhadap database yang dipilih
-	hasAccess := user.IsPlatformAdmin
-	for _, dbAcc := range user.Databases {
-		if dbAcc.DatabaseID == dbID && dbAcc.EffectiveAccess != "NONE" {
-			hasAccess = true
-			break
-		}
-	}
-	if !hasAccess {
-		denied := buildTableDataAndSchemaForDB(dbID, "")
-		denied.QueryError = fmt.Sprintf("Akses ditolak: Anda tidak memiliki izin untuk menjalankan query pada database '%s'.", dbID)
-		w.WriteHeader(http.StatusOK)
-		_ = components.DataGrid(denied).Render(r.Context(), w)
+	// Otorisasi selalu lewat rbac: membaca data butuh minimal VIEW_ONLY melalui group
+	dbID := resolveDBID(r, layout)
+	if _, err := s.authorizeDB(r.Context(), user, dbID, rbac.ActionViewData); err != nil {
+		writeFragmentStatus(w, err)
+		_ = components.DataGridError(accessDeniedMessage(err)).Render(r.Context(), w)
 		return
 	}
 
@@ -770,9 +736,8 @@ func (s *Server) handleDashboardQuery(w http.ResponseWriter, r *http.Request) {
 // --- Migration Editor Handlers ---
 
 func (s *Server) handleMigrationPage(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.validateRequestSession(w, r)
+	user, layout, ok := s.requireSession(w, r)
 	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 
@@ -782,10 +747,17 @@ func (s *Server) handleMigrationPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	activeDBID := r.URL.Query().Get("db_id")
-	if activeDBID == "" && len(user.Databases) > 0 {
-		activeDBID = user.Databases[0].DatabaseID
+	activeDBID := resolveDBID(r, layout)
+	if activeDBID == "" {
+		templ.Handler(pages.Migration(layout, "", false, nil, csrfToken)).ServeHTTP(w, r)
+		return
 	}
+	level, err := s.authorizeDB(r.Context(), user, activeDBID, rbac.ActionViewMigration)
+	if err != nil {
+		s.renderForbiddenPage(w, r, layout, csrfToken, "migration", err)
+		return
+	}
+	canEdit := rbac.IsAllowed(level, rbac.ActionExecuteMigration)
 
 	dummyHistories := []domain.MigrationHistory{
 		{
@@ -798,23 +770,36 @@ func (s *Server) handleMigrationPage(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	templ.Handler(pages.Migration(user, activeDBID, dummyHistories, csrfToken)).ServeHTTP(w, r)
+	templ.Handler(pages.Migration(layout, activeDBID, canEdit, dummyHistories, csrfToken)).ServeHTTP(w, r)
 }
 
 func (s *Server) handleMigrationDryRun(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.validateRequestSession(w, r); !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	if !s.authorizeMigrationWrite(w, r, rbac.ActionCreateMigration) {
 		return
 	}
 	_ = pages.MigrationFeedback(true, "Simulasi DDL Valid: 1 tabel akan dibuat tanpa error.").Render(r.Context(), w)
 }
 
 func (s *Server) handleMigrationApply(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.validateRequestSession(w, r); !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	if !s.authorizeMigrationWrite(w, r, rbac.ActionExecuteMigration) {
 		return
 	}
 	_ = pages.MigrationFeedback(true, "Migrasi berhasil dieksekusi ke PostgreSQL Target dalam 18ms.").Render(r.Context(), w)
+}
+
+// authorizeMigrationWrite memastikan user memiliki VIEW_EDIT (melalui group) pada database target migrasi.
+func (s *Server) authorizeMigrationWrite(w http.ResponseWriter, r *http.Request, action rbac.Action) bool {
+	user, layout, ok := s.requireSession(w, r)
+	if !ok {
+		return false
+	}
+	dbID := resolveDBID(r, layout)
+	if _, err := s.authorizeDB(r.Context(), user, dbID, action); err != nil {
+		writeFragmentStatus(w, err)
+		_ = pages.MigrationFeedback(false, accessDeniedMessage(err)).Render(r.Context(), w)
+		return false
+	}
+	return true
 }
 
 func (s *Server) handleLogoutHTMX(w http.ResponseWriter, r *http.Request) {
@@ -826,200 +811,6 @@ func (s *Server) handleLogoutHTMX(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("HX-Redirect", "/login")
 	w.WriteHeader(http.StatusOK)
-}
-
-// --- Platform Admin Handlers (Hanya dapat diakses oleh PLATFORM_ADMIN) ---
-
-func (s *Server) requirePlatformAdmin(w http.ResponseWriter, r *http.Request) (*authn.AuthLayoutUser, bool) {
-	user, ok := s.validateRequestSession(w, r)
-	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return nil, false
-	}
-	if !user.IsPlatformAdmin {
-		http.Error(w, "403 Forbidden: Hanya Platform Admin yang diizinkan mengakses halaman ini", http.StatusForbidden)
-		return nil, false
-	}
-	return user, true
-}
-
-func (s *Server) buildAdminUsersList(ctx context.Context) []domain.UserManagementItem {
-	rawUsers, err := s.sessions.ListUsers(ctx)
-	if err != nil {
-		return nil
-	}
-	items := make([]domain.UserManagementItem, 0, len(rawUsers))
-	for _, u := range rawUsers {
-		defaultDB1 := "VIEW_EDIT"
-		defaultDB2 := "VIEW_ONLY"
-		if u.Role == authn.RolePlatformAdmin {
-			defaultDB2 = "VIEW_EDIT"
-		}
-		db1Access := authn.GetUserDBAccess(u.ID, "db-1", defaultDB1)
-		db2Access := authn.GetUserDBAccess(u.ID, "db-2", defaultDB2)
-
-		items = append(items, domain.UserManagementItem{
-			ID:       u.ID,
-			Username: u.Username,
-			Email:    u.Email,
-			Role:     u.Role,
-			IsActive: u.IsActive,
-			Grants: []domain.UserAccessGrant{
-				{DatabaseID: "db-1", DatabaseName: "PostgreSQL Demo", DBMS: "POSTGRESQL", EffectiveAccess: db1Access},
-				{DatabaseID: "db-2", DatabaseName: "MySQL Production", DBMS: "MYSQL", EffectiveAccess: db2Access},
-			},
-		})
-	}
-	return items
-}
-
-func (s *Server) handleAdminPage(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.requirePlatformAdmin(w, r)
-	if !ok {
-		return
-	}
-
-	csrfToken, err := s.ensureCSRFToken(w, r)
-	if err != nil {
-		http.Error(w, "Gagal membuat token CSRF", http.StatusInternalServerError)
-		return
-	}
-
-	activeDBID := r.URL.Query().Get("db_id")
-	if activeDBID == "" && len(user.Databases) > 0 {
-		activeDBID = user.Databases[0].DatabaseID
-	}
-
-	s.adminMu.RLock()
-	instances := append([]domain.DBInstance(nil), s.instances...)
-	codes := append([]domain.TeamInviteCodeItem(nil), s.inviteCodes...)
-	s.adminMu.RUnlock()
-
-	users := s.buildAdminUsersList(r.Context())
-
-	templ.Handler(pages.Admin(user, activeDBID, instances, codes, users, csrfToken)).ServeHTTP(w, r)
-}
-
-func (s *Server) handleAdminAddDB(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.requirePlatformAdmin(w, r); !ok {
-		return
-	}
-
-	name := strings.TrimSpace(r.FormValue("name"))
-	dbms := strings.TrimSpace(r.FormValue("dbms"))
-	host := strings.TrimSpace(r.FormValue("host"))
-	portStr := strings.TrimSpace(r.FormValue("port"))
-	dbName := strings.TrimSpace(r.FormValue("db_name"))
-
-	if name == "" || host == "" || dbName == "" {
-		w.WriteHeader(http.StatusOK)
-		_ = pages.AdminFeedback(false, "Nama instance, host, dan nama database wajib diisi.").Render(r.Context(), w)
-		return
-	}
-
-	port, err := strconv.Atoi(portStr)
-	if err != nil || port <= 0 {
-		port = 5432
-	}
-
-	s.adminMu.Lock()
-	newID := fmt.Sprintf("db-%d", len(s.instances)+1)
-	autoCode := fmt.Sprintf("TEAM-DB%d", len(s.instances)+1)
-	newInst := domain.DBInstance{
-		ID:         newID,
-		InviteCode: autoCode,
-		Name:       name,
-		DBMS:       dbms,
-		Host:       host,
-		Port:       port,
-		DBName:     dbName,
-		Status:     "CONNECTED",
-	}
-	s.instances = append(s.instances, newInst)
-	s.inviteCodes = append(s.inviteCodes, domain.TeamInviteCodeItem{
-		Code:          autoCode,
-		GroupName:     name + "-Group",
-		DatabaseID:    newID,
-		DatabaseName:  name,
-		DefaultAccess: "VIEW_ONLY",
-	})
-	s.adminMu.Unlock()
-
-	authn.RegisterTeamCode(autoCode, "grp-"+newID, name+"-Group")
-
-	msg := fmt.Sprintf("Database '%s' (%s) berhasil didaftarkan dengan kode tim: %s", name, newID, autoCode)
-	w.WriteHeader(http.StatusOK)
-	_ = pages.AdminFeedback(true, msg).Render(r.Context(), w)
-}
-
-func (s *Server) handleAdminGenerateCode(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.requirePlatformAdmin(w, r); !ok {
-		return
-	}
-
-	code := strings.ToUpper(strings.TrimSpace(r.FormValue("code")))
-	groupName := strings.TrimSpace(r.FormValue("group_name"))
-	dbID := strings.TrimSpace(r.FormValue("database_id"))
-	defaultAccess := strings.TrimSpace(r.FormValue("default_access"))
-	if defaultAccess != "VIEW_EDIT" {
-		defaultAccess = "VIEW_ONLY"
-	}
-
-	s.adminMu.Lock()
-	dbName := "PostgreSQL Demo"
-	for _, inst := range s.instances {
-		if inst.ID == dbID {
-			dbName = inst.Name
-			break
-		}
-	}
-	if code != "" && groupName != "" {
-		s.inviteCodes = append(s.inviteCodes, domain.TeamInviteCodeItem{
-			Code:          code,
-			GroupName:     groupName,
-			DatabaseID:    dbID,
-			DatabaseName:  dbName,
-			DefaultAccess: defaultAccess,
-		})
-		authn.RegisterTeamCode(code, "grp-"+strings.ToLower(code), groupName)
-	}
-	instances := append([]domain.DBInstance(nil), s.instances...)
-	codes := append([]domain.TeamInviteCodeItem(nil), s.inviteCodes...)
-	s.adminMu.Unlock()
-
-	feedback := fmt.Sprintf("Kode undangan '%s' untuk grup '%s' (%s) berhasil diaktifkan!", code, groupName, defaultAccess)
-	w.WriteHeader(http.StatusOK)
-	_ = pages.AdminCodesSection(codes, instances, feedback).Render(r.Context(), w)
-}
-
-func (s *Server) handleAdminUpdateUserAccess(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.requirePlatformAdmin(w, r); !ok {
-		return
-	}
-
-	userID := strings.TrimSpace(r.FormValue("user_id"))
-	role := strings.TrimSpace(r.FormValue("role"))
-	accessDB1 := strings.TrimSpace(r.FormValue("access_db_1"))
-	accessDB2 := strings.TrimSpace(r.FormValue("access_db_2"))
-
-	if role != authn.RolePlatformAdmin {
-		role = authn.RoleUser
-	}
-
-	if userID != "" {
-		_ = s.sessions.UpdateUserRole(r.Context(), userID, role)
-		if accessDB1 != "" {
-			authn.SetUserDBAccess(userID, "db-1", accessDB1)
-		}
-		if accessDB2 != "" {
-			authn.SetUserDBAccess(userID, "db-2", accessDB2)
-		}
-	}
-
-	users := s.buildAdminUsersList(r.Context())
-	feedback := fmt.Sprintf("Hak akses untuk user '%s' berhasil diperbarui (Role: %s, DB-1: %s, DB-2: %s).", userID, role, accessDB1, accessDB2)
-	w.WriteHeader(http.StatusOK)
-	_ = pages.AdminUsersTable(users, feedback).Render(r.Context(), w)
 }
 
 // --- JSON API Handlers ---
@@ -1084,9 +875,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		prevToken = c.Value
 	}
 
-	opaqueSessionID, userProfile, err := s.sessions.Login(r.Context(), req.Username, req.Password, prevToken)
+	opaqueSessionID, user, err := s.sessions.Login(r.Context(), req.Username, req.Password, prevToken)
 	if err != nil {
 		writeJSONError(w, http.StatusUnauthorized, "Username atau password tidak valid")
+		return
+	}
+
+	layout, err := s.layoutUser(r.Context(), user)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Gagal memuat profil pengguna")
 		return
 	}
 
@@ -1094,8 +891,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"message":  "login berhasil",
-		"username": userProfile.Username,
-		"user":     userProfile,
+		"username": user.Username,
+		"user":     layout,
 	})
 }
 
@@ -1107,7 +904,12 @@ func (s *Server) handleGetMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, user)
+	layout, err := s.layoutUser(r.Context(), user)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Gagal memuat profil pengguna")
+		return
+	}
+	writeJSON(w, http.StatusOK, layout)
 }
 
 // Handler logout untuk menghapus sesi aktif di server dan membersihkan cookie __Host-sid

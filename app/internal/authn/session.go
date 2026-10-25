@@ -5,11 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
-	"sync"
 	"time"
 
 	"dbplatform/app/internal/ids"
-	"dbplatform/app/internal/rbac"
 )
 
 const (
@@ -17,66 +15,6 @@ const (
 	RolePlatformAdmin = "PLATFORM_ADMIN"
 	RoleUser          = "USER"
 )
-
-var (
-	ErrInvalidInviteCode = errors.New("kode undangan tim tidak valid")
-	teamCodesMu          sync.RWMutex
-	defaultTeamCodes     = map[string]GroupSummary{
-		"TEAM-BACKEND": {ID: "grp-1", Name: "Backend-Engineers"},
-		"TEAM-ANALYST": {ID: "grp-2", Name: "Data-Analysts"},
-	}
-	userAccessMu       sync.RWMutex
-	userDBAccessGrants = map[string]map[string]string{} // userID -> dbID -> EffectiveAccess
-)
-
-// RegisterTeamCode mendaftarkan kode undangan tim baru agar dapat digunakan saat Sign Up
-func RegisterTeamCode(code, groupID, groupName string) {
-	teamCodesMu.Lock()
-	defer teamCodesMu.Unlock()
-	defaultTeamCodes[strings.ToUpper(strings.TrimSpace(code))] = GroupSummary{
-		ID:   groupID,
-		Name: groupName,
-	}
-}
-
-// SetUserDBAccess untuk mengatur level akses efektif seorang user pada database tertentu
-func SetUserDBAccess(userID, dbID, accessLevel string) {
-	userAccessMu.Lock()
-	defer userAccessMu.Unlock()
-	if userDBAccessGrants[userID] == nil {
-		userDBAccessGrants[userID] = make(map[string]string)
-	}
-	userDBAccessGrants[userID][dbID] = accessLevel
-}
-
-// GetUserDBAccess untuk membaca level akses efektif seorang user pada database tertentu
-func GetUserDBAccess(userID, dbID, fallback string) string {
-	userAccessMu.RLock()
-	defer userAccessMu.RUnlock()
-	if m, ok := userDBAccessGrants[userID]; ok {
-		if lvl, ok := m[dbID]; ok && lvl != "" {
-			return lvl
-		}
-	}
-	return fallback
-}
-
-// ValidateSignupCode memvalidasi kode undangan tim saat Sign Up.
-// Sign Up publik hanya dapat membuat akun USER
-func ValidateSignupCode(inviteCode string) (GroupSummary, error) {
-	code := strings.TrimSpace(inviteCode)
-	if code == "" {
-		return GroupSummary{}, ErrInvalidInviteCode
-	}
-
-	teamCodesMu.RLock()
-	grp, ok := defaultTeamCodes[strings.ToUpper(code)]
-	teamCodesMu.RUnlock()
-	if !ok {
-		return GroupSummary{}, ErrInvalidInviteCode
-	}
-	return grp, nil
-}
 
 // SessionStore adalah mesin pengelola Identifikasi Principal & Siklus Hidup Sesi (Session Lifecycle Engine)
 type SessionStore struct {
@@ -184,9 +122,9 @@ func (s *SessionStore) CountActiveAdmins(ctx context.Context) (int, error) {
 }
 
 // Authenticate memverifikasi username atau email beserta password (Argon2id), serta memuat UUID permanen pengguna
-func (s *SessionStore) Authenticate(ctx context.Context, identifier, plainPassword string) (*User, *AuthLayoutUser, error) {
+func (s *SessionStore) Authenticate(ctx context.Context, identifier, plainPassword string) (*User, error) {
 	if identifier == "" || plainPassword == "" {
-		return nil, nil, ErrInvalidCredentials
+		return nil, ErrInvalidCredentials
 	}
 
 	// Input berisi '@' dicocokkan ke email, selain itu ke username. Tidak ada tebakan lain.
@@ -203,25 +141,25 @@ func (s *SessionStore) Authenticate(ctx context.Context, identifier, plainPasswo
 	if err != nil {
 		// Jalankan dummy hash verification untuk mencegah timing attack enumerasi username/email
 		VerifyDummyPassword(plainPassword)
-		return nil, nil, ErrInvalidCredentials
+		return nil, ErrInvalidCredentials
 	}
 
 	ok, err := VerifyPassword(plainPassword, user.PasswordHash)
 	if err != nil || !ok {
-		return nil, nil, ErrInvalidCredentials
+		return nil, ErrInvalidCredentials
 	}
 
 	if !user.IsActive {
-		return nil, nil, ErrUserInactive
+		return nil, ErrUserInactive
 	}
 
-	return user, BuildUserProfileFromUser(user), nil
+	return user, nil
 }
 
 // Login melakukan autentikasi principal, mencabut sesi pra-login (rotasi saat login),
 // dan menerbitkan opaque session identifier baru di PostgreSQL Internal.
-func (s *SessionStore) Login(ctx context.Context, username, plainPassword, previousOpaqueToken string) (string, *AuthLayoutUser, error) {
-	user, profile, err := s.Authenticate(ctx, username, plainPassword)
+func (s *SessionStore) Login(ctx context.Context, username, plainPassword, previousOpaqueToken string) (string, *User, error) {
+	user, err := s.Authenticate(ctx, username, plainPassword)
 	if err != nil {
 		return "", nil, err
 	}
@@ -236,7 +174,7 @@ func (s *SessionStore) Login(ctx context.Context, username, plainPassword, previ
 		return "", nil, err
 	}
 
-	return opaqueToken, profile, nil
+	return opaqueToken, user, nil
 }
 
 // CreateSessionForUser menghasilkan opaque session identifier acak (CSPRNG) dan menyimpannya ke PostgreSQL Internal
@@ -321,14 +259,13 @@ func (s *SessionStore) ValidateAndRefresh(ctx context.Context, rawOpaqueToken st
 		return nil, ErrUserInactive
 	}
 
-	profile := BuildUserProfileFromUser(user)
 	newIdleExp := minTime(now.Add(s.cfg.IdleTimeout), sess.AbsoluteExpiresAt)
 
 	// Jika request paralel masuk memakai token lama selama grace period:
 	// Izinkan request tanpa merotasi ulang dan tanpa mengubah cookie baru yang sudah diterbitkan request utama
 	if usedGraceSlot {
 		return &ValidationResult{
-			User:          profile,
+			User:          user,
 			Session:       sess,
 			Rotated:       false,
 			UsedGraceSlot: true,
@@ -366,7 +303,7 @@ func (s *SessionStore) ValidateAndRefresh(ctx context.Context, rawOpaqueToken st
 			sess.IdleExpiresAt = newIdleExp
 
 			return &ValidationResult{
-				User:        profile,
+				User:        user,
 				Session:     sess,
 				Rotated:     true,
 				NewOpaqueID: newRawToken,
@@ -376,7 +313,7 @@ func (s *SessionStore) ValidateAndRefresh(ctx context.Context, rawOpaqueToken st
 		// Jika rotated == false, berarti request paralel lain baru saja merotasi sesi ini beberapa milidetik lalu.
 		// Request ini tetap sah dalam masa grace period.
 		return &ValidationResult{
-			User:          profile,
+			User:          user,
 			Session:       sess,
 			Rotated:       false,
 			UsedGraceSlot: true,
@@ -391,7 +328,7 @@ func (s *SessionStore) ValidateAndRefresh(ctx context.Context, rawOpaqueToken st
 	sess.IdleExpiresAt = newIdleExp
 
 	return &ValidationResult{
-		User:    profile,
+		User:    user,
 		Session: sess,
 		Rotated: false,
 	}, nil
@@ -399,7 +336,7 @@ func (s *SessionStore) ValidateAndRefresh(ctx context.Context, rawOpaqueToken st
 
 // RotateOnPrivilegeChange merotasi session identifier seketika saat terjadi peningkatan/perubahan privilege
 // dengan tetap mempertahankan grace period singkat untuk request paralel dan TIDAK memperpanjang absolute expiration.
-func (s *SessionStore) RotateOnPrivilegeChange(ctx context.Context, rawOpaqueToken string, newRole string) (string, *AuthLayoutUser, error) {
+func (s *SessionStore) RotateOnPrivilegeChange(ctx context.Context, rawOpaqueToken string, newRole string) (string, *User, error) {
 	res, err := s.ValidateAndRefresh(ctx, rawOpaqueToken)
 	if err != nil {
 		return "", nil, err
@@ -415,11 +352,10 @@ func (s *SessionStore) RotateOnPrivilegeChange(ctx context.Context, rawOpaqueTok
 	if err != nil {
 		return "", nil, err
 	}
-	profile := BuildUserProfileFromUser(user)
 
 	// Jika ValidateAndRefresh di atas sudah kebetulan merotasi token, gunakan token baru tersebut
 	if res.Rotated && res.NewOpaqueID != "" {
-		return res.NewOpaqueID, profile, nil
+		return res.NewOpaqueID, user, nil
 	}
 
 	now := s.nowFunc()
@@ -447,7 +383,7 @@ func (s *SessionStore) RotateOnPrivilegeChange(ctx context.Context, rawOpaqueTok
 		return "", nil, ErrSessionExpired
 	}
 
-	return newRawToken, profile, nil
+	return newRawToken, user, nil
 }
 
 // RevokeSession menonaktifkan sesi seketika di backend saat pengguna logout
@@ -475,48 +411,6 @@ func (s *SessionStore) ListUsers(ctx context.Context) ([]*User, error) {
 // UpdateUserRole mengubah peran pengguna (USER / PLATFORM_ADMIN)
 func (s *SessionStore) UpdateUserRole(ctx context.Context, userID, role string) error {
 	return s.repo.UpdateUserRole(ctx, userID, role)
-}
-
-// BuildUserProfileFromUser membentuk profil AuthLayoutUser dari entitas User permanen
-func BuildUserProfileFromUser(u *User) *AuthLayoutUser {
-	isAdmin := u.Role == RolePlatformAdmin
-	defaultDB1 := string(rbac.AccessViewEdit)
-	defaultDB2 := string(rbac.AccessViewOnly)
-	if isAdmin {
-		defaultDB2 = string(rbac.AccessViewEdit)
-	}
-	db1Access := GetUserDBAccess(u.ID, "db-1", defaultDB1)
-	db2Access := GetUserDBAccess(u.ID, "db-2", defaultDB2)
-
-	var dbs []DatabaseAccessSummary
-	if db1Access != string(rbac.AccessNone) {
-		dbs = append(dbs, DatabaseAccessSummary{
-			DatabaseID:      "db-1",
-			DatabaseName:    "PostgreSQL Demo",
-			DBMS:            "POSTGRESQL",
-			EffectiveAccess: db1Access,
-		})
-	}
-	if db2Access != string(rbac.AccessNone) {
-		dbs = append(dbs, DatabaseAccessSummary{
-			DatabaseID:      "db-2",
-			DatabaseName:    "MySQL Production",
-			DBMS:            "MYSQL",
-			EffectiveAccess: db2Access,
-		})
-	}
-
-	return &AuthLayoutUser{
-		ID:              u.ID,
-		Username:        u.Username,
-		Email:           u.Email,
-		Role:            u.Role,
-		IsPlatformAdmin: isAdmin,
-		Groups: []GroupSummary{
-			{ID: "grp-1", Name: "Backend-Engineers"},
-		},
-		Databases: dbs,
-	}
 }
 
 func minTime(a, b time.Time) time.Time {

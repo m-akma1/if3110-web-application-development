@@ -27,31 +27,6 @@ type User struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
-// GroupSummary berisi informasi ringkas group yang diikuti oleh user
-type GroupSummary struct {
-	ID   string `json:"id"`   // Unique identifier untuk security group
-	Name string `json:"name"` // Nama group (misal: "Backend-Engineers", "Data-Analysts")
-}
-
-// DatabaseAccessSummary membantu Layout UI menampilkan daftar database beserta hak akses efektif user
-type DatabaseAccessSummary struct {
-	DatabaseID      string `json:"database_id"`
-	DatabaseName    string `json:"database_name"`
-	DBMS            string `json:"dbms"`             // "POSTGRESQL", "MYSQL", atau "MARIADB"
-	EffectiveAccess string `json:"effective_access"` // "VIEW_ONLY" atau "VIEW_EDIT"
-}
-
-// AuthLayoutUser adalah struct yang dilempar ke Layout SSR Frontend (Response dari GET /api/auth/me)
-type AuthLayoutUser struct {
-	ID              string                  `json:"id"`
-	Username        string                  `json:"username"`
-	Email           string                  `json:"email"`
-	Role            string                  `json:"role"`              // "PLATFORM_ADMIN" atau "USER"
-	IsPlatformAdmin bool                    `json:"is_platform_admin"` // Memudahkan layout menampilkan menu Admin (Kelola Koneksi DB & Group)
-	Groups          []GroupSummary          `json:"groups"`            // Daftar group tempat user bergabung (1 atau lebih group)
-	Databases       []DatabaseAccessSummary `json:"databases"`         // Daftar database yang boleh diakses beserta level akses efektifnya
-}
-
 // Session merepresentasikan state siklus hidup sesi di PostgreSQL Internal
 type Session struct {
 	ID                   string     // Unique identifier untuk baris sesi (session family ID)
@@ -104,7 +79,7 @@ func getEnvInt(key string, fallback int) int {
 
 // ValidationResult menyimpan hasil validasi sesi beserta token baru apabila terjadi rotasi otomatis
 type ValidationResult struct {
-	User          *AuthLayoutUser
+	User          *User // principal yang sudah terverifikasi (identitas saja; hak akses ditentukan rbac)
 	Session       *Session
 	Rotated       bool
 	NewOpaqueID   string

@@ -60,17 +60,17 @@ func TestPrincipalIdentification_HashingAndPermanentID(t *testing.T) {
 	}
 
 	// Verifikasi password salah wajib ditolak
-	if _, _, err := store.Authenticate(ctx, "budi_santoso", "PasswordSalah123"); err == nil {
+	if _, err := store.Authenticate(ctx, "budi_santoso", "PasswordSalah123"); err == nil {
 		t.Fatalf("autentikasi dengan password salah seharusnya gagal")
 	}
 
 	// Verifikasi password benar berhasil dan memuat Unique Identifier Permanen (permanentID)
-	user, profile, err := store.Authenticate(ctx, "budi_santoso", rawPassword)
+	user, err := store.Authenticate(ctx, "budi_santoso", rawPassword)
 	if err != nil {
 		t.Fatalf("autentikasi seharusnya berhasil, dapat error: %v", err)
 	}
-	if user.ID != permanentID || profile.ID != permanentID {
-		t.Fatalf("unique identifier permanen tidak sesuai: dapat %s, ingin %s", profile.ID, permanentID)
+	if user.ID != permanentID {
+		t.Fatalf("unique identifier permanen tidak sesuai: dapat %s, ingin %s", user.ID, permanentID)
 	}
 }
 
@@ -211,7 +211,7 @@ func TestSessionLifecycle_RotationAndParallelGracePeriod(t *testing.T) {
 	if token3 == "" || token3 == token2 {
 		t.Fatalf("peningkatan privilege wajib menghasilkan session identifier baru")
 	}
-	if !elevatedProfile.IsPlatformAdmin || elevatedProfile.Role != authn.RolePlatformAdmin {
+	if elevatedProfile.Role != authn.RolePlatformAdmin {
 		t.Fatalf("role pengguna seharusnya meningkat menjadi PLATFORM_ADMIN, dapat: %s", elevatedProfile.Role)
 	}
 
