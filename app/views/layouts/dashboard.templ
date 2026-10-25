@@ -12,8 +12,9 @@ templ Dashboard(title string, user *domain.AuthLayoutUser, activeDBID string, ac
 		<meta charset="UTF-8"/>
 		<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 		<meta name="csrf-token" content={ csrfToken }/>
-		<!-- Swap 403 responses too, so "access denied" fragments from the backend are shown -->
-		<meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"403","swap":true,"error":false},{"code":"422","swap":true,"error":false},{"code":"[45]..","swap":false,"error":true}]}'/>
+		<!-- Swap 403/404/422/503 too: the backend answers with "access denied", "not found",
+			     "invalid input" and "database unavailable" fragments that must be shown -->
+		<meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"403","swap":true,"error":false},{"code":"404","swap":true,"error":false},{"code":"422","swap":true,"error":false},{"code":"503","swap":true,"error":false},{"code":"[45]..","swap":false,"error":true}]}'/>
 		<title>{ title } - Platform Manajemen Database</title>
 		<link href="/static/css/style.css" rel="stylesheet"/>
 		<script src="/static/js/htmx.min.js"></script>
@@ -35,7 +36,7 @@ templ Dashboard(title string, user *domain.AuthLayoutUser, activeDBID string, ac
 			@components.Sidebar(user, activeTab)
 
 			<div class="flex-1 flex flex-col min-w-0 overflow-hidden bg-[#1c1b1e] rounded-2xl border border-[#333138]">
-				@components.Navbar(user, activeDBID)
+				@components.Navbar(user, activeDBID, activeTab)
 
 				<main class="flex-1 overflow-y-auto p-6 bg-[#1c1b1e]">
 					{ children... }

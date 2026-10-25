@@ -1,32 +1,105 @@
 package pages
 
 import (
+	"regexp"
+	"strings"
+
 	"dbplatform/app/domain"
 	"dbplatform/app/views/components"
 	"dbplatform/app/views/layouts"
 )
 
-templ Dashboard(user *domain.AuthLayoutUser, activeDBID string, tables []domain.TableSummary, selectedData domain.TableDataResult, csrfToken string) {
-	@layouts.Dashboard("Database Viewer", user, activeDBID, "viewer", csrfToken) {
-		if activeDBID == "" {
+type tableGroup struct {
+	Schema string
+	Tables []domain.TableSummary
+}
+
+// groupBySchema keeps the order of tables (sorted by schema, then name) and starts a new
+// group whenever the schema changes.
+func groupBySchema(tables []domain.TableSummary) []tableGroup {
+	var out []tableGroup
+	for _, t := range tables {
+		if len(out) == 0 || out[len(out)-1].Schema != t.Schema {
+			out = append(out, tableGroup{Schema: t.Schema})
+		}
+		out[len(out)-1].Tables = append(out[len(out)-1].Tables, t)
+	}
+	return out
+}
+
+func tableKey(schema, name string) string { return schema + "." + name }
+
+func selectedKey(view domain.ViewerPageView) string {
+	for _, t := range view.Tables {
+		if t.IsSelected {
+			return tableKey(t.Schema, t.Name)
+		}
+	}
+	return ""
+}
+
+var plainIdentRe = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+
+func sqlIdent(s string) string {
+	if plainIdentRe.MatchString(s) {
+		return s
+	}
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
+// starterQuery pre-fills the Query Explorer with a query on the first table.
+func starterQuery(view domain.ViewerPageView) string {
+	if len(view.Tables) == 0 {
+		return ""
+	}
+	t := view.Tables[0]
+	name := sqlIdent(t.Name)
+	if t.Schema != "public" {
+		name = sqlIdent(t.Schema) + "." + name
+	}
+	return "SELECT * FROM " + name + " LIMIT 25;"
+}
+
+func databaseLabel(view domain.ViewerPageView) string {
+	if view.DatabaseName != "" {
+		return view.DatabaseName
+	}
+	return view.DatabaseID
+}
+
+templ Dashboard(user *domain.AuthLayoutUser, view domain.ViewerPageView, csrfToken string) {
+	@layouts.Dashboard("Database Viewer", user, view.DatabaseID, "viewer", csrfToken) {
+		if view.DatabaseID == "" {
 			@components.NoDatabaseAccess(user)
+		} else if view.Error != "" {
+			@components.ErrorState("Database tidak tersedia", view.Error, components.ViewerURL(view.DatabaseID), "")
 		} else {
-		<div class="flex gap-6 h-full" x-data="{ selectedTable: 'users' }">
-			<!-- Sidebar Daftar Tabel -->
+		<div class="flex gap-6 h-full" x-data="{ selectedTable: '' }" data-selected={ selectedKey(view) } x-init="selectedTable = $el.dataset.selected">
+			<!-- Sidebar Daftar Tabel, dikelompokkan per schema -->
 			<div class="w-60 bg-[#222126] border border-[#333138] rounded-2xl p-4 flex flex-col shrink-0">
 				<h3 class="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 px-2">Daftar Tabel</h3>
-				<div class="space-y-1 overflow-y-auto flex-1">
-					for _, tbl := range tables {
-						<button
-							hx-get={ "/dashboard/table?db_id=" + activeDBID + "&name=" + tbl.Name }
-							hx-target="#data-grid-container"
-							hx-swap="outerHTML"
-							@click={ "selectedTable = '" + tbl.Name + "'" }
-							:class={ "selectedTable === '" + tbl.Name + "' ? 'bg-[#ceafa3]/15 text-[#ceafa3] border border-[#ceafa3]/30 font-bold' : 'text-zinc-300 hover:bg-[#2c2a30] border border-transparent'" }
-							class="w-full text-left px-3 py-2 rounded-xl text-xs transition flex justify-between items-center cursor-pointer"
-						>
-							<span class="truncate font-mono text-xs">{ tbl.Name }</span>
-						</button>
+				<div class="space-y-3 overflow-y-auto flex-1">
+					if len(view.Tables) == 0 {
+						<p class="px-2 text-[11px] text-zinc-500">Belum ada tabel.</p>
+					}
+					for _, grp := range groupBySchema(view.Tables) {
+						<div class="space-y-1">
+							<h4 class="px-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 font-mono">{ grp.Schema }</h4>
+							for _, tbl := range grp.Tables {
+								<button
+									type="button"
+									data-key={ tableKey(tbl.Schema, tbl.Name) }
+									hx-get={ components.TableURL(view.DatabaseID, tbl.Schema, tbl.Name, 1) }
+									hx-target="#data-grid-container"
+									hx-swap="outerHTML"
+									@click="selectedTable = $el.dataset.key"
+									:class="selectedTable === $el.dataset.key ? 'bg-[#ceafa3]/15 text-[#ceafa3] border border-[#ceafa3]/30 font-bold' : 'text-zinc-300 hover:bg-[#2c2a30] border border-transparent'"
+									class="w-full text-left px-3 py-2 rounded-xl text-xs transition flex justify-between items-center cursor-pointer"
+								>
+									<span class="truncate font-mono text-xs">{ tbl.Name }</span>
+								</button>
+							}
+						</div>
 					}
 				</div>
 			</div>
@@ -36,8 +109,10 @@ templ Dashboard(user *domain.AuthLayoutUser, activeDBID string, tables []domain.
 				<!-- Read-Only SQL Query Runner dengan Live Keyword Guard -->
 				<div
 					class="bg-[#222126] border border-[#333138] rounded-2xl p-4 shadow-xl space-y-3"
+					data-query={ starterQuery(view) }
+					x-init="sqlQuery = $el.dataset.query"
 					x-data="{
-						sqlQuery: 'SELECT id, username, role, created_at FROM users;',
+						sqlQuery: '',
 						get forbiddenKeyword() {
 							const m = this.sqlQuery.match(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|REPLACE|GRANT|REVOKE|MERGE|CALL|EXEC|EXECUTE|COPY|VACUUM)\b/i);
 							return m ? m[1].toUpperCase() : '';
@@ -55,7 +130,7 @@ templ Dashboard(user *domain.AuthLayoutUser, activeDBID string, tables []domain.
 								SELECT Only (Read-Only Guard)
 							</span>
 							<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-[#18171b] text-zinc-300 border border-[#333138]">
-								Target DB: { activeDBID }
+								Target DB: { databaseLabel(view) }
 							</span>
 						</div>
 						<span class="text-xs text-zinc-400">
@@ -69,13 +144,13 @@ templ Dashboard(user *domain.AuthLayoutUser, activeDBID string, tables []domain.
 						hx-swap="outerHTML"
 						class="space-y-2.5"
 					>
-						<input type="hidden" name="db_id" value={ activeDBID }/>
+						<input type="hidden" name="db_id" value={ view.DatabaseID }/>
 						<div class="space-y-2">
 							<textarea
 								name="sql_query"
 								rows="3"
 								x-model="sqlQuery"
-								placeholder="SELECT * FROM users LIMIT 25;"
+								placeholder="SELECT * FROM nama_tabel LIMIT 25;"
 								:class="(forbiddenKeyword !== '' || hasMultiStatement) ? 'border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30' : 'border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50'"
 								class="w-full px-3.5 py-2.5 text-xs font-mono rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition resize-y"
 							></textarea>
@@ -114,7 +189,18 @@ templ Dashboard(user *domain.AuthLayoutUser, activeDBID string, tables []domain.
 					</form>
 				</div>
 
-				@components.DataGrid(selectedData)
+				switch {
+					case view.Selected != nil:
+						@components.DataGrid(*view.Selected)
+					case view.TableError != "" && len(view.Tables) > 0:
+						@components.DataGridUnavailable("Gagal memuat tabel", view.TableError,
+							components.TableURL(view.DatabaseID, view.Tables[0].Schema, view.Tables[0].Name, 1))
+					default:
+						<div id="data-grid-container">
+							@components.EmptyState("Database ini belum memiliki tabel",
+								"Buat tabel melalui menu Migration, atau jalankan query SELECT di atas.")
+						</div>
+				}
 			</div>
 		</div>
 		}

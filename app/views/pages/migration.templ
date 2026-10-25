@@ -61,19 +61,11 @@ templ Migration(user *domain.AuthLayoutUser, page domain.MigrationPageView, csrf
 							Setiap script dijalankan dalam satu transaksi: COMMIT jika semua statement berhasil, ROLLBACK jika ada yang gagal.
 						</p>
 					</div>
-					<form method="get" action="/migration" class="flex items-center gap-2">
-						<label for="migration-db" class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Database</label>
-						<select
-							id="migration-db"
-							name="db_id"
-							onchange="this.form.submit()"
-							class="bg-[#18171b] border border-[#333138] text-zinc-200 text-xs font-mono rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#ceafa3]/50"
-						>
-							for _, db := range user.Databases {
-								<option value={ db.DatabaseID } selected?={ db.DatabaseID == page.DatabaseID }>{ db.DatabaseName }</option>
-							}
-						</select>
-					</form>
+					if page.DatabaseName != "" {
+						<span class="px-2.5 py-1 rounded-lg text-xs font-mono bg-[#18171b] text-zinc-300 border border-[#333138]">
+							Database: { page.DatabaseName }
+						</span>
+					}
 				</div>
 
 				if page.CanEdit {
