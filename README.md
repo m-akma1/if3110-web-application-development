@@ -63,7 +63,7 @@ All variables are **required** unless marked optional. Copy `.env.example` to `.
 
 | Variable | Default Value | Description |
 |---|---|---|
-| `QUERY_TIMEOUT_MS` | `5000` | (Optional) Maximum execution time in milliseconds for read-only queries |
+| `QUERY_TIMEOUT_MS` | `5000` | (Optional) Maximum execution time in milliseconds for each read-only statement: Query Explorer queries and table browsing (row count, page of rows, schema lookups) |
 | `QUERY_ROW_LIMIT` | `500` | (Optional) Maximum number of rows returned by a read-only query |
 
 #### Migration Execution Limits
