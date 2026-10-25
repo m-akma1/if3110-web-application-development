@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"dbplatform/app/domain"
+	"dbplatform/app/internal/admin"
 	"dbplatform/app/internal/authn"
 	"dbplatform/app/internal/dbmanager"
 	"dbplatform/app/internal/groups"
@@ -34,6 +35,7 @@ type Server struct {
 	sessions   *authn.SessionStore
 	groups     *groups.Repository
 	access     *rbac.Authorizer
+	admin      *admin.Service
 	dbRegistry *dbmanager.ConnectionRegistry
 }
 
@@ -42,6 +44,9 @@ type Deps struct {
 	Sessions *authn.SessionStore // identity and session lifecycle
 	Groups   *groups.Repository  // groups, membership, invite codes
 	Access   *rbac.Authorizer    // every database authorization decision
+	Admin    *admin.Service      // platform admin console (users, groups, grants, codes, targets)
+	// Registry holds live pools to target databases; shared with the target manager. Nil creates an empty one.
+	Registry *dbmanager.ConnectionRegistry
 }
 
 // NewServer menyusun router beserta rantai middleware (Logger -> CSRF -> Mux)
@@ -59,7 +64,11 @@ func NewServer(logOutput io.Writer, deps Deps) *Server {
 		sessions:   deps.Sessions,
 		groups:     deps.Groups,
 		access:     deps.Access,
-		dbRegistry: dbmanager.NewConnectionRegistry(),
+		admin:      deps.Admin,
+		dbRegistry: deps.Registry,
+	}
+	if s.dbRegistry == nil {
+		s.dbRegistry = dbmanager.NewConnectionRegistry()
 	}
 	s.registerRoutes()
 
@@ -111,7 +120,22 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /migration/dry-run", s.handleMigrationDryRun)
 	s.mux.HandleFunc("POST /migration/apply", s.handleMigrationApply)
 	s.mux.HandleFunc("GET /admin", s.handleAdminPage)
-	s.mux.HandleFunc("POST /admin/users/role", s.handleAdminUpdateUserRole)
+	s.mux.HandleFunc("POST /admin/users", s.handleAdminCreateUser)
+	s.mux.HandleFunc("POST /admin/users/{id}/role", s.handleAdminSetUserRole)
+	s.mux.HandleFunc("POST /admin/users/{id}/active", s.handleAdminSetUserActive)
+	s.mux.HandleFunc("POST /admin/users/{id}/password", s.handleAdminResetPassword)
+	s.mux.HandleFunc("POST /admin/groups", s.handleAdminCreateGroup)
+	s.mux.HandleFunc("POST /admin/groups/{id}", s.handleAdminRenameGroup)
+	s.mux.HandleFunc("DELETE /admin/groups/{id}", s.handleAdminDeleteGroup)
+	s.mux.HandleFunc("POST /admin/groups/{id}/members", s.handleAdminAddMember)
+	s.mux.HandleFunc("DELETE /admin/groups/{id}/members/{userID}", s.handleAdminRemoveMember)
+	s.mux.HandleFunc("POST /admin/grants", s.handleAdminSetGrant)
+	s.mux.HandleFunc("POST /admin/databases", s.handleAdminCreateTarget)
+	s.mux.HandleFunc("POST /admin/databases/{id}", s.handleAdminUpdateTarget)
+	s.mux.HandleFunc("POST /admin/databases/{id}/test", s.handleAdminTestTarget)
+	s.mux.HandleFunc("DELETE /admin/databases/{id}", s.handleAdminDeleteTarget)
+	s.mux.HandleFunc("POST /admin/codes", s.handleAdminCreateCode)
+	s.mux.HandleFunc("POST /admin/codes/{code}/active", s.handleAdminSetCodeActive)
 	s.mux.HandleFunc("POST /logout", s.handleLogoutHTMX)
 
 	// JSON API Routes

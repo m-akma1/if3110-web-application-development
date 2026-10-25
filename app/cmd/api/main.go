@@ -9,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"dbplatform/app/internal/admin"
 	"dbplatform/app/internal/authn"
 	"dbplatform/app/internal/bootstrap"
 	"dbplatform/app/internal/config"
+	"dbplatform/app/internal/dbmanager"
 	"dbplatform/app/internal/groups"
 	apphttp "dbplatform/app/internal/http"
 	"dbplatform/app/internal/platformdb"
@@ -47,9 +49,19 @@ func main() {
 		log.Printf("Migrasi skema platform diterapkan: %s", strings.Join(applied, ", "))
 	}
 
+	cipher, err := dbmanager.NewCredentialCipher(cfg.TargetCredentialsKey)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+
 	sessionStore := authn.NewPostgresSessionStore(db, authn.DefaultSessionConfig())
 	groupRepo := groups.NewRepository(db)
-	authorizer := rbac.NewAuthorizer(rbac.NewPostgresGrantStore(db))
+	grantStore := rbac.NewPostgresGrantStore(db)
+	authorizer := rbac.NewAuthorizer(grantStore)
+	registry := dbmanager.NewConnectionRegistry()
+	defer registry.Close()
+	targets := dbmanager.NewManager(dbmanager.NewTargetRepository(db), cipher, registry)
+	adminService := admin.NewService(sessionStore, groupRepo, grantStore, targets)
 
 	created, err := bootstrap.EnsureAdmin(ctx, sessionStore, bootstrap.AdminConfig{
 		Username: cfg.BootstrapAdminUsername,
@@ -71,6 +83,23 @@ func main() {
 		if len(seeded) > 0 {
 			log.Printf("Data demo dibuat: %s", strings.Join(seeded, ", "))
 		}
+		registered, err := bootstrap.SeedDemoTarget(ctx, targets, grantStore, groupRepo, cfg.DemoTargetURL)
+		if err != nil {
+			log.Fatalf("gagal mendaftarkan database demo: %v", err)
+		}
+		if registered {
+			log.Printf("Database demo didaftarkan: %s", bootstrap.DemoTargetName)
+		}
+	}
+
+	// Connect every registered target. Unreachable targets are marked ERROR, never fatal.
+	loadCtx, cancelLoad := context.WithTimeout(context.Background(), 60*time.Second)
+	connected, failed, err := targets.LoadAll(loadCtx)
+	cancelLoad()
+	if err != nil {
+		log.Printf("peringatan: gagal memuat database target: %v", err)
+	} else {
+		log.Printf("Database target: %d terhubung, %d gagal", connected, failed)
 	}
 
 	// The platform DB (users, sessions, groups) is never registered as a viewer target.
@@ -78,6 +107,8 @@ func main() {
 		Sessions: sessionStore,
 		Groups:   groupRepo,
 		Access:   authorizer,
+		Admin:    adminService,
+		Registry: registry,
 	})
 
 	log.Printf("Backend API berjalan pada %s", cfg.ListenAddr)

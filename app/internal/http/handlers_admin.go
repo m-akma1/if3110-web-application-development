@@ -1,44 +1,27 @@
 package http
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"net/http"
-	"strings"
 
 	"dbplatform/app/domain"
+	"dbplatform/app/internal/admin"
 	"dbplatform/app/internal/authn"
+	"dbplatform/app/internal/dbmanager"
+	"dbplatform/app/internal/groups"
+	"dbplatform/app/internal/rbac"
 	"dbplatform/app/views/pages"
 
 	"github.com/a-h/templ"
 )
 
-// Admin overview. Creating groups, grants, invite codes and database connections
-// is added by feat/m1-admin-console; this branch only lists them and changes roles.
+// Admin console. Every admin action re-renders the whole console (#admin-console), so all tabs
+// stay consistent; the active tab lives in Alpine state outside the swapped element.
 
-func (s *Server) buildAdminUsersList(ctx context.Context) ([]domain.UserManagementItem, error) {
-	users, err := s.sessions.ListUsers(ctx)
-	if err != nil {
-		return nil, err
-	}
-	memberships, err := s.groups.MemberGroupsByUser(ctx)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]domain.UserManagementItem, 0, len(users))
-	for _, u := range users {
-		item := domain.UserManagementItem{ID: u.ID, Username: u.Username, Email: u.Email, Role: u.Role, IsActive: u.IsActive}
-		for _, g := range memberships[u.ID] {
-			item.Groups = append(item.Groups, domain.GroupSummary{ID: g.ID, Name: g.Name, IsSystem: g.IsSystem})
-		}
-		items = append(items, item)
-	}
-	return items, nil
-}
+var adminTabs = map[string]bool{"users": true, "groups": true, "databases": true, "codes": true}
 
 func (s *Server) handleAdminPage(w http.ResponseWriter, r *http.Request) {
-	_, layout, ok := s.requirePlatformAdmin(w, r)
+	user, layout, ok := s.requirePlatformAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -47,67 +30,60 @@ func (s *Server) handleAdminPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Gagal membuat token CSRF", http.StatusInternalServerError)
 		return
 	}
-
-	users, err := s.buildAdminUsersList(r.Context())
+	ov, err := s.admin.Overview(r.Context())
 	if err != nil {
-		s.logger.Printf("[ADMIN] gagal memuat user: %v", err)
+		s.logger.Printf("[ADMIN] gagal memuat data: %v", err)
 		http.Error(w, "Gagal memuat data admin", http.StatusInternalServerError)
 		return
 	}
-	gs, err := s.groups.List(r.Context())
-	if err != nil {
-		s.logger.Printf("[ADMIN] gagal memuat group: %v", err)
-		http.Error(w, "Gagal memuat data admin", http.StatusInternalServerError)
-		return
+	tab := r.URL.Query().Get("tab")
+	if !adminTabs[tab] {
+		tab = "users"
 	}
-	codes, err := s.groups.ListInviteCodes(r.Context())
-	if err != nil {
-		s.logger.Printf("[ADMIN] gagal memuat kode undangan: %v", err)
-		http.Error(w, "Gagal memuat data admin", http.StatusInternalServerError)
-		return
-	}
-
-	groupItems := make([]domain.GroupItem, 0, len(gs))
-	for _, g := range gs {
-		groupItems = append(groupItems, domain.GroupItem{ID: g.ID, Name: g.Name, Description: g.Description, IsSystem: g.IsSystem, MemberCount: g.MemberCount})
-	}
-	codeItems := make([]domain.InviteCodeItem, 0, len(codes))
-	for _, c := range codes {
-		codeItems = append(codeItems, domain.InviteCodeItem{Code: c.Code, GroupName: c.GroupName, IsActive: c.IsActive, CreatedAt: c.CreatedAt})
-	}
-
-	templ.Handler(pages.Admin(layout, resolveDBID(r, layout), users, groupItems, codeItems, csrfToken)).ServeHTTP(w, r)
+	templ.Handler(pages.Admin(layout, resolveDBID(r, layout), tab, user.ID, *ov, csrfToken)).ServeHTTP(w, r)
 }
 
-func (s *Server) handleAdminUpdateUserRole(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := s.requirePlatformAdmin(w, r); !ok {
-		return
+// renderAdminConsole answers an admin action: 200 with a success flash, or 422/500 with an error flash.
+func (s *Server) renderAdminConsole(w http.ResponseWriter, r *http.Request, actor *authn.User, successMsg string, actionErr error) {
+	flash := &domain.Flash{Success: true, Message: successMsg}
+	status := http.StatusOK
+	if actionErr != nil {
+		msg, code := adminErrorMessage(actionErr)
+		if code == http.StatusInternalServerError {
+			s.logger.Printf("[ADMIN] aksi gagal: %v", actionErr)
+		}
+		flash = &domain.Flash{Success: false, Message: msg}
+		status = code
 	}
-
-	userID := strings.TrimSpace(r.FormValue("user_id"))
-	role := strings.TrimSpace(r.FormValue("role"))
-
-	feedback := ""
-	err := s.sessions.UpdateUserRole(r.Context(), userID, role)
-	switch {
-	case errors.Is(err, authn.ErrInvalidRole):
-		feedback = "Role tidak valid."
-	case errors.Is(err, authn.ErrUserNotFound):
-		feedback = "Pengguna tidak ditemukan."
-	case err != nil:
-		s.logger.Printf("[ADMIN] gagal mengubah role: %v", err)
-		feedback = "Gagal mengubah role pengguna."
-	default:
-		feedback = fmt.Sprintf("Role pengguna berhasil diperbarui menjadi %s.", role)
-	}
-
-	users, listErr := s.buildAdminUsersList(r.Context())
-	if listErr != nil {
+	ov, err := s.admin.Overview(r.Context())
+	if err != nil {
+		s.logger.Printf("[ADMIN] gagal memuat data: %v", err)
 		http.Error(w, "Gagal memuat data admin", http.StatusInternalServerError)
 		return
 	}
-	if err != nil {
-		w.WriteHeader(http.StatusUnprocessableEntity)
+	w.WriteHeader(status)
+	_ = pages.AdminConsole(actor.ID, *ov, flash).Render(r.Context(), w)
+}
+
+// adminErrorMessage maps known domain errors to a user-facing message and 422; anything else is a 500.
+func adminErrorMessage(err error) (string, int) {
+	var ve *dbmanager.ValidationError
+	if errors.As(err, &ve) {
+		return "Data koneksi tidak valid: " + ve.Message, http.StatusUnprocessableEntity
 	}
-	_ = pages.AdminUsersTable(users, feedback, err == nil).Render(r.Context(), w)
+	known := []error{
+		admin.ErrSelfLockout, admin.ErrInvalidLevel,
+		authn.ErrInvalidUsername, authn.ErrInvalidEmail, authn.ErrWeakPassword, authn.ErrUsernameTaken,
+		authn.ErrEmailTaken, authn.ErrInvalidRole, authn.ErrUserNotFound,
+		groups.ErrGroupNotFound, groups.ErrGroupNameTaken, groups.ErrInvalidGroupName, groups.ErrInvalidInviteCode,
+		groups.ErrInviteCodeTaken, groups.ErrSystemGroup,
+		rbac.ErrUnknownGrantTarget,
+		dbmanager.ErrTargetNotFound, dbmanager.ErrTargetNameTaken,
+	}
+	for _, k := range known {
+		if errors.Is(err, k) {
+			return k.Error(), http.StatusUnprocessableEntity
+		}
+	}
+	return "Terjadi kesalahan pada server. Silakan coba lagi.", http.StatusInternalServerError
 }

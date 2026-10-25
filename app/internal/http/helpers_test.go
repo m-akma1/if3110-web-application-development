@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"dbplatform/app/internal/admin"
 	"dbplatform/app/internal/authn"
+	"dbplatform/app/internal/dbmanager"
 	"dbplatform/app/internal/groups"
 	apphttp "dbplatform/app/internal/http"
 	"dbplatform/app/internal/rbac"
@@ -39,6 +41,9 @@ type testEnv struct {
 	db       *sql.DB
 	sessions *authn.SessionStore
 	groups   *groups.Repository
+	grants   *rbac.PostgresGrantStore
+	targets  *dbmanager.Manager
+	registry *dbmanager.ConnectionRegistry
 }
 
 func newTestEnv(t *testing.T, logOutput io.Writer) *testEnv {
@@ -51,12 +56,22 @@ func newTestEnv(t *testing.T, logOutput io.Writer) *testEnv {
 		}
 	}
 	gr := groups.NewRepository(db)
+	grants := rbac.NewPostgresGrantStore(db)
+	cipher, err := dbmanager.NewCredentialCipher(testutil.CredentialsKey(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := dbmanager.NewConnectionRegistry()
+	t.Cleanup(registry.Close)
+	targets := dbmanager.NewManager(dbmanager.NewTargetRepository(db), cipher, registry)
 	srv := apphttp.NewServer(logOutput, apphttp.Deps{
 		Sessions: store,
 		Groups:   gr,
-		Access:   rbac.NewAuthorizer(rbac.NewPostgresGrantStore(db)),
+		Access:   rbac.NewAuthorizer(grants),
+		Admin:    admin.NewService(store, gr, grants, targets),
+		Registry: registry,
 	})
-	return &testEnv{srv: srv, db: db, sessions: store, groups: gr}
+	return &testEnv{srv: srv, db: db, sessions: store, groups: gr, grants: grants, targets: targets, registry: registry}
 }
 
 // newTestServer is newTestEnv when only the server is needed.
