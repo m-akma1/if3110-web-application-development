@@ -5,18 +5,30 @@ import (
     "dbplatform/app/views/components"
 )
 
-templ Dashboard(title string, user *authn.AuthLayoutUser, activeDBID string, activeTab string) {
+templ Dashboard(title string, user *authn.AuthLayoutUser, activeDBID string, activeTab string, csrfToken string) {
     <!DOCTYPE html>
     <html lang="id" class="h-full bg-slate-900">
     <head>
         <meta charset="UTF-8"/>
         <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+        <meta name="csrf-token" content={ csrfToken }/>
         <title>{ title } - Platform Manajemen Database</title>
         <link href="/static/css/style.css" rel="stylesheet"/>
         <script src="/static/js/htmx.min.js"></script>
         <script defer src="/static/js/alpine.min.js"></script>
+        <script>
+            document.addEventListener('htmx:configRequest', function(evt) {
+                var meta = document.querySelector('meta[name="csrf-token"]');
+                if (meta && meta.content) {
+                    evt.detail.headers['X-CSRF-Token'] = meta.content;
+                }
+            });
+        </script>
     </head>
-    <body class="h-full text-slate-100 bg-slate-900 font-sans">
+    <body
+        class="h-full text-slate-100 bg-slate-900 font-sans"
+        hx-headers={ `{"X-CSRF-Token": "` + csrfToken + `"}` }
+    >
         <div class="flex h-screen overflow-hidden">
             @components.Sidebar(user, activeTab)
 

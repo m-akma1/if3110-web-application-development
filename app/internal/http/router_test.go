@@ -173,6 +173,7 @@ func TestGOTTH_LoginAndDashboardFlow(t *testing.T) {
 
 	// 3. GET /dashboard dengan cookie __Host-sid -> merender komponen Dashboard, Navbar, dan Sidebar
 	reqDash := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	reqDash.AddCookie(csrfCookie)
 	for _, c := range recPostLogin.Result().Cookies() {
 		reqDash.AddCookie(c)
 	}
@@ -185,5 +186,198 @@ func TestGOTTH_LoginAndDashboardFlow(t *testing.T) {
 	body := recDash.Body.String()
 	if !strings.Contains(body, "Database Viewer") || !strings.Contains(body, "Moreno") {
 		t.Fatalf("halaman /dashboard tidak memuat konten user atau komponen Database Viewer")
+	}
+	if !strings.Contains(body, "X-CSRF-Token") || !strings.Contains(body, csrfCookie.Value) {
+		t.Fatalf("halaman /dashboard wajib menyertakan hx-headers X-CSRF-Token agar tombol Logout HTMX berfungsi")
+	}
+
+	// 4. POST /logout via HTMX menggunakan akun Moreno
+	reqLogout := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	reqLogout.Header.Set(apphttp.CSRFHeaderName, csrfCookie.Value)
+	reqLogout.AddCookie(csrfCookie)
+	for _, c := range recPostLogin.Result().Cookies() {
+		reqLogout.AddCookie(c)
+	}
+	recLogout := httptest.NewRecorder()
+	srv.ServeHTTP(recLogout, reqLogout)
+
+	if recLogout.Code != http.StatusOK || recLogout.Header().Get("HX-Redirect") != "/login" {
+		t.Fatalf("seharusnya POST /logout akun Moreno berhasil dan mengembalikan HX-Redirect: /login, status=%d, redirect=%q",
+			recLogout.Code, recLogout.Header().Get("HX-Redirect"))
+	}
+
+	// 5. Pastikan sesi Moreno langsung nonaktif di backend setelah logout
+	reqDashAfterLogout := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	for _, c := range recPostLogin.Result().Cookies() {
+		reqDashAfterLogout.AddCookie(c)
+	}
+	recDashAfterLogout := httptest.NewRecorder()
+	srv.ServeHTTP(recDashAfterLogout, reqDashAfterLogout)
+
+	if recDashAfterLogout.Code != http.StatusSeeOther {
+		t.Fatalf("seharusnya akses /dashboard dengan cookie lama setelah logout ditolak (303 Redirect ke /login), dapat: %d",
+			recDashAfterLogout.Code)
+	}
+}
+
+// 5. Menguji Alur Sign Up & Login menggunakan Email dan Password (/auth/signup & /auth/login)
+func TestGOTTH_EmailSignupAndLoginFlow(t *testing.T) {
+	var logBuf bytes.Buffer
+	srv := apphttp.NewServer(&logBuf)
+
+	// 1. GET /auth/signup
+	reqGetSignup := httptest.NewRequest(http.MethodGet, "/auth/signup", nil)
+	recGetSignup := httptest.NewRecorder()
+	srv.ServeHTTP(recGetSignup, reqGetSignup)
+
+	if recGetSignup.Code != http.StatusOK {
+		t.Fatalf("gagal membuka halaman /auth/signup, status: %d", recGetSignup.Code)
+	}
+
+	var csrfCookie *http.Cookie
+	for _, c := range recGetSignup.Result().Cookies() {
+		if c.Name == apphttp.CSRFCookieName {
+			csrfCookie = c
+			break
+		}
+	}
+	if csrfCookie == nil || csrfCookie.Value == "" {
+		t.Fatalf("cookie CSRF tidak ditemukan pada /auth/signup")
+	}
+
+	// 2. POST /auth/signup dengan kode tim salah -> wajib ditolak
+	badSignup := url.Values{}
+	badSignup.Set("email", "userbaru@email.com")
+	badSignup.Set("password", "PasswordBaru123!")
+	badSignup.Set("account_type", "USER")
+	badSignup.Set("invite_code", "KODE-SALAH")
+	reqBadSignup := httptest.NewRequest(http.MethodPost, "/auth/signup", strings.NewReader(badSignup.Encode()))
+	reqBadSignup.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqBadSignup.Header.Set(apphttp.CSRFHeaderName, csrfCookie.Value)
+	reqBadSignup.AddCookie(csrfCookie)
+
+	recBadSignup := httptest.NewRecorder()
+	srv.ServeHTTP(recBadSignup, reqBadSignup)
+	if recBadSignup.Header().Get("HX-Redirect") != "" || !strings.Contains(recBadSignup.Body.String(), "Kode tim tidak valid") {
+		t.Fatalf("seharusnya signup dengan kode tim salah ditolak, body: %s", recBadSignup.Body.String())
+	}
+
+	// 3. POST /auth/signup dengan email, password, dan kode tim valid (TEAM-BACKEND)
+	signupForm := url.Values{}
+	signupForm.Set("email", "userbaru@email.com")
+	signupForm.Set("password", "PasswordBaru123!")
+	signupForm.Set("account_type", "USER")
+	signupForm.Set("invite_code", "TEAM-BACKEND")
+	reqPostSignup := httptest.NewRequest(http.MethodPost, "/auth/signup", strings.NewReader(signupForm.Encode()))
+	reqPostSignup.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqPostSignup.Header.Set(apphttp.CSRFHeaderName, csrfCookie.Value)
+	reqPostSignup.AddCookie(csrfCookie)
+
+	recPostSignup := httptest.NewRecorder()
+	srv.ServeHTTP(recPostSignup, reqPostSignup)
+
+	if recPostSignup.Header().Get("HX-Redirect") != "/dashboard" {
+		t.Fatalf("seharusnya POST /auth/signup mengirim HX-Redirect: /dashboard, dapat: %q (body: %s)",
+			recPostSignup.Header().Get("HX-Redirect"), recPostSignup.Body.String())
+	}
+
+	// 4. POST /auth/login menggunakan email dan password yang baru didaftarkan
+	loginForm := url.Values{}
+	loginForm.Set("email", "userbaru@email.com")
+	loginForm.Set("password", "PasswordBaru123!")
+	reqPostLogin := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(loginForm.Encode()))
+	reqPostLogin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqPostLogin.Header.Set(apphttp.CSRFHeaderName, csrfCookie.Value)
+	reqPostLogin.AddCookie(csrfCookie)
+
+	recPostLogin := httptest.NewRecorder()
+	srv.ServeHTTP(recPostLogin, reqPostLogin)
+
+	if recPostLogin.Header().Get("HX-Redirect") != "/dashboard" {
+		t.Fatalf("seharusnya POST /auth/login dengan email berhasil dan mengirim HX-Redirect: /dashboard, dapat: %q",
+			recPostLogin.Header().Get("HX-Redirect"))
+	}
+
+	// 5. Uji Read-Only Query Guard di /dashboard/query (menolak DELETE, mengizinkan SELECT)
+	queryMut := url.Values{}
+	queryMut.Set("sql_query", "DELETE FROM users WHERE id = '1';")
+	reqMut := httptest.NewRequest(http.MethodPost, "/dashboard/query", strings.NewReader(queryMut.Encode()))
+	reqMut.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqMut.Header.Set(apphttp.CSRFHeaderName, csrfCookie.Value)
+	reqMut.AddCookie(csrfCookie)
+	for _, c := range recPostLogin.Result().Cookies() {
+		reqMut.AddCookie(c)
+	}
+	recMut := httptest.NewRecorder()
+	srv.ServeHTTP(recMut, reqMut)
+	if !strings.Contains(recMut.Body.String(), "DELETE") || !strings.Contains(recMut.Body.String(), "ditolak") {
+		t.Fatalf("seharusnya query DELETE ditolak oleh Read-Only Guard, dapat: %s", recMut.Body.String())
+	}
+
+	querySel := url.Values{}
+	querySel.Set("sql_query", "SELECT id, username FROM users;")
+	reqSel := httptest.NewRequest(http.MethodPost, "/dashboard/query", strings.NewReader(querySel.Encode()))
+	reqSel.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqSel.Header.Set(apphttp.CSRFHeaderName, csrfCookie.Value)
+	reqSel.AddCookie(csrfCookie)
+	for _, c := range recPostLogin.Result().Cookies() {
+		reqSel.AddCookie(c)
+	}
+	recSel := httptest.NewRecorder()
+	srv.ServeHTTP(recSel, reqSel)
+	if !strings.Contains(recSel.Body.String(), "Query Read-Only berhasil dieksekusi") {
+		t.Fatalf("seharusnya query SELECT diizinkan oleh Read-Only Guard, dapat: %s", recSel.Body.String())
+	}
+
+	// 6. User biasa (USER) mengakses /admin -> wajib ditolak 403 Forbidden
+	reqUserAdmin := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	for _, c := range recPostLogin.Result().Cookies() {
+		reqUserAdmin.AddCookie(c)
+	}
+	recUserAdmin := httptest.NewRecorder()
+	srv.ServeHTTP(recUserAdmin, reqUserAdmin)
+	if recUserAdmin.Code != http.StatusForbidden {
+		t.Fatalf("seharusnya USER biasa ditolak saat membuka /admin (403), dapat: %d", recUserAdmin.Code)
+	}
+
+	// 7. Login sebagai PLATFORM_ADMIN (Moreno) dan akses /admin + ubah hak akses user
+	adminForm := url.Values{}
+	adminForm.Set("email", "moreno@email.com")
+	adminForm.Set("password", "Rahasia123")
+	reqAdminLogin := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(adminForm.Encode()))
+	reqAdminLogin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqAdminLogin.Header.Set(apphttp.CSRFHeaderName, csrfCookie.Value)
+	reqAdminLogin.AddCookie(csrfCookie)
+	recAdminLogin := httptest.NewRecorder()
+	srv.ServeHTTP(recAdminLogin, reqAdminLogin)
+
+	reqAdminPage := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	reqAdminPage.AddCookie(csrfCookie)
+	for _, c := range recAdminLogin.Result().Cookies() {
+		reqAdminPage.AddCookie(c)
+	}
+	recAdminPage := httptest.NewRecorder()
+	srv.ServeHTTP(recAdminPage, reqAdminPage)
+	if recAdminPage.Code != http.StatusOK || !strings.Contains(recAdminPage.Body.String(), "TEAM-BACKEND") {
+		t.Fatalf("seharusnya PLATFORM_ADMIN dapat membuka /admin dan melihat kode TEAM-BACKEND, status=%d", recAdminPage.Code)
+	}
+
+	// 8. Admin mengubah hak akses user dhia (usr-dhia-003) melalui POST /admin/users/access
+	grantForm := url.Values{}
+	grantForm.Set("user_id", "usr-dhia-003")
+	grantForm.Set("role", "USER")
+	grantForm.Set("access_db_1", "VIEW_ONLY")
+	grantForm.Set("access_db_2", "VIEW_EDIT")
+	reqGrant := httptest.NewRequest(http.MethodPost, "/admin/users/access", strings.NewReader(grantForm.Encode()))
+	reqGrant.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqGrant.Header.Set(apphttp.CSRFHeaderName, csrfCookie.Value)
+	reqGrant.AddCookie(csrfCookie)
+	for _, c := range recAdminLogin.Result().Cookies() {
+		reqGrant.AddCookie(c)
+	}
+	recGrant := httptest.NewRecorder()
+	srv.ServeHTTP(recGrant, reqGrant)
+	if recGrant.Code != http.StatusOK || !strings.Contains(recGrant.Body.String(), "usr-dhia-003") || !strings.Contains(recGrant.Body.String(), "berhasil diperbarui") {
+		t.Fatalf("seharusnya update hak akses user berhasil, status=%d, body=%s", recGrant.Code, recGrant.Body.String())
 	}
 }

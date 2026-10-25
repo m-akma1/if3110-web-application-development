@@ -1,23 +1,73 @@
 package components
 
 import (
-	"fmt"
 	"dbplatform/app/domain"
+	"fmt"
 )
 
+func resolveSchemaName(s string) string {
+	if s == "" {
+		return "public"
+	}
+	return s
+}
+
 templ DataGrid(data domain.TableDataResult) {
-	<div id="data-grid-container" class="space-y-4">
-		<div class="flex items-center justify-between">
-			<h2 class="text-lg font-bold text-white flex items-center gap-2">
-				<span>Tabel:</span>
-				<span class="text-blue-400 font-mono">{ data.TableName }</span>
-			</h2>
-			<span class="text-xs text-slate-400 bg-slate-800 px-3 py-1 rounded-lg border border-slate-700">
-				{ fmt.Sprintf("%d Total Baris", data.TotalRows) }
-			</span>
+	<div id="data-grid-container" class="space-y-4" x-data="{ activeView: 'data' }">
+		if data.QueryError != "" {
+			<div class="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium flex items-center gap-2">
+				<svg class="w-4 h-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+					<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
+				</svg>
+				<span>{ data.QueryError }</span>
+			</div>
+		}
+
+		if data.ExecutedQuery != "" && data.QueryError == "" {
+			<div class="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-center justify-between gap-2">
+				<span>Query Read-Only berhasil dieksekusi: <code class="font-mono text-white">{ data.ExecutedQuery }</code></span>
+				<span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-500/20">Read-Only Tx</span>
+			</div>
+		}
+
+		<!-- Header Tabel & Tab Switcher (Data Viewer vs Schema Viewer) -->
+		<div class="flex flex-wrap items-center justify-between gap-3">
+			<div class="flex items-center gap-2.5">
+				<h2 class="text-lg font-bold text-white flex items-center gap-1.5">
+					<span class="text-slate-400 font-mono text-sm">{ resolveSchemaName(data.SchemaName) }.</span>
+					<span class="text-blue-400 font-mono">{ data.TableName }</span>
+				</h2>
+				<span class="text-xs text-slate-400 bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-700">
+					{ fmt.Sprintf("%d Baris", data.TotalRows) }
+				</span>
+			</div>
+
+			<!-- Tombol Tab: Data Tabel & Schema Viewer -->
+			<div class="inline-flex rounded-lg bg-slate-900 p-1 border border-slate-700/80">
+				<button
+					type="button"
+					@click="activeView = 'data'"
+					:class="activeView === 'data' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+					class="px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer"
+				>
+					Data Tabel
+				</button>
+				<button
+					type="button"
+					@click="activeView = 'schema'"
+					:class="activeView === 'schema' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'"
+					class="px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1.5"
+				>
+					<span>Schema Viewer</span>
+					<span class="px-1.5 py-0.2 rounded text-[10px] bg-slate-800/80 text-slate-300">
+						{ fmt.Sprintf("%d Kolom", len(data.ColumnsMeta)) }
+					</span>
+				</button>
+			</div>
 		</div>
 
-		<div class="bg-slate-800/80 border border-slate-700/60 rounded-xl overflow-hidden shadow-xl">
+		<!-- TAB 1: DATA VIEWER -->
+		<div x-show="activeView === 'data'" class="bg-slate-800/80 border border-slate-700/60 rounded-xl overflow-hidden shadow-xl">
 			<div class="overflow-x-auto">
 				<table class="w-full text-left text-sm text-slate-300">
 					<thead class="bg-slate-900/80 text-xs uppercase tracking-wider text-slate-400 border-b border-slate-700">
@@ -50,7 +100,7 @@ templ DataGrid(data domain.TableDataResult) {
 			<div class="p-4 border-t border-slate-700/60 flex items-center justify-between text-xs text-slate-400">
 				<span>Halaman { fmt.Sprintf("%d dari %d", data.CurrentPage, data.TotalPages) }</span>
 				<div class="flex gap-2">
-					<button 
+					<button
 						disabled?={ data.CurrentPage <= 1 }
 						hx-get={ fmt.Sprintf("/dashboard/table?name=%s&page=%d", data.TableName, data.CurrentPage-1) }
 						hx-target="#data-grid-container"
@@ -59,7 +109,7 @@ templ DataGrid(data domain.TableDataResult) {
 					>
 						Sebelumnya
 					</button>
-					<button 
+					<button
 						disabled?={ data.CurrentPage >= data.TotalPages }
 						hx-get={ fmt.Sprintf("/dashboard/table?name=%s&page=%d", data.TableName, data.CurrentPage+1) }
 						hx-target="#data-grid-container"
@@ -68,6 +118,150 @@ templ DataGrid(data domain.TableDataResult) {
 					>
 						Selanjutnya
 					</button>
+				</div>
+			</div>
+		</div>
+
+		<!-- TAB 2: SCHEMA VIEWER (Columns, Constraints, Indexes) -->
+		<div x-show="activeView === 'schema'" x-cloak class="space-y-4">
+			<!-- 1. Struktur Kolom -->
+			<div class="bg-slate-800/80 border border-slate-700/60 rounded-xl overflow-hidden shadow-xl">
+				<div class="px-4 py-3 bg-slate-900/90 border-b border-slate-700 flex items-center justify-between">
+					<span class="text-xs font-bold text-white uppercase tracking-wider">Daftar Kolom (Columns)</span>
+					<span class="text-[10px] font-mono text-slate-400">Schema: { resolveSchemaName(data.SchemaName) }</span>
+				</div>
+				<div class="overflow-x-auto">
+					<table class="w-full text-left text-xs text-slate-300">
+						<thead class="bg-slate-900/60 uppercase tracking-wider text-slate-400 border-b border-slate-700/60">
+							<tr>
+								<th class="px-4 py-2.5 font-semibold">Nama Kolom</th>
+								<th class="px-4 py-2.5 font-semibold">Tipe Data</th>
+								<th class="px-4 py-2.5 font-semibold">Nullable</th>
+								<th class="px-4 py-2.5 font-semibold">Default</th>
+								<th class="px-4 py-2.5 font-semibold">Atribut</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-slate-700/60">
+							if len(data.ColumnsMeta) > 0 {
+								for _, colMeta := range data.ColumnsMeta {
+									<tr class="hover:bg-slate-700/30 transition">
+										<td class="px-4 py-2.5 font-mono font-semibold text-white">{ colMeta.Name }</td>
+										<td class="px-4 py-2.5 font-mono text-blue-400">{ colMeta.DataType }</td>
+										<td class="px-4 py-2.5">
+											if colMeta.IsNullable {
+												<span class="px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-mono">NULL</span>
+											} else {
+												<span class="px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-mono">NOT NULL</span>
+											}
+										</td>
+										<td class="px-4 py-2.5 font-mono text-slate-400">
+											if colMeta.DefaultValue != "" {
+												{ colMeta.DefaultValue }
+											} else {
+												<span>-</span>
+											}
+										</td>
+										<td class="px-4 py-2.5">
+											if colMeta.IsPK {
+												<span class="px-2 py-0.5 rounded bg-blue-500/20 border border-blue-500/30 text-blue-400 text-[10px] font-bold">PRIMARY KEY</span>
+											} else {
+												<span class="text-slate-500">-</span>
+											}
+										</td>
+									</tr>
+								}
+							} else {
+								<tr>
+									<td colspan="5" class="px-4 py-6 text-center text-slate-500">
+										Informasi kolom belum tersedia untuk tabel ini.
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+			<!-- 2. Constraints & Indexes Grid -->
+			<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+				<!-- Constraints -->
+				<div class="bg-slate-800/80 border border-slate-700/60 rounded-xl overflow-hidden shadow-xl">
+					<div class="px-4 py-3 bg-slate-900/90 border-b border-slate-700 flex items-center justify-between">
+						<span class="text-xs font-bold text-white uppercase tracking-wider">Constraints</span>
+						<span class="text-[10px] text-slate-400">{ fmt.Sprintf("%d Constraint", len(data.Constraints)) }</span>
+					</div>
+					<div class="overflow-x-auto">
+						<table class="w-full text-left text-xs text-slate-300">
+							<thead class="bg-slate-900/60 uppercase tracking-wider text-slate-400 border-b border-slate-700/60">
+								<tr>
+									<th class="px-4 py-2.5 font-semibold">Nama</th>
+									<th class="px-4 py-2.5 font-semibold">Tipe</th>
+									<th class="px-4 py-2.5 font-semibold">Definisi</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-slate-700/60">
+								if len(data.Constraints) > 0 {
+									for _, cst := range data.Constraints {
+										<tr class="hover:bg-slate-700/30 transition">
+											<td class="px-4 py-2.5 font-mono text-white">{ cst.Name }</td>
+											<td class="px-4 py-2.5">
+												<span class="px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-semibold">
+													{ cst.Type }
+												</span>
+											</td>
+											<td class="px-4 py-2.5 font-mono text-slate-400">{ cst.Definition }</td>
+										</tr>
+									}
+								} else {
+									<tr>
+										<td colspan="3" class="px-4 py-5 text-center text-slate-500">Tidak ada constraint terdaftar.</td>
+									</tr>
+								}
+							</tbody>
+						</table>
+					</div>
+				</div>
+
+				<!-- Indexes -->
+				<div class="bg-slate-800/80 border border-slate-700/60 rounded-xl overflow-hidden shadow-xl">
+					<div class="px-4 py-3 bg-slate-900/90 border-b border-slate-700 flex items-center justify-between">
+						<span class="text-xs font-bold text-white uppercase tracking-wider">Indexes</span>
+						<span class="text-[10px] text-slate-400">{ fmt.Sprintf("%d Index", len(data.Indexes)) }</span>
+					</div>
+					<div class="overflow-x-auto">
+						<table class="w-full text-left text-xs text-slate-300">
+							<thead class="bg-slate-900/60 uppercase tracking-wider text-slate-400 border-b border-slate-700/60">
+								<tr>
+									<th class="px-4 py-2.5 font-semibold">Nama Index</th>
+									<th class="px-4 py-2.5 font-semibold">Kolom</th>
+									<th class="px-4 py-2.5 font-semibold">Tipe</th>
+									<th class="px-4 py-2.5 font-semibold">Sifat</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-slate-700/60">
+								if len(data.Indexes) > 0 {
+									for _, idx := range data.Indexes {
+										<tr class="hover:bg-slate-700/30 transition">
+											<td class="px-4 py-2.5 font-mono text-white">{ idx.Name }</td>
+											<td class="px-4 py-2.5 font-mono text-blue-400">{ idx.Columns }</td>
+											<td class="px-4 py-2.5 font-mono text-slate-400">{ idx.IndexType }</td>
+											<td class="px-4 py-2.5">
+												if idx.IsUnique {
+													<span class="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold">UNIQUE</span>
+												} else {
+													<span class="px-2 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px]">NON-UNIQUE</span>
+												}
+											</td>
+										</tr>
+									}
+								} else {
+									<tr>
+										<td colspan="4" class="px-4 py-5 text-center text-slate-500">Tidak ada index terdaftar.</td>
+									</tr>
+								}
+							</tbody>
+						</table>
+					</div>
 				</div>
 			</div>
 		</div>
