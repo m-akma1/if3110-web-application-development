@@ -33,12 +33,13 @@ services:
   target-postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # No fallbacks: compose refuses to start when one of these is missing from .env.
     environment:
-      POSTGRES_USER: ${TARGET_POSTGRES_USER:-target_admin}
-      POSTGRES_PASSWORD: ${TARGET_POSTGRES_PASSWORD:-change-me-target-admin}
-      POSTGRES_DB: ${TARGET_POSTGRES_DB:-demo_target}
-      TARGET_APP_USER: ${TARGET_APP_USER:-app_target}
-      TARGET_APP_PASSWORD: ${TARGET_APP_PASSWORD:-change-me-app-target}
+      POSTGRES_USER: ${TARGET_POSTGRES_USER:?set TARGET_POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${TARGET_POSTGRES_PASSWORD:?set TARGET_POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${TARGET_POSTGRES_DB:?set TARGET_POSTGRES_DB in .env}
+      TARGET_APP_USER: ${TARGET_APP_USER:?set TARGET_APP_USER in .env}
+      TARGET_APP_PASSWORD: ${TARGET_APP_PASSWORD:?set TARGET_APP_PASSWORD in .env}
     volumes:
       - target_postgres_data:/var/lib/postgresql/data
       - ./docker/target-init:/docker-entrypoint-initdb.d:ro
@@ -53,16 +54,15 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
-    env_file:
-      - .env
+    # Only the database's own settings; the app's secrets stay out of this container.
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-if3110}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-webdev-sangat-mengasyikkan}
-      POSTGRES_DB: ${POSTGRES_DB:-dbplatform_core}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-if3110} -d $${POSTGRES_DB:-dbplatform_core}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5

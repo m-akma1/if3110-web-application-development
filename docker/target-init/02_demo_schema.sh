@@ -2,7 +2,7 @@
 # Sample schema and data for the demo target, created as the app role so it owns every object.
 set -eu
 
-: "${TARGET_APP_USER:=app_target}"
+: "${TARGET_APP_USER:?TARGET_APP_USER must be set}"
 
 psql -v ON_ERROR_STOP=1 \
   --username "$POSTGRES_USER" \

@@ -4,7 +4,7 @@
 # and makes it the owner of the demo database (and therefore of schema public).
 set -eu
 
-: "${TARGET_APP_USER:=app_target}"
+: "${TARGET_APP_USER:?TARGET_APP_USER must be set}"
 : "${TARGET_APP_PASSWORD:?TARGET_APP_PASSWORD must be set}"
 
 psql -v ON_ERROR_STOP=1 \
