@@ -16,9 +16,9 @@ func seedTestUsers(t *testing.T, store *authn.SessionStore) {
 	t.Helper()
 	accounts := []authn.RegisterInput{
 		{Username: "admin", Email: "admin@email.com", Password: "SuperSecretPass999!", Role: authn.RolePlatformAdmin},
-		{Username: "moreno", Email: "moreno@email.com", Password: "Rahasia123", Role: authn.RolePlatformAdmin},
-		{Username: "dhia", Email: "dhia@email.com", Password: "PasswordDhia123!", Role: authn.RoleUser},
-		{Username: "caca", Password: "PasswordCaca123!", Role: authn.RoleUser},
+		{Username: "alice", Email: "alice@email.com", Password: "Rahasia123", Role: authn.RolePlatformAdmin},
+		{Username: "bob", Email: "bob@email.com", Password: "PasswordBob123!", Role: authn.RoleUser},
+		{Username: "carol", Password: "PasswordCarol123!", Role: authn.RoleUser},
 	}
 	for _, acc := range accounts {
 		if _, err := store.RegisterUser(context.Background(), acc); err != nil {
@@ -150,7 +150,7 @@ func TestSessionLifecycle_RotationAndParallelGracePeriod(t *testing.T) {
 	seedTestUsers(t, store)
 
 	// 1. Login awal menghasilkan token_1
-	token1, _, err := store.Login(ctx, "dhia", "PasswordDhia123!", "")
+	token1, _, err := store.Login(ctx, "bob", "PasswordBob123!", "")
 	if err != nil {
 		t.Fatalf("login gagal: %v", err)
 	}
@@ -238,12 +238,12 @@ func TestSessionLifecycle_InstantRevocationOnLogoutAndAccessRevoke(t *testing.T)
 	seedTestUsers(t, store)
 
 	// Skenario A: Logout menonaktifkan sesi seketika (termasuk token dalam grace period)
-	tokenA, _, err := store.Login(ctx, "caca", "PasswordCaca123!", "")
+	tokenA, _, err := store.Login(ctx, "carol", "PasswordCarol123!", "")
 	if err != nil {
-		t.Fatalf("login caca gagal: %v", err)
+		t.Fatalf("login carol gagal: %v", err)
 	}
 
-	// Rotasi sesi caca sehingga ada tokenA (dalam grace period) dan tokenB (aktif)
+	// Rotasi sesi carol sehingga ada tokenA (dalam grace period) dan tokenB (aktif)
 	tokenB, _, err := store.RotateOnPrivilegeChange(ctx, tokenA, authn.RolePlatformAdmin)
 	if err != nil {
 		t.Fatalf("rotasi privilege gagal: %v", err)
@@ -263,16 +263,16 @@ func TestSessionLifecycle_InstantRevocationOnLogoutAndAccessRevoke(t *testing.T)
 	}
 
 	// Skenario B: Pencabutan akses pengguna (RevokeUserAccess) menonaktifkan semua sesi di berbagai perangkat seketika
-	tokenDevice1, profile, err := store.Login(ctx, "Moreno", "Rahasia123", "")
+	tokenDevice1, profile, err := store.Login(ctx, "Alice", "Rahasia123", "")
 	if err != nil {
 		t.Fatalf("login device 1 gagal: %v", err)
 	}
-	tokenDevice2, _, err := store.Login(ctx, "Moreno", "Rahasia123", "")
+	tokenDevice2, _, err := store.Login(ctx, "Alice", "Rahasia123", "")
 	if err != nil {
 		t.Fatalf("login device 2 gagal: %v", err)
 	}
 
-	// Cabut akses pengguna Moreno berdasarkan permanent User ID
+	// Cabut akses pengguna Alice berdasarkan permanent User ID
 	if err := store.RevokeUserAccess(ctx, profile.ID); err != nil {
 		t.Fatalf("gagal mencabut akses user: %v", err)
 	}

@@ -95,8 +95,8 @@ func TestSignup_ValidationAndDuplicates(t *testing.T) {
 	}{
 		{"username kosong", url.Values{"password": {"PasswordValid123"}}, "Username wajib diisi"},
 		{"username tidak valid", url.Values{"username": {"a b"}, "password": {"PasswordValid123"}}, "3-32 karakter"},
-		{"username dipakai (beda huruf)", url.Values{"username": {"DHIA"}, "password": {"PasswordValid123"}}, "Username sudah terdaftar"},
-		{"email dipakai", url.Values{"username": {"dhia2"}, "email": {"DHIA@email.com"}, "password": {"PasswordValid123"}}, "Email sudah terdaftar"},
+		{"username dipakai (beda huruf)", url.Values{"username": {"BOB"}, "password": {"PasswordValid123"}}, "Username sudah terdaftar"},
+		{"email dipakai", url.Values{"username": {"bob2"}, "email": {"BOB@email.com"}, "password": {"PasswordValid123"}}, "Email sudah terdaftar"},
 		{"email tidak valid", url.Values{"username": {"baru1"}, "email": {"bukan-email"}, "password": {"PasswordValid123"}}, "Format email tidak valid"},
 		{"password pendek", url.Values{"username": {"baru2"}, "password": {"pendek"}}, "8-128 karakter"},
 		{"kode tim salah", url.Values{"username": {"baru3"}, "password": {"PasswordValid123"}, "invite_code": {"KODE-SALAH"}}, "Kode tim tidak valid"},
@@ -145,16 +145,16 @@ func TestLogin_ByEmailOrUsername_AndGenericError(t *testing.T) {
 	srv := newTestServer(t, nil)
 	csrf, _ := authCSRF(t, srv, "/auth/login")
 
-	for _, id := range []string{"dhia", "DHIA", "dhia@email.com"} {
-		rec := postForm(srv, csrf, "/auth/login", url.Values{"identifier": {id}, "password": {"PasswordDhia123!"}})
+	for _, id := range []string{"bob", "BOB", "bob@email.com"} {
+		rec := postForm(srv, csrf, "/auth/login", url.Values{"identifier": {id}, "password": {"PasswordBob123!"}})
 		if rec.Header().Get("HX-Redirect") != "/dashboard" {
 			t.Errorf("login dengan %q seharusnya berhasil", id)
 		}
 	}
 
 	// Pesan error sama untuk user tidak ada dan password salah (tidak membocorkan keberadaan akun)
-	unknown := postForm(srv, csrf, "/auth/login", url.Values{"identifier": {"tidak.ada"}, "password": {"PasswordDhia123!"}})
-	wrong := postForm(srv, csrf, "/auth/login", url.Values{"identifier": {"dhia"}, "password": {"PasswordSalah123"}})
+	unknown := postForm(srv, csrf, "/auth/login", url.Values{"identifier": {"tidak.ada"}, "password": {"PasswordBob123!"}})
+	wrong := postForm(srv, csrf, "/auth/login", url.Values{"identifier": {"bob"}, "password": {"PasswordSalah123"}})
 	for _, rec := range []*httptest.ResponseRecorder{unknown, wrong} {
 		if rec.Header().Get("HX-Redirect") != "" || !strings.Contains(rec.Body.String(), "Username/email atau password tidak valid") {
 			t.Errorf("login gagal seharusnya menampilkan pesan generik, body: %s", rec.Body.String())

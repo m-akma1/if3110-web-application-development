@@ -39,7 +39,7 @@ func TestAdminRoutes_RequirePlatformAdmin_Integration(t *testing.T) {
 		{http.MethodPost, "/admin/codes"},
 		{http.MethodPost, "/admin/codes/SOME-CODE/active"},
 	}
-	user := loggedIn(t, env.srv, "dhia")
+	user := loggedIn(t, env.srv, "bob")
 	anon := newClient(t, env.srv)
 	for _, rt := range routes {
 		req := func(c *client) int {
@@ -82,7 +82,7 @@ func TestAdminConsole_EndToEnd_Integration(t *testing.T) {
 	t.Cleanup(func() { _, _ = base.ExecContext(context.Background(), "DROP TABLE IF EXISTS "+table) })
 
 	in, _ := dbmanager.TargetInputFromURL("E2E Target", testutil.TestDatabaseURL(t))
-	admin := loggedIn(t, env.srv, "moreno")
+	admin := loggedIn(t, env.srv, "alice")
 
 	rec := admin.post("/admin/databases", url.Values{
 		"name": {in.Name}, "host": {in.Host}, "port": {strconv.Itoa(in.Port)}, "db_name": {in.DBName},
@@ -102,19 +102,19 @@ func TestAdminConsole_EndToEnd_Integration(t *testing.T) {
 		t.Fatalf("membuat group gagal: %d %s", rec.Code, rec.Body.String())
 	}
 	readers, _ := env.groups.GetByName(ctx, "Readers")
-	if rec := admin.post("/admin/groups/"+readers.ID+"/members", url.Values{"user_id": {userID(t, env.srv, "dhia")}}); rec.Code != http.StatusOK {
+	if rec := admin.post("/admin/groups/"+readers.ID+"/members", url.Values{"user_id": {userID(t, env.srv, "bob")}}); rec.Code != http.StatusOK {
 		t.Fatalf("menambah anggota gagal: %d %s", rec.Code, rec.Body.String())
 	}
 	if rec := admin.post("/admin/grants", url.Values{"group_id": {readers.ID}, "database_id": {targetID}, "level": {"VIEW_ONLY"}}); rec.Code != http.StatusOK {
 		t.Fatalf("memberi akses gagal: %d %s", rec.Code, rec.Body.String())
 	}
 
-	dhia := loggedIn(t, env.srv, "dhia")
-	page := dhia.get("/dashboard?db_id=" + targetID)
+	bob := loggedIn(t, env.srv, "bob")
+	page := bob.get("/dashboard?db_id=" + targetID)
 	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "E2E Target - View Only") || !strings.Contains(page.Body.String(), table) {
 		t.Fatalf("anggota seharusnya melihat database dan tabel live-nya: %d", page.Code)
 	}
-	if code := dhia.post("/migration/apply", url.Values{"db_id": {targetID}}).Code; code != http.StatusForbidden {
+	if code := bob.post("/migration/apply", url.Values{"db_id": {targetID}}).Code; code != http.StatusForbidden {
 		t.Fatalf("VIEW_ONLY tidak boleh menjalankan migrasi, status %d", code)
 	}
 
@@ -123,15 +123,15 @@ func TestAdminConsole_EndToEnd_Integration(t *testing.T) {
 	if rec := admin.do(req); rec.Code != http.StatusOK {
 		t.Fatalf("hapus database gagal: %d %s", rec.Code, rec.Body.String())
 	}
-	if code := dhia.get("/dashboard?db_id=" + targetID).Code; code != http.StatusForbidden {
+	if code := bob.get("/dashboard?db_id=" + targetID).Code; code != http.StatusForbidden {
 		t.Fatalf("setelah database dihapus, akses harus ditolak, status %d", code)
 	}
 }
 
 func TestAdminConsole_ValidationAndSafety_Integration(t *testing.T) {
 	env := newTestEnv(t, nil)
-	admin := loggedIn(t, env.srv, "moreno")
-	morenoID := userID(t, env.srv, "moreno")
+	admin := loggedIn(t, env.srv, "alice")
+	aliceID := userID(t, env.srv, "alice")
 
 	cases := []struct {
 		name string
@@ -140,10 +140,10 @@ func TestAdminConsole_ValidationAndSafety_Integration(t *testing.T) {
 		want string
 	}{
 		{"port tidak valid", "/admin/databases", url.Values{"name": {"X DB"}, "host": {"h"}, "port": {"99999"}, "db_name": {"d"}, "username": {"u"}, "password": {"p"}}, "port harus 1-65535"},
-		{"turunkan role sendiri", "/admin/users/" + morenoID + "/role", url.Values{"role": {"USER"}}, "akun anda sendiri"},
-		{"nonaktifkan diri sendiri", "/admin/users/" + morenoID + "/active", url.Values{"active": {"false"}}, "akun anda sendiri"},
-		{"username dipakai", "/admin/users", url.Values{"username": {"dhia"}, "password": {"PasswordValid1"}}, "username sudah terdaftar"},
-		{"password lemah", "/admin/users/" + userID(t, env.srv, "dhia") + "/password", url.Values{"password": {"pendek"}}, "password minimal 8"},
+		{"turunkan role sendiri", "/admin/users/" + aliceID + "/role", url.Values{"role": {"USER"}}, "akun anda sendiri"},
+		{"nonaktifkan diri sendiri", "/admin/users/" + aliceID + "/active", url.Values{"active": {"false"}}, "akun anda sendiri"},
+		{"username dipakai", "/admin/users", url.Values{"username": {"bob"}, "password": {"PasswordValid1"}}, "username sudah terdaftar"},
+		{"password lemah", "/admin/users/" + userID(t, env.srv, "bob") + "/password", url.Values{"password": {"pendek"}}, "password minimal 8"},
 		{"kode ke Public", "/admin/codes", url.Values{"group_id": {groups.PublicGroupID}, "code": {"PUBLIC-1"}}, "group sistem"},
 		{"level tidak valid", "/admin/grants", url.Values{"group_id": {groups.PublicGroupID}, "database_id": {ids.New()}, "level": {"ROOT"}}, "tingkat akses tidak valid"},
 	}
@@ -159,7 +159,7 @@ func TestAdminConsole_ValidationAndSafety_Integration(t *testing.T) {
 	if !strings.Contains(page, "activeTab: 'databases'") {
 		t.Errorf("parameter ?tab seharusnya memilih tab awal")
 	}
-	if strings.Contains(page, "/admin/users/"+morenoID+"/role") || strings.Contains(page, "/admin/users/"+morenoID+"/active") {
+	if strings.Contains(page, "/admin/users/"+aliceID+"/role") || strings.Contains(page, "/admin/users/"+aliceID+"/active") {
 		t.Errorf("baris admin sendiri tidak boleh menampilkan kontrol role/nonaktif")
 	}
 }

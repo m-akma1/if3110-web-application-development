@@ -158,7 +158,7 @@ func TestGOTTH_LoginAndDashboardFlow(t *testing.T) {
 
 	// 2. POST /login via HTMX form-urlencoded
 	form := url.Values{}
-	form.Set("username", "Moreno")
+	form.Set("username", "Alice")
 	form.Set("password", "Rahasia123")
 	reqPostLogin := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
 	reqPostLogin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -185,14 +185,14 @@ func TestGOTTH_LoginAndDashboardFlow(t *testing.T) {
 		t.Fatalf("seharusnya GET /dashboard dengan sesi valid berhasil (200 OK), dapat: %d", recDash.Code)
 	}
 	body := recDash.Body.String()
-	if !strings.Contains(body, "Database Viewer") || !strings.Contains(body, "moreno") {
+	if !strings.Contains(body, "Database Viewer") || !strings.Contains(body, "alice") {
 		t.Fatalf("halaman /dashboard tidak memuat konten user atau komponen Database Viewer")
 	}
 	if !strings.Contains(body, "X-CSRF-Token") || !strings.Contains(body, csrfCookie.Value) {
 		t.Fatalf("halaman /dashboard wajib menyertakan hx-headers X-CSRF-Token agar tombol Logout HTMX berfungsi")
 	}
 
-	// 4. POST /logout via HTMX menggunakan akun Moreno
+	// 4. POST /logout via HTMX menggunakan akun Alice
 	reqLogout := httptest.NewRequest(http.MethodPost, "/logout", nil)
 	reqLogout.Header.Set(apphttp.CSRFHeaderName, csrfCookie.Value)
 	reqLogout.AddCookie(csrfCookie)
@@ -203,11 +203,11 @@ func TestGOTTH_LoginAndDashboardFlow(t *testing.T) {
 	srv.ServeHTTP(recLogout, reqLogout)
 
 	if recLogout.Code != http.StatusOK || recLogout.Header().Get("HX-Redirect") != "/login" {
-		t.Fatalf("seharusnya POST /logout akun Moreno berhasil dan mengembalikan HX-Redirect: /login, status=%d, redirect=%q",
+		t.Fatalf("seharusnya POST /logout akun Alice berhasil dan mengembalikan HX-Redirect: /login, status=%d, redirect=%q",
 			recLogout.Code, recLogout.Header().Get("HX-Redirect"))
 	}
 
-	// 5. Pastikan sesi Moreno langsung nonaktif di backend setelah logout
+	// 5. Pastikan sesi Alice langsung nonaktif di backend setelah logout
 	reqDashAfterLogout := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
 	for _, c := range recPostLogin.Result().Cookies() {
 		reqDashAfterLogout.AddCookie(c)

@@ -664,9 +664,9 @@ func buildTableDataAndSchema(tableName string) domain.TableDataResult {
 			TableName:  "users",
 			Columns:    []string{"id", "username", "email", "role", "created_at"},
 			Rows: [][]string{
-				{"usr-101", "moreno", "moreno@email.com", "PLATFORM_ADMIN", "2026-08-01 10:00"},
-				{"usr-102", "akmal", "akmal@email.com", "USER", "2026-08-02 11:30"},
-				{"usr-103", "dzaki", "dzaki@email.com", "USER", "2026-08-03 14:15"},
+				{"usr-101", "alice", "alice@email.com", "PLATFORM_ADMIN", "2026-08-01 10:00"},
+				{"usr-102", "bob", "bob@email.com", "USER", "2026-08-02 11:30"},
+				{"usr-103", "carol", "carol@email.com", "USER", "2026-08-03 14:15"},
 			},
 			TotalRows:   150,
 			CurrentPage: 1,

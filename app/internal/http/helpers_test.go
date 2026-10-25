@@ -23,9 +23,9 @@ import (
 // testAccounts are registered on every test server.
 var testAccounts = []authn.RegisterInput{
 	{Username: "admin", Email: "admin@email.com", Password: "SuperSecretPass999!", Role: authn.RolePlatformAdmin},
-	{Username: "moreno", Email: "moreno@email.com", Password: "Rahasia123", Role: authn.RolePlatformAdmin},
-	{Username: "dhia", Email: "dhia@email.com", Password: "PasswordDhia123!", Role: authn.RoleUser},
-	{Username: "caca", Password: "PasswordCaca123!", Role: authn.RoleUser},
+	{Username: "alice", Email: "alice@email.com", Password: "Rahasia123", Role: authn.RolePlatformAdmin},
+	{Username: "bob", Email: "bob@email.com", Password: "PasswordBob123!", Role: authn.RoleUser},
+	{Username: "carol", Password: "PasswordCarol123!", Role: authn.RoleUser},
 }
 
 var testPasswords = func() map[string]string {

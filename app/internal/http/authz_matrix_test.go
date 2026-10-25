@@ -142,16 +142,16 @@ func TestAuthorizationMatrix_Integration(t *testing.T) {
 
 func TestAdminRoutes_ForbiddenForUsers_Integration(t *testing.T) {
 	env := newTestEnv(t, nil)
-	c := loggedIn(t, env.srv, "dhia")
+	c := loggedIn(t, env.srv, "bob")
 
 	if code := c.get("/admin").Code; code != http.StatusForbidden {
 		t.Errorf("GET /admin oleh USER: status %d, ingin 403", code)
 	}
-	rec := c.post("/admin/users/"+userID(t, env.srv, "dhia")+"/role", url.Values{"role": {authn.RolePlatformAdmin}})
+	rec := c.post("/admin/users/"+userID(t, env.srv, "bob")+"/role", url.Values{"role": {authn.RolePlatformAdmin}})
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("POST /admin/users/{id}/role oleh USER: status %d, ingin 403", rec.Code)
 	}
-	u, _ := env.sessions.GetUserByUsername(context.Background(), "dhia")
+	u, _ := env.sessions.GetUserByUsername(context.Background(), "bob")
 	if u.Role != authn.RoleUser {
 		t.Fatalf("USER tidak boleh bisa menaikkan role-nya sendiri, role sekarang: %s", u.Role)
 	}
