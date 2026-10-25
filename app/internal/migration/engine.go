@@ -63,7 +63,9 @@ func NewEngine(platform *sql.DB, pools PoolSource, limits Limits) *Engine {
 }
 
 // DryRun runs script on the target inside a transaction that is always rolled back, so the
-// target is never changed. A failing script is a normal result (RunResult.OK false), not an error.
+// target is never changed. Statements run one at a time and DML statements are analyzed with
+// EXPLAIN ANALYZE (see explain.go), so RunResult.Steps has a report and plan per statement.
+// A failing script is a normal result (RunResult.OK false), not an error.
 // Errors are ErrEmptyScript, ErrScriptTooLarge, *RejectedError, ErrTargetUnavailable or a context error.
 func (e *Engine) DryRun(ctx context.Context, databaseID, script string) (*RunResult, error) {
 	stmts, err := CheckScript(script)
@@ -74,7 +76,15 @@ func (e *Engine) DryRun(ctx context.Context, databaseID, script string) (*RunRes
 	if !ok {
 		return nil, ErrTargetUnavailable
 	}
-	return e.run(ctx, pool, script, stmts, false)
+	ctx, cancel := context.WithTimeout(ctx, e.runTimeout())
+	defer cancel()
+	conn, tx, err := e.begin(ctx, pool)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	defer func() { _ = tx.Rollback() }()
+	return dryRun(ctx, tx, script, stmts), nil
 }
 
 // Execute runs a DRAFT on its target database in one transaction: COMMIT when every statement
@@ -112,8 +122,7 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	defer e.unlock(lockConn, m.DatabaseID)
 
 	// Once the lock is held, finish the run and its history write even if the client goes away.
-	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx),
-		e.limits.LockTimeout+e.limits.StatementTimeout+15*time.Second)
+	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.runTimeout())
 	defer cancel()
 
 	// Re-read under the lock: another request may have executed or edited this draft meanwhile.
@@ -130,7 +139,7 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	}
 
 	executedAt := e.now()
-	res, err := e.run(runCtx, pool, m.SQL, stmts, true)
+	res, err := e.run(runCtx, pool, m.SQL, stmts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -156,37 +165,54 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	return m, res, err
 }
 
-// run executes script on one pooled connection of the target, inside a transaction with
-// lock and statement timeouts, then commits (commit true and no error) or rolls back.
-// It returns an error only when the transaction could not be started; script failures are
-// reported in RunResult.
-func (e *Engine) run(ctx context.Context, pool *sql.DB, script string, stmts []Statement, commit bool) (*RunResult, error) {
+// runTimeout bounds a whole run on the client side, in case the server-side timeouts do not fire.
+func (e *Engine) runTimeout() time.Duration {
+	return e.limits.LockTimeout + e.limits.StatementTimeout + 15*time.Second
+}
+
+// begin opens a transaction on one pooled connection of the target with lock and statement
+// timeouts set. The caller closes conn and ends tx.
+func (e *Engine) begin(ctx context.Context, pool *sql.DB) (*sql.Conn, *sql.Tx, error) {
 	conn, err := pool.Conn(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrTargetUnavailable, err)
+		return nil, nil, fmt.Errorf("%w: %v", ErrTargetUnavailable, err)
 	}
-	defer conn.Close()
-
-	start := time.Now()
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrTargetUnavailable, err)
+		conn.Close()
+		return nil, nil, fmt.Errorf("%w: %v", ErrTargetUnavailable, err)
 	}
-	defer func() { _ = tx.Rollback() }()
-
 	// SET cannot take bind parameters; the values are integers, so formatting them in is safe.
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("SET LOCAL lock_timeout = %d", e.limits.LockTimeout.Milliseconds())); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrTargetUnavailable, err)
+	for _, set := range []string{
+		fmt.Sprintf("SET LOCAL lock_timeout = %d", e.limits.LockTimeout.Milliseconds()),
+		fmt.Sprintf("SET LOCAL statement_timeout = %d", e.limits.StatementTimeout.Milliseconds()),
+	} {
+		if _, err := tx.ExecContext(ctx, set); err != nil {
+			_ = tx.Rollback()
+			conn.Close()
+			return nil, nil, fmt.Errorf("%w: %v", ErrTargetUnavailable, err)
+		}
 	}
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("SET LOCAL statement_timeout = %d", e.limits.StatementTimeout.Milliseconds())); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrTargetUnavailable, err)
+	return conn, tx, nil
+}
+
+// run executes the whole script on the target in one transaction and commits it when every
+// statement succeeds. It returns an error only when the transaction could not be started;
+// script failures are reported in RunResult.
+func (e *Engine) run(ctx context.Context, pool *sql.DB, script string, stmts []Statement) (*RunResult, error) {
+	start := time.Now()
+	conn, tx, err := e.begin(ctx, pool)
+	if err != nil {
+		return nil, err
 	}
+	defer conn.Close()
+	defer func() { _ = tx.Rollback() }()
 
 	// Without arguments pgx sends the script with the simple query protocol, so the server parses
 	// all statements itself and error positions are relative to the whole script.
 	_, execErr := tx.ExecContext(ctx, script)
 	committed := false
-	if execErr == nil && commit {
+	if execErr == nil {
 		execErr = tx.Commit()
 		committed = execErr == nil
 	}
@@ -247,19 +273,15 @@ func discardConn(conn *sql.Conn) {
 	_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 }
 
-// toScriptError turns a driver error into a ScriptError, mapping PostgreSQL's character
-// position to a line, column and statement number of the script.
+// toScriptError turns a driver error from a whole-script run into a ScriptError, mapping
+// PostgreSQL's character position to a line, column and statement number of the script.
 func toScriptError(script string, stmts []Statement, err error) *ScriptError {
+	se := baseScriptError(err)
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return &ScriptError{Message: "eksekusi melebihi batas waktu dan dibatalkan"}
+	if errors.As(err, &pgErr) {
+		if line, col, off, ok := lineColumn(script, int(pgErr.Position)); ok {
+			se.Line, se.Column, se.Statement = line, col, statementAt(stmts, off)
 		}
-		return &ScriptError{Message: err.Error()}
-	}
-	se := &ScriptError{Message: pgErr.Message, Code: pgErr.Code, Detail: pgErr.Detail, Hint: pgErr.Hint, Where: pgErr.Where}
-	if line, col, off, ok := lineColumn(script, int(pgErr.Position)); ok {
-		se.Line, se.Column, se.Statement = line, col, statementAt(stmts, off)
 	}
 	return se
 }

@@ -84,10 +84,31 @@ type RunResult struct {
 	Statements int // statements in the script, as split by SplitStatements
 	Duration   time.Duration
 	Err        *ScriptError // set when OK is false
+	Steps      []Step       // per-statement report; only dry runs fill it (see explain.go)
+}
+
+// StepKind says what a dry run did with one statement.
+type StepKind string
+
+const (
+	StepExplained StepKind = "EXPLAINED" // DML run through EXPLAIN ANALYZE; Plan is set
+	StepExecuted  StepKind = "EXECUTED"  // not explainable (DDL and others); run as is
+	StepFailed    StepKind = "FAILED"    // this statement raised the error in RunResult.Err
+	StepSkipped   StepKind = "SKIPPED"   // not run because an earlier statement failed
+)
+
+// Step is the dry-run report for one statement.
+type Step struct {
+	Index    int // 1-based
+	SQL      string
+	Kind     StepKind
+	Duration time.Duration
+	Plan     *Plan // for StepExplained
 }
 
 // ScriptError describes why a script failed on the target.
-// Line, Column and Statement are 1-based and 0 when PostgreSQL did not report a position.
+// Line and Column are 1-based and 0 when PostgreSQL did not report a position.
+// Statement is 1-based and 0 when the failing statement is unknown.
 type ScriptError struct {
 	Message   string
 	Code      string // SQLSTATE, e.g. 42P01
@@ -112,8 +133,13 @@ func (e *ScriptError) String() string {
 	} else {
 		b.WriteString(e.Message)
 	}
-	if e.Line > 0 {
+	switch {
+	case e.Line > 0 && e.Statement > 0:
 		fmt.Fprintf(&b, " (statement %d, baris %d, kolom %d)", e.Statement, e.Line, e.Column)
+	case e.Line > 0:
+		fmt.Fprintf(&b, " (baris %d, kolom %d)", e.Line, e.Column)
+	case e.Statement > 0:
+		fmt.Fprintf(&b, " (statement %d)", e.Statement)
 	}
 	if e.Detail != "" {
 		b.WriteString("\nDETAIL: " + e.Detail)
