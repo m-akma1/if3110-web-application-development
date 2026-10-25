@@ -102,6 +102,22 @@ func runRepositoryContract(t *testing.T, repo authn.Repository) {
 		if !got.AbsoluteExpiresAt.Equal(sess.AbsoluteExpiresAt) {
 			t.Fatalf("rotasi tidak boleh mengubah absolute_expires_at")
 		}
+		if err := repo.MarkSessionsForRotation(ctx, alice.ID); err != nil {
+			t.Fatal(err)
+		}
+		marked, _ := repo.GetSessionByTokenHash(ctx, authn.HashOpaqueToken("t2"))
+		if marked == nil || marked.LastRotatedAt.Year() > 1970 {
+			t.Fatalf("MarkSessionsForRotation seharusnya memundurkan last_rotated_at, dapat %+v", marked)
+		}
+		if err := repo.UpdatePasswordHash(ctx, alice.ID, "hash-baru"); err != nil {
+			t.Fatal(err)
+		}
+		if u, _ := repo.GetUserByID(ctx, alice.ID); u.PasswordHash != "hash-baru" {
+			t.Fatalf("password hash seharusnya diperbarui")
+		}
+		if err := repo.UpdatePasswordHash(ctx, ids.New(), "x"); !errors.Is(err, authn.ErrUserNotFound) {
+			t.Fatalf("user tidak ada seharusnya ErrUserNotFound, dapat %v", err)
+		}
 		if err := repo.RevokeAllUserSessions(ctx, alice.ID); err != nil {
 			t.Fatal(err)
 		}

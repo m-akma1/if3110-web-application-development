@@ -403,6 +403,44 @@ func (s *SessionStore) RevokeUserAccess(ctx context.Context, userID string) erro
 	return s.repo.RevokeAllUserSessions(ctx, userID)
 }
 
+// GetUserByID memuat principal berdasarkan UUID permanen.
+func (s *SessionStore) GetUserByID(ctx context.Context, userID string) (*User, error) {
+	return s.repo.GetUserByID(ctx, userID)
+}
+
+// ForceRotateUserSessions membuat setiap sesi aktif milik user dirotasi pada request berikutnya.
+// Dipakai saat privilege user meningkat (promosi role, masuk group, grant dinaikkan): nama cookie
+// tetap, nilainya diganti, absolute expiration tidak berubah.
+func (s *SessionStore) ForceRotateUserSessions(ctx context.Context, userID string) error {
+	return s.repo.MarkSessionsForRotation(ctx, userID)
+}
+
+// RevokeAllSessions mencabut seluruh sesi user tanpa menonaktifkan akunnya (misal saat role diturunkan
+// atau password direset), sehingga user wajib login ulang.
+func (s *SessionStore) RevokeAllSessions(ctx context.Context, userID string) error {
+	return s.repo.RevokeAllUserSessions(ctx, userID)
+}
+
+// ReactivateUser mengaktifkan kembali akun yang sebelumnya dinonaktifkan.
+func (s *SessionStore) ReactivateUser(ctx context.Context, userID string) error {
+	return s.repo.SetUserActiveStatus(ctx, userID, true)
+}
+
+// SetPassword mengganti password user (divalidasi, di-hash Argon2id) dan mencabut seluruh sesinya.
+func (s *SessionStore) SetPassword(ctx context.Context, userID, plainPassword string) error {
+	if err := ValidatePassword(plainPassword); err != nil {
+		return err
+	}
+	hash, err := HashPassword(plainPassword)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.UpdatePasswordHash(ctx, userID, hash); err != nil {
+		return err
+	}
+	return s.repo.RevokeAllUserSessions(ctx, userID)
+}
+
 // ListUsers mengembalikan seluruh pengguna yang terdaftar di platform untuk halaman Platform Admin
 func (s *SessionStore) ListUsers(ctx context.Context) ([]*User, error) {
 	return s.repo.ListUsers(ctx)
