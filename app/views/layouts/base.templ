@@ -13,7 +13,7 @@ templ Base(title string, csrfToken string) {
         <script defer src="/static/js/alpine.min.js"></script>
     </head>
     <body 
-        class="h-full text-slate-100 antialiased font-sans bg-slate-900"
+        class="h-full text-zinc-100 bg-[#121212] font-sans antialiased"
         hx-headers={ `{"X-CSRF-Token": "` + csrfToken + `"}` }
     >
         <div class="min-h-full flex flex-col justify-center py-12 sm:px-6 lg:px-8">

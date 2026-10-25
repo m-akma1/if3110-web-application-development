@@ -1,27 +1,29 @@
 package pages
 
 import (
-	"dbplatform/app/internal/authn"
 	"dbplatform/app/domain"
 	"dbplatform/app/views/components"
 	"dbplatform/app/views/layouts"
 )
 
-templ Dashboard(user *authn.AuthLayoutUser, activeDBID string, tables []domain.TableSummary, selectedData domain.TableDataResult) {
-	@layouts.Dashboard("Database Viewer", user, activeDBID, "viewer") {
+templ Dashboard(user *domain.AuthLayoutUser, activeDBID string, tables []domain.TableSummary, selectedData domain.TableDataResult, csrfToken string) {
+	@layouts.Dashboard("Database Viewer", user, activeDBID, "viewer", csrfToken) {
+		if activeDBID == "" {
+			@components.NoDatabaseAccess(user)
+		} else {
 		<div class="flex gap-6 h-full" x-data="{ selectedTable: 'users' }">
 			<!-- Sidebar Daftar Tabel -->
-			<div class="w-64 bg-slate-800/60 border border-slate-700/60 rounded-xl p-4 flex flex-col shrink-0">
-				<h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-2">Daftar Tabel</h3>
+			<div class="w-60 bg-[#222126] border border-[#333138] rounded-2xl p-4 flex flex-col shrink-0">
+				<h3 class="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 px-2">Daftar Tabel</h3>
 				<div class="space-y-1 overflow-y-auto flex-1">
 					for _, tbl := range tables {
-						<button 
-							hx-get={ "/dashboard/table?name=" + tbl.Name }
+						<button
+							hx-get={ "/dashboard/table?db_id=" + activeDBID + "&name=" + tbl.Name }
 							hx-target="#data-grid-container"
 							hx-swap="outerHTML"
 							@click={ "selectedTable = '" + tbl.Name + "'" }
-							:class={ "selectedTable === '" + tbl.Name + "' ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30' : 'text-slate-300 hover:bg-slate-700/50'" }
-							class="w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition flex justify-between items-center border border-transparent"
+							:class={ "selectedTable === '" + tbl.Name + "' ? 'bg-[#ceafa3]/15 text-[#ceafa3] border border-[#ceafa3]/30 font-bold' : 'text-zinc-300 hover:bg-[#2c2a30] border border-transparent'" }
+							class="w-full text-left px-3 py-2 rounded-xl text-xs transition flex justify-between items-center cursor-pointer"
 						>
 							<span class="truncate font-mono text-xs">{ tbl.Name }</span>
 						</button>
@@ -29,10 +31,92 @@ templ Dashboard(user *authn.AuthLayoutUser, activeDBID string, tables []domain.T
 				</div>
 			</div>
 
-			<!-- Main Panel Data Grid -->
-			<div class="flex-1 min-w-0">
+			<!-- Main Panel: Read-Only Query Runner + Data Grid -->
+			<div class="flex-1 min-w-0 space-y-5">
+				<!-- Read-Only SQL Query Runner dengan Live Keyword Guard -->
+				<div
+					class="bg-[#222126] border border-[#333138] rounded-2xl p-4 shadow-xl space-y-3"
+					x-data="{
+						sqlQuery: 'SELECT id, username, role, created_at FROM users;',
+						get forbiddenKeyword() {
+							const m = this.sqlQuery.match(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|REPLACE|GRANT|REVOKE|MERGE|CALL|EXEC|EXECUTE|COPY|VACUUM)\b/i);
+							return m ? m[1].toUpperCase() : '';
+						},
+						get hasMultiStatement() {
+							const trimmed = this.sqlQuery.trim().replace(/;$/, '');
+							return trimmed.includes(';');
+						}
+					}"
+				>
+					<div class="flex items-center justify-between">
+						<div class="flex items-center gap-2">
+							<span class="text-xs font-bold text-white uppercase tracking-wider">SQL Query Explorer</span>
+							<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-[#ceafa3]/10 text-[#ceafa3] border border-[#ceafa3]/20">
+								SELECT Only (Read-Only Guard)
+							</span>
+							<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-[#18171b] text-zinc-300 border border-[#333138]">
+								Target DB: { activeDBID }
+							</span>
+						</div>
+						<span class="text-xs text-zinc-400">
+							Perubahan data/skema wajib melalui menu Migration
+						</span>
+					</div>
+
+					<form
+						hx-post="/dashboard/query"
+						hx-target="#data-grid-container"
+						hx-swap="outerHTML"
+						class="space-y-2.5"
+					>
+						<input type="hidden" name="db_id" value={ activeDBID }/>
+						<div class="space-y-2">
+							<textarea
+								name="sql_query"
+								rows="3"
+								x-model="sqlQuery"
+								placeholder="SELECT * FROM users LIMIT 25;"
+								:class="(forbiddenKeyword !== '' || hasMultiStatement) ? 'border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30' : 'border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50'"
+								class="w-full px-3.5 py-2.5 text-xs font-mono rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition resize-y"
+							></textarea>
+							<div class="flex justify-end">
+								<button
+									type="submit"
+									:disabled="forbiddenKeyword !== '' || hasMultiStatement || sqlQuery.trim() === ''"
+									class="px-4 py-2 rounded-lg bg-[#ceafa3] hover:bg-[#c2a195] disabled:opacity-40 disabled:cursor-not-allowed text-[#121212] text-xs font-semibold transition cursor-pointer shrink-0"
+								>
+									Jalankan Query
+								</button>
+							</div>
+						</div>
+
+						<!-- Peringatan Real-Time di Frontend saat Terdeteksi Keyword Mutasi -->
+						<div
+							x-show="forbiddenKeyword !== ''"
+							x-cloak
+							class="p-2.5 rounded-lg bg-[#ff8080]/10 border border-[#ff8080]/30 text-xs text-[#ff8080] flex items-center gap-2"
+						>
+							<svg class="w-4 h-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+								<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
+							</svg>
+							<span>
+								Perintah <strong class="font-mono underline" x-text="forbiddenKeyword"></strong> ditolak! Halaman utama hanya mengizinkan pembacaan data (<code class="font-mono">SELECT</code>).
+							</span>
+						</div>
+
+						<div
+							x-show="forbiddenKeyword === '' && hasMultiStatement"
+							x-cloak
+							class="p-2.5 rounded-lg bg-[#ffbc5e]/10 border border-[#ffbc5e]/20 text-xs text-[#ffbc5e] flex items-center gap-2"
+						>
+							<span>Multi-statement (<code class="font-mono">;</code>) tidak diizinkan pada Data Viewer.</span>
+						</div>
+					</form>
+				</div>
+
 				@components.DataGrid(selectedData)
 			</div>
 		</div>
+		}
 	}
 }

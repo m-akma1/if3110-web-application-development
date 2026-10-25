@@ -1,0 +1,25 @@
+package components
+
+import "dbplatform/app/domain"
+
+// NoDatabaseAccess is the empty state for users whose groups have no database grants yet.
+templ NoDatabaseAccess(user *domain.AuthLayoutUser) {
+	<div class="max-w-xl mx-auto mt-16 bg-[#222126] border border-[#333138] rounded-2xl p-8 text-center space-y-3">
+		<div class="text-[#ffbc5e] flex justify-center">
+			<svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path></svg>
+		</div>
+		<h2 class="text-lg font-bold text-white">Belum ada database yang dapat diakses</h2>
+		<p class="text-xs text-zinc-400 leading-relaxed">
+			Akses database diberikan melalui group. Minta Platform Admin menambahkan Anda ke group yang memiliki akses,
+			atau memberi akses pada group yang sudah Anda ikuti.
+		</p>
+		if user != nil && len(user.Groups) > 0 {
+			<div class="flex flex-wrap justify-center gap-1.5 pt-2">
+				<span class="text-[10px] text-zinc-500 uppercase tracking-wider mr-1 self-center">Group Anda:</span>
+				for _, g := range user.Groups {
+					<span class="px-2 py-0.5 rounded-md text-[10px] font-mono bg-[#18171b] text-zinc-300 border border-[#333138]">{ g.Name }</span>
+				}
+			</div>
+		}
+	</div>
+}

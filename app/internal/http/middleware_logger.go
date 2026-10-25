@@ -40,7 +40,7 @@ func SanitizedLoggerMiddleware(logger *log.Logger) func(http.Handler) http.Handl
 			safePath := SanitizeURL(r.URL)
 
 			// catat informasi aman tidak ada cookie, set cookie, body
-			logger.Printf("[HTTP] method=%s path=%s status%d duration%s",
+			logger.Printf("[HTTP] method=%s path=%s status=%d duration=%s",
 				r.Method,
 				safePath,
 				rec.statusCode,

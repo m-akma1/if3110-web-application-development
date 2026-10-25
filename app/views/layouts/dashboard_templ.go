@@ -9,11 +9,11 @@ import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
 import (
-	"dbplatform/app/internal/authn"
+	"dbplatform/app/domain"
 	"dbplatform/app/views/components"
 )
 
-func Dashboard(title string, user *authn.AuthLayoutUser, activeDBID string, activeTab string) templ.Component {
+func Dashboard(title string, user *domain.AuthLayoutUser, activeDBID string, activeTab string, csrfToken string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -34,20 +34,46 @@ func Dashboard(title string, user *authn.AuthLayoutUser, activeDBID string, acti
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<!doctype html><html lang=\"id\" class=\"h-full bg-slate-900\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<!doctype html><html lang=\"id\" class=\"h-full bg-[#121212]\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><meta name=\"csrf-token\" content=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var2 string
-		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(title)
+		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.ResolveAttributeValue(csrfToken)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/layouts/dashboard.templ`, Line: 14, Col: 22}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/layouts/dashboard.templ`, Line: 14, Col: 45}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var2)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, " - Platform Manajemen Database</title><link href=\"/static/css/style.css\" rel=\"stylesheet\"><script src=\"/static/js/htmx.min.js\"></script><script defer src=\"/static/js/alpine.min.js\"></script></head><body class=\"h-full text-slate-100 bg-slate-900 font-sans\"><div class=\"flex h-screen overflow-hidden\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\"><!-- Swap 403 responses too, so \"access denied\" fragments from the backend are shown --><meta name=\"htmx-config\" content='{\"responseHandling\":[{\"code\":\"204\",\"swap\":false},{\"code\":\"[23]..\",\"swap\":true},{\"code\":\"403\",\"swap\":true,\"error\":false},{\"code\":\"422\",\"swap\":true,\"error\":false},{\"code\":\"[45]..\",\"swap\":false,\"error\":true}]}'><title>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var3 string
+		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(title)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/layouts/dashboard.templ`, Line: 17, Col: 16}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, " - Platform Manajemen Database</title><link href=\"/static/css/style.css\" rel=\"stylesheet\"><script src=\"/static/js/htmx.min.js\"></script><script defer src=\"/static/js/alpine.min.js\"></script><script>\n\t\t\tdocument.addEventListener('htmx:configRequest', function(evt) {\n\t\t\t\tvar meta = document.querySelector('meta[name=\"csrf-token\"]');\n\t\t\t\tif (meta && meta.content) {\n\t\t\t\t\tevt.detail.headers['X-CSRF-Token'] = meta.content;\n\t\t\t\t}\n\t\t\t});\n\t\t</script></head><body class=\"h-full text-zinc-100 bg-[#121212] font-sans antialiased\" hx-headers=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var4 string
+		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(`{"X-CSRF-Token": "` + csrfToken + `"}`)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/layouts/dashboard.templ`, Line: 32, Col: 54}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\"><div class=\"flex h-screen overflow-hidden p-3 gap-3 bg-[#121212]\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -55,7 +81,7 @@ func Dashboard(title string, user *authn.AuthLayoutUser, activeDBID string, acti
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div class=\"flex-1 flex flex-col min-w-0 overflow-hidden\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"flex-1 flex flex-col min-w-0 overflow-hidden bg-[#1c1b1e] rounded-2xl border border-[#333138]\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -63,7 +89,7 @@ func Dashboard(title string, user *authn.AuthLayoutUser, activeDBID string, acti
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<main class=\"flex-1 overflow-y-auto p-6 bg-slate-900\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<main class=\"flex-1 overflow-y-auto p-6 bg-[#1c1b1e]\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -71,7 +97,7 @@ func Dashboard(title string, user *authn.AuthLayoutUser, activeDBID string, acti
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</main></div></div></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</main></div></div></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

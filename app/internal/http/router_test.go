@@ -33,7 +33,8 @@ func TestSanitizeURL_Unit(t *testing.T) {
 // 2.  Menguji CSRF Guard & Handler Tanpa HTTP Server
 func TestCSRFGuard_BlocksPostWithoutToken(t *testing.T) {
 	var logBuf bytes.Buffer
-	srv := apphttp.NewServer(&logBuf)
+	// CSRF guard menolak sebelum handler berjalan, jadi tidak perlu database
+	srv := apphttp.NewServer(&logBuf, apphttp.Deps{})
 
 	// Kirim POST tanpa Cookie & Header CSRF
 	body := strings.NewReader(`{"username":"admin","password":"SecretPassword123"}`)
@@ -51,7 +52,7 @@ func TestCSRFGuard_BlocksPostWithoutToken(t *testing.T) {
 // 3.  Alur Lengkap (Ambil CSRF -> POST Login -> Cek Sanitasi Log & Cookie)
 func TestLoginFlow_CSRFAndSanitizedLog_Integration(t *testing.T) {
 	var logBuf bytes.Buffer
-	srv := apphttp.NewServer(&logBuf)
+	srv := newTestServer(t, &logBuf)
 
 	//  Ambil Token CSRF (GET /api/csrf-token)
 	reqCSRF := httptest.NewRequest(http.MethodGet, "/api/csrf-token", nil)
@@ -133,7 +134,7 @@ func TestLoginFlow_CSRFAndSanitizedLog_Integration(t *testing.T) {
 // 4. Menguji Alur UI GOTTH (GET /login -> POST /login via HTMX -> GET /dashboard)
 func TestGOTTH_LoginAndDashboardFlow(t *testing.T) {
 	var logBuf bytes.Buffer
-	srv := apphttp.NewServer(&logBuf)
+	srv := newTestServer(t, &logBuf)
 
 	// 1. GET /login -> menerbitkan cookie __Host-csrf dan merender halaman Login
 	reqGetLogin := httptest.NewRequest(http.MethodGet, "/login", nil)
@@ -157,7 +158,7 @@ func TestGOTTH_LoginAndDashboardFlow(t *testing.T) {
 
 	// 2. POST /login via HTMX form-urlencoded
 	form := url.Values{}
-	form.Set("username", "Moreno")
+	form.Set("username", "Alice")
 	form.Set("password", "Rahasia123")
 	reqPostLogin := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
 	reqPostLogin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -173,6 +174,7 @@ func TestGOTTH_LoginAndDashboardFlow(t *testing.T) {
 
 	// 3. GET /dashboard dengan cookie __Host-sid -> merender komponen Dashboard, Navbar, dan Sidebar
 	reqDash := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	reqDash.AddCookie(csrfCookie)
 	for _, c := range recPostLogin.Result().Cookies() {
 		reqDash.AddCookie(c)
 	}
@@ -183,7 +185,38 @@ func TestGOTTH_LoginAndDashboardFlow(t *testing.T) {
 		t.Fatalf("seharusnya GET /dashboard dengan sesi valid berhasil (200 OK), dapat: %d", recDash.Code)
 	}
 	body := recDash.Body.String()
-	if !strings.Contains(body, "Database Viewer") || !strings.Contains(body, "Moreno") {
+	if !strings.Contains(body, "Database Viewer") || !strings.Contains(body, "alice") {
 		t.Fatalf("halaman /dashboard tidak memuat konten user atau komponen Database Viewer")
+	}
+	if !strings.Contains(body, "X-CSRF-Token") || !strings.Contains(body, csrfCookie.Value) {
+		t.Fatalf("halaman /dashboard wajib menyertakan hx-headers X-CSRF-Token agar tombol Logout HTMX berfungsi")
+	}
+
+	// 4. POST /logout via HTMX menggunakan akun Alice
+	reqLogout := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	reqLogout.Header.Set(apphttp.CSRFHeaderName, csrfCookie.Value)
+	reqLogout.AddCookie(csrfCookie)
+	for _, c := range recPostLogin.Result().Cookies() {
+		reqLogout.AddCookie(c)
+	}
+	recLogout := httptest.NewRecorder()
+	srv.ServeHTTP(recLogout, reqLogout)
+
+	if recLogout.Code != http.StatusOK || recLogout.Header().Get("HX-Redirect") != "/login" {
+		t.Fatalf("seharusnya POST /logout akun Alice berhasil dan mengembalikan HX-Redirect: /login, status=%d, redirect=%q",
+			recLogout.Code, recLogout.Header().Get("HX-Redirect"))
+	}
+
+	// 5. Pastikan sesi Alice langsung nonaktif di backend setelah logout
+	reqDashAfterLogout := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	for _, c := range recPostLogin.Result().Cookies() {
+		reqDashAfterLogout.AddCookie(c)
+	}
+	recDashAfterLogout := httptest.NewRecorder()
+	srv.ServeHTTP(recDashAfterLogout, reqDashAfterLogout)
+
+	if recDashAfterLogout.Code != http.StatusSeeOther {
+		t.Fatalf("seharusnya akses /dashboard dengan cookie lama setelah logout ditolak (303 Redirect ke /login), dapat: %d",
+			recDashAfterLogout.Code)
 	}
 }
