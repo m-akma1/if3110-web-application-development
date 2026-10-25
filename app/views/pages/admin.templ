@@ -6,104 +6,76 @@ import (
 	"fmt"
 )
 
-// Admin is the Platform Admin overview: users (with role change), groups, and invite codes.
-// Platform Admin manages the platform; it is not a database access level.
-templ Admin(
-	user *domain.AuthLayoutUser,
-	activeDBID string,
-	users []domain.UserManagementItem,
-	groups []domain.GroupItem,
-	codes []domain.InviteCodeItem,
-	csrfToken string,
-) {
+// Shared form styles for the admin console.
+const (
+	adminInput  = "w-full px-3 py-2 bg-[#18171b] border border-[#333138] rounded-xl text-xs text-white placeholder:text-zinc-500 focus:ring-2 focus:ring-[#ceafa3]/50 focus:border-[#ceafa3] focus:outline-none"
+	adminSelect = "bg-[#18171b] border border-[#333138] text-zinc-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-[#ceafa3]"
+	adminLabel  = "block text-xs font-medium text-zinc-300 mb-1"
+	btnPrimary  = "px-3 py-2 rounded-xl bg-[#ceafa3] hover:bg-[#c2a195] text-[#121212] text-xs font-bold transition cursor-pointer"
+	btnSmall    = "px-2.5 py-1 rounded-lg bg-[#2c2a30] hover:bg-[#3a3740] text-zinc-200 text-[11px] font-semibold transition cursor-pointer"
+	btnDanger   = "px-2.5 py-1 rounded-lg bg-[#ff8080]/10 hover:bg-[#ff8080]/20 text-[#ff8080] text-[11px] font-semibold border border-[#ff8080]/30 transition cursor-pointer"
+)
+
+// Admin is the Platform Admin console. Platform Admin manages the platform; it is not a
+// database access level, so admins reach databases only through their groups like anyone else.
+templ Admin(user *domain.AuthLayoutUser, activeDBID string, tab string, actorID string, ov domain.AdminOverview, csrfToken string) {
 	@layouts.Dashboard("Platform Admin", user, activeDBID, "admin", csrfToken) {
-		<div class="space-y-6" x-data="{ activeTab: 'users' }">
+		<div class="space-y-6" x-data={ fmt.Sprintf("{ activeTab: '%s' }", tab) }>
 			<div>
 				<h1 class="text-2xl font-bold text-white tracking-tight">Platform Administration</h1>
 				<p class="text-zinc-400 mt-1 text-xs">
-					Akses database diberikan per group, bukan per user. Setiap user selalu menjadi anggota group Public.
+					Kelola pengguna, group, koneksi database, dan kode undangan. Akses database diberikan per group;
+					setiap user selalu menjadi anggota group Public.
 				</p>
 			</div>
 
-			<div class="flex gap-2 border-b border-[#333138] pb-3">
-				@adminTabButton("users", fmt.Sprintf("Pengguna (%d)", len(users)))
-				@adminTabButton("groups", fmt.Sprintf("Group (%d)", len(groups)))
-				@adminTabButton("codes", fmt.Sprintf("Kode Undangan (%d)", len(codes)))
+			<div class="flex flex-wrap gap-2 border-b border-[#333138] pb-3">
+				@adminTabButton("users", "Pengguna")
+				@adminTabButton("groups", "Group & Akses")
+				@adminTabButton("databases", "Koneksi Database")
+				@adminTabButton("codes", "Kode Undangan")
 			</div>
 
-			<div x-show="activeTab === 'users'">
-				@AdminUsersTable(users, "", true)
-			</div>
-
-			<div x-show="activeTab === 'groups'" x-cloak>
-				@adminCard("Daftar Group") {
-					<table class="w-full text-left text-sm text-zinc-300">
-						<thead class="bg-[#18171b] text-xs uppercase tracking-wider text-zinc-400 border-b border-[#333138]">
-							<tr>
-								<th class="px-4 py-3 font-semibold">Nama</th>
-								<th class="px-4 py-3 font-semibold">Deskripsi</th>
-								<th class="px-4 py-3 font-semibold text-right">Anggota</th>
-							</tr>
-						</thead>
-						<tbody class="divide-y divide-[#333138]">
-							for _, g := range groups {
-								<tr>
-									<td class="px-4 py-3 text-xs font-semibold text-zinc-100">
-										{ g.Name }
-										if g.IsSystem {
-											<span class="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#2c2a30] text-zinc-300">SISTEM</span>
-										}
-									</td>
-									<td class="px-4 py-3 text-xs text-zinc-400">{ g.Description }</td>
-									<td class="px-4 py-3 text-xs font-mono text-right">{ fmt.Sprintf("%d", g.MemberCount) }</td>
-								</tr>
-							}
-						</tbody>
-					</table>
-				}
-			</div>
-
-			<div x-show="activeTab === 'codes'" x-cloak>
-				@adminCard("Kode Undangan") {
-					<table class="w-full text-left text-sm text-zinc-300">
-						<thead class="bg-[#18171b] text-xs uppercase tracking-wider text-zinc-400 border-b border-[#333138]">
-							<tr>
-								<th class="px-4 py-3 font-semibold">Kode</th>
-								<th class="px-4 py-3 font-semibold">Group Tujuan</th>
-								<th class="px-4 py-3 font-semibold">Status</th>
-								<th class="px-4 py-3 font-semibold">Dibuat</th>
-							</tr>
-						</thead>
-						<tbody class="divide-y divide-[#333138]">
-							if len(codes) == 0 {
-								<tr><td colspan="4" class="px-4 py-8 text-center text-xs text-zinc-500">Belum ada kode undangan.</td></tr>
-							}
-							for _, c := range codes {
-								<tr>
-									<td class="px-4 py-3 text-xs font-mono font-bold text-[#ceafa3]">{ c.Code }</td>
-									<td class="px-4 py-3 text-xs">{ c.GroupName }</td>
-									<td class="px-4 py-3 text-xs">
-										if c.IsActive {
-											<span class="text-[#7dff95]">Aktif</span>
-										} else {
-											<span class="text-zinc-500">Nonaktif</span>
-										}
-									</td>
-									<td class="px-4 py-3 text-xs text-zinc-400">{ c.CreatedAt.Format("2006-01-02 15:04") }</td>
-								</tr>
-							}
-						</tbody>
-					</table>
-				}
+			<div hx-target="#admin-console" hx-swap="outerHTML">
+				@AdminConsole(actorID, ov, nil)
 			</div>
 		</div>
+	}
+}
+
+// AdminConsole is the swappable body of the admin page (every admin action returns it).
+templ AdminConsole(actorID string, ov domain.AdminOverview, flash *domain.Flash) {
+	<div id="admin-console" class="space-y-6">
+		if flash != nil && flash.Message != "" {
+			@adminFlash(*flash)
+		}
+		<div x-show="activeTab === 'users'">
+			@adminUsersSection(actorID, ov)
+		</div>
+		<div x-show="activeTab === 'groups'" x-cloak>
+			@adminGroupsSection(ov)
+		</div>
+		<div x-show="activeTab === 'databases'" x-cloak>
+			@adminTargetsSection(ov)
+		</div>
+		<div x-show="activeTab === 'codes'" x-cloak>
+			@adminCodesSection(ov)
+		</div>
+	</div>
+}
+
+templ adminFlash(f domain.Flash) {
+	if f.Success {
+		<div role="status" class="p-3 rounded-xl bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs">{ f.Message }</div>
+	} else {
+		<div role="alert" class="p-3 rounded-xl bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs">{ f.Message }</div>
 	}
 }
 
 templ adminTabButton(key string, label string) {
 	<button
 		type="button"
-		@click={ "activeTab = '" + key + "'" }
+		@click={ "activeTab = '" + key + "'; history.replaceState(null, '', '/admin?tab=" + key + "')" }
 		:class={ "activeTab === '" + key + "' ? 'bg-[#ceafa3] text-[#121212] font-bold' : 'text-zinc-400 hover:bg-[#252429] hover:text-zinc-200'" }
 		class="px-4 py-2 rounded-xl text-xs transition cursor-pointer"
 	>
@@ -111,10 +83,13 @@ templ adminTabButton(key string, label string) {
 	</button>
 }
 
-templ adminCard(title string) {
+templ adminCard(title string, subtitle string) {
 	<div class="bg-[#222126] border border-[#333138] rounded-2xl overflow-hidden shadow-xl">
-		<div class="px-4 py-3 bg-[#18171b] border-b border-[#333138]">
+		<div class="px-4 py-3 bg-[#18171b] border-b border-[#333138] flex items-center justify-between gap-3">
 			<span class="text-xs font-bold text-white uppercase tracking-wider">{ title }</span>
+			if subtitle != "" {
+				<span class="text-[10px] text-zinc-400">{ subtitle }</span>
+			}
 		</div>
 		<div class="overflow-x-auto">
 			{ children... }
@@ -122,63 +97,13 @@ templ adminCard(title string) {
 	</div>
 }
 
-// AdminUsersTable is also returned alone after a role change (HTMX swap).
-templ AdminUsersTable(users []domain.UserManagementItem, feedbackMsg string, success bool) {
-	<div id="admin-users-table" class="space-y-3">
-		if feedbackMsg != "" {
-			if success {
-				<div class="p-3 rounded-xl bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs">{ feedbackMsg }</div>
-			} else {
-				<div class="p-3 rounded-xl bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs">{ feedbackMsg }</div>
-			}
-		}
-		@adminCard("Pengguna Platform") {
-			<table class="w-full text-left text-sm text-zinc-300">
-				<thead class="bg-[#18171b] text-xs uppercase tracking-wider text-zinc-400 border-b border-[#333138]">
-					<tr>
-						<th class="px-4 py-3 font-semibold">Username &amp; Email</th>
-						<th class="px-4 py-3 font-semibold">Group</th>
-						<th class="px-4 py-3 font-semibold">Status</th>
-						<th class="px-4 py-3 font-semibold">Role</th>
-					</tr>
-				</thead>
-				<tbody class="divide-y divide-[#333138]">
-					for _, u := range users {
-						<tr>
-							<td class="px-4 py-3">
-								<div class="text-xs font-semibold text-zinc-100">{ u.Username }</div>
-								if u.Email != "" {
-									<div class="text-[11px] text-zinc-500">{ u.Email }</div>
-								}
-							</td>
-							<td class="px-4 py-3">
-								<div class="flex flex-wrap gap-1">
-									for _, g := range u.Groups {
-										<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[#18171b] border border-[#333138] text-zinc-300">{ g.Name }</span>
-									}
-								</div>
-							</td>
-							<td class="px-4 py-3 text-xs">
-								if u.IsActive {
-									<span class="text-[#7dff95]">Aktif</span>
-								} else {
-									<span class="text-zinc-500">Nonaktif</span>
-								}
-							</td>
-							<td class="px-4 py-3">
-								<form hx-post="/admin/users/role" hx-target="#admin-users-table" hx-swap="outerHTML" class="flex items-center gap-2">
-									<input type="hidden" name="user_id" value={ u.ID }/>
-									<select name="role" class="bg-[#18171b] border border-[#333138] text-zinc-200 text-xs rounded-lg px-2 py-1">
-										<option value="USER" selected?={ u.Role == "USER" }>USER</option>
-										<option value="PLATFORM_ADMIN" selected?={ u.Role == "PLATFORM_ADMIN" }>PLATFORM_ADMIN</option>
-									</select>
-									<button type="submit" class="px-2.5 py-1 rounded-lg bg-[#ceafa3] hover:bg-[#c2a195] text-[#121212] text-[11px] font-bold cursor-pointer">Simpan</button>
-								</form>
-							</td>
-						</tr>
-					}
-				</tbody>
-			</table>
-		}
-	</div>
+func levelLabel(level string) string {
+	switch level {
+	case "VIEW_EDIT":
+		return "View + Edit"
+	case "VIEW_ONLY":
+		return "View Only"
+	default:
+		return "Tanpa akses"
+	}
 }
