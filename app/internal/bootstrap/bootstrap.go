@@ -61,8 +61,8 @@ type DemoConfig struct {
 // DemoUsers are the demo accounts created by SeedDemo.
 var DemoUsers = []authn.RegisterInput{
 	{Username: "moreno", Email: "moreno@example.com", Role: authn.RolePlatformAdmin},
-	{Username: "dhia", Email: "dhia@example.com", Role: authn.RoleUser},
-	{Username: "caca", Role: authn.RoleUser}, // no email: logs in by username only
+	{Username: "akmal", Email: "akmal@example.com", Role: authn.RoleUser},
+	{Username: "dzaki", Role: authn.RoleUser}, // no email: logs in by username only
 }
 
 // SeedDemo inserts the demo accounts that do not exist yet and returns the usernames it created.
