@@ -104,7 +104,7 @@ type client struct {
 
 func newClient(t *testing.T, srv *apphttp.Server) *client {
 	c := &client{t: t, srv: srv, cookies: map[string]*http.Cookie{}}
-	c.do(httptest.NewRequest(http.MethodGet, "/auth/login", nil))
+	c.do(httptest.NewRequest(http.MethodGet, "/login", nil))
 	if c.cookies[apphttp.CSRFCookieName] == nil {
 		t.Fatalf("no CSRF cookie issued")
 	}
@@ -144,7 +144,7 @@ func (c *client) post(path string, form url.Values) *httptest.ResponseRecorder {
 // login signs the client in and fails the test if it does not work.
 func (c *client) login(identifier, password string) {
 	c.t.Helper()
-	rec := c.post("/auth/login", url.Values{"identifier": {identifier}, "password": {password}})
+	rec := c.post("/login", url.Values{"identifier": {identifier}, "password": {password}})
 	if rec.Header().Get("HX-Redirect") != "/dashboard" {
 		c.t.Fatalf("login %s failed: %s", identifier, rec.Body.String())
 	}

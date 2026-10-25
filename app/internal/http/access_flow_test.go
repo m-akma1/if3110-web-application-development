@@ -29,7 +29,7 @@ func TestSignupJoinsGroups_AndNavbarShowsAccess_Integration(t *testing.T) {
 
 	// 1. Without a code: only Public, sees the empty state, no Migration menu.
 	dave := newClient(t, env.srv)
-	rec := dave.post("/auth/signup", url.Values{"username": {"dave"}, "password": {"PasswordDave1"}})
+	rec := dave.post("/signup", url.Values{"username": {"dave"}, "password": {"PasswordDave1"}})
 	if rec.Header().Get("HX-Redirect") != "/dashboard" {
 		t.Fatalf("signup tanpa kode gagal: %s", rec.Body.String())
 	}
@@ -45,7 +45,7 @@ func TestSignupJoinsGroups_AndNavbarShowsAccess_Integration(t *testing.T) {
 
 	// 2. With a code (any case): joins Engineers and sees the database with View + Edit.
 	erin := newClient(t, env.srv)
-	rec = erin.post("/auth/signup", url.Values{"username": {"erin"}, "password": {"PasswordErin123"}, "invite_code": {"eng-code"}})
+	rec = erin.post("/signup", url.Values{"username": {"erin"}, "password": {"PasswordErin123"}, "invite_code": {"eng-code"}})
 	if rec.Header().Get("HX-Redirect") != "/dashboard" {
 		t.Fatalf("signup dengan kode gagal: %s", rec.Body.String())
 	}
@@ -68,10 +68,9 @@ func TestSignupJoinsGroups_AndNavbarShowsAccess_Integration(t *testing.T) {
 		t.Fatalf("membuat draft setelah grant diturunkan: status %d, ingin 403", code)
 	}
 
-	// 4. /api/auth/me reports groups and effective access.
-	me := erin.get("/api/auth/me").Body.String()
-	if !strings.Contains(me, `"name":"Engineers"`) || !strings.Contains(me, `"effective_access":"VIEW_ONLY"`) {
-		t.Fatalf("/api/auth/me seharusnya memuat group dan akses efektif, dapat: %s", me)
+	// 4. The navbar shows the new effective level.
+	if page := erin.get("/migration").Body.String(); !strings.Contains(page, "PostgreSQL Demo - View Only") {
+		t.Fatalf("navbar seharusnya menampilkan akses efektif View Only")
 	}
 }
 

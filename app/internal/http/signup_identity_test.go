@@ -53,8 +53,8 @@ func sessionCookie(rec *httptest.ResponseRecorder) *http.Cookie {
 
 func TestAuthPages_NoAdminSignupOrLeakedCodes(t *testing.T) {
 	srv := newTestServer(t, nil)
-	_, signup := authCSRF(t, srv, "/auth/signup")
-	_, login := authCSRF(t, srv, "/auth/login")
+	_, signup := authCSRF(t, srv, "/signup")
+	_, login := authCSRF(t, srv, "/login")
 
 	for _, secret := range []string{"OWNER-SECRET-2026", "TEAM-BACKEND", "TEAM-ANALYST", "account_type", "Pemilik Database"} {
 		if strings.Contains(signup, secret) {
@@ -71,14 +71,14 @@ func TestAuthPages_NoAdminSignupOrLeakedCodes(t *testing.T) {
 
 func TestSignup_UsernameOnly_ThenLoginByUsername(t *testing.T) {
 	srv := newTestServer(t, nil)
-	csrf, _ := authCSRF(t, srv, "/auth/signup")
+	csrf, _ := authCSRF(t, srv, "/signup")
 
-	rec := postForm(srv, csrf, "/auth/signup", url.Values{"username": {"Tanpa.Email"}, "password": {"PasswordTanpa123"}})
+	rec := postForm(srv, csrf, "/signup", url.Values{"username": {"Tanpa.Email"}, "password": {"PasswordTanpa123"}})
 	if rec.Header().Get("HX-Redirect") != "/dashboard" || sessionCookie(rec) == nil {
 		t.Fatalf("signup hanya dengan username (tanpa email & kode) seharusnya berhasil, body: %s", rec.Body.String())
 	}
 
-	login := postForm(srv, csrf, "/auth/login", url.Values{"identifier": {"tanpa.email"}, "password": {"PasswordTanpa123"}})
+	login := postForm(srv, csrf, "/login", url.Values{"identifier": {"tanpa.email"}, "password": {"PasswordTanpa123"}})
 	if login.Header().Get("HX-Redirect") != "/dashboard" {
 		t.Fatalf("login via username seharusnya berhasil, body: %s", login.Body.String())
 	}
@@ -86,7 +86,7 @@ func TestSignup_UsernameOnly_ThenLoginByUsername(t *testing.T) {
 
 func TestSignup_ValidationAndDuplicates(t *testing.T) {
 	srv := newTestServer(t, nil)
-	csrf, _ := authCSRF(t, srv, "/auth/signup")
+	csrf, _ := authCSRF(t, srv, "/signup")
 
 	cases := []struct {
 		name string
@@ -102,7 +102,7 @@ func TestSignup_ValidationAndDuplicates(t *testing.T) {
 		{"kode tim salah", url.Values{"username": {"baru3"}, "password": {"PasswordValid123"}, "invite_code": {"KODE-SALAH"}}, "Kode tim tidak valid"},
 	}
 	for _, tc := range cases {
-		rec := postForm(srv, csrf, "/auth/signup", tc.form)
+		rec := postForm(srv, csrf, "/signup", tc.form)
 		if rec.Header().Get("HX-Redirect") != "" || !strings.Contains(rec.Body.String(), tc.want) {
 			t.Errorf("%s: seharusnya ditolak dengan pesan %q", tc.name, tc.want)
 		}
@@ -111,9 +111,9 @@ func TestSignup_ValidationAndDuplicates(t *testing.T) {
 
 func TestSignup_AccountTypeIsIgnored(t *testing.T) {
 	srv := newTestServer(t, nil)
-	csrf, _ := authCSRF(t, srv, "/auth/signup")
+	csrf, _ := authCSRF(t, srv, "/signup")
 
-	rec := postForm(srv, csrf, "/auth/signup", url.Values{
+	rec := postForm(srv, csrf, "/signup", url.Values{
 		"username":     {"calon.admin"},
 		"password":     {"PasswordCalon123"},
 		"account_type": {authn.RolePlatformAdmin},
@@ -123,7 +123,7 @@ func TestSignup_AccountTypeIsIgnored(t *testing.T) {
 		t.Fatalf("passcode pemilik lama tidak boleh diterima sebagai kode")
 	}
 
-	rec = postForm(srv, csrf, "/auth/signup", url.Values{
+	rec = postForm(srv, csrf, "/signup", url.Values{
 		"username":     {"calon.admin"},
 		"password":     {"PasswordCalon123"},
 		"account_type": {authn.RolePlatformAdmin},
@@ -143,18 +143,18 @@ func TestSignup_AccountTypeIsIgnored(t *testing.T) {
 
 func TestLogin_ByEmailOrUsername_AndGenericError(t *testing.T) {
 	srv := newTestServer(t, nil)
-	csrf, _ := authCSRF(t, srv, "/auth/login")
+	csrf, _ := authCSRF(t, srv, "/login")
 
 	for _, id := range []string{"bob", "BOB", "bob@email.com"} {
-		rec := postForm(srv, csrf, "/auth/login", url.Values{"identifier": {id}, "password": {"PasswordBob123!"}})
+		rec := postForm(srv, csrf, "/login", url.Values{"identifier": {id}, "password": {"PasswordBob123!"}})
 		if rec.Header().Get("HX-Redirect") != "/dashboard" {
 			t.Errorf("login dengan %q seharusnya berhasil", id)
 		}
 	}
 
 	// Pesan error sama untuk user tidak ada dan password salah (tidak membocorkan keberadaan akun)
-	unknown := postForm(srv, csrf, "/auth/login", url.Values{"identifier": {"tidak.ada"}, "password": {"PasswordBob123!"}})
-	wrong := postForm(srv, csrf, "/auth/login", url.Values{"identifier": {"bob"}, "password": {"PasswordSalah123"}})
+	unknown := postForm(srv, csrf, "/login", url.Values{"identifier": {"tidak.ada"}, "password": {"PasswordBob123!"}})
+	wrong := postForm(srv, csrf, "/login", url.Values{"identifier": {"bob"}, "password": {"PasswordSalah123"}})
 	for _, rec := range []*httptest.ResponseRecorder{unknown, wrong} {
 		if rec.Header().Get("HX-Redirect") != "" || !strings.Contains(rec.Body.String(), "Username/email atau password tidak valid") {
 			t.Errorf("login gagal seharusnya menampilkan pesan generik, body: %s", rec.Body.String())

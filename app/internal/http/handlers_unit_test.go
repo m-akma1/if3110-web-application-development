@@ -227,7 +227,7 @@ func TestViewer_InputValidation_Unit(t *testing.T) {
 func TestCSRFGuard_Unit(t *testing.T) {
 	env := newUnitEnv(t)
 	post := func(cookie, header string) int {
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader("not json"))
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(""))
 		if cookie != "" {
 			req.AddCookie(&http.Cookie{Name: apphttp.CSRFCookieName, Value: cookie})
 		}
@@ -247,7 +247,7 @@ func TestCSRFGuard_Unit(t *testing.T) {
 		{"header only", "", "tok", http.StatusForbidden},
 		{"cookie only", "tok", "", http.StatusForbidden},
 		{"mismatch", "tok-a", "tok-b", http.StatusForbidden},
-		{"match reaches the handler", "tok", "tok", http.StatusBadRequest}, // the body is not JSON
+		{"match reaches the handler", "tok", "tok", http.StatusOK}, // re-renders the empty login form
 	}
 	for _, tc := range cases {
 		if got := post(tc.cookie, tc.header); got != tc.want {
@@ -266,7 +266,8 @@ func TestCSRFGuard_Unit(t *testing.T) {
 // the old cookie, and an absolute lifetime that rotation does not extend.
 func TestSessionPolicy_OverHTTP_Unit(t *testing.T) {
 	env := newUnitEnv(t)
-	ok := func(c *client) bool { return c.get("/api/auth/me").Code == http.StatusOK }
+	// Any page works as a probe: a refused session is redirected to /login.
+	ok := func(c *client) bool { return c.get("/dashboard").Code != http.StatusSeeOther }
 
 	t.Run("idle timeout", func(t *testing.T) {
 		c := env.login(t, "viewer")
@@ -325,52 +326,51 @@ func TestSessionPolicy_OverHTTP_Unit(t *testing.T) {
 	})
 }
 
-func TestJSONAuthAPI_Failures_Unit(t *testing.T) {
+func TestLoginForm_Failures_Unit(t *testing.T) {
 	env := newUnitEnv(t)
 	c := newClient(t, env.srv)
-	postJSON := func(path, body string) int {
-		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		return c.do(req).Code
-	}
-
-	cases := []struct {
-		name, path, body string
-		want             int
-	}{
-		{"wrong password", "/api/auth/login", `{"username":"viewer","password":"nope-nope"}`, http.StatusUnauthorized},
-		{"unknown user", "/api/auth/login", `{"username":"ghost","password":"Password-ghost"}`, http.StatusUnauthorized},
-		{"missing password", "/api/auth/login", `{"username":"viewer"}`, http.StatusBadRequest},
-		{"bad json", "/api/auth/login", `{"username":`, http.StatusBadRequest},
-		{"password in url", "/api/auth/login?password=Password-viewer", `{"username":"viewer","password":"Password-viewer"}`, http.StatusBadRequest},
-	}
-	for _, tc := range cases {
-		if got := postJSON(tc.path, tc.body); got != tc.want {
-			t.Errorf("%s: status %d, want %d", tc.name, got, tc.want)
+	login := func(form url.Values, query string) string {
+		rec := c.post("/login"+query, form)
+		if rec.Header().Get("HX-Redirect") != "" || c.cookies[authn.SessionCookieName] != nil {
+			t.Fatalf("login %v should fail, but a session was issued", form)
 		}
+		return rec.Body.String()
 	}
 
-	if code := c.get("/api/auth/me").Code; code != http.StatusUnauthorized {
-		t.Errorf("/api/auth/me without a session: status %d", code)
+	// Wrong password and unknown user get the same message (no account enumeration).
+	const generic = "Username/email atau password tidak valid"
+	if body := login(url.Values{"identifier": {"viewer"}, "password": {"nope-nope"}}, ""); !strings.Contains(body, generic) {
+		t.Errorf("wrong password: %s", body)
 	}
+	if body := login(url.Values{"identifier": {"ghost"}, "password": {"Password-ghost"}}, ""); !strings.Contains(body, generic) {
+		t.Errorf("unknown user: %s", body)
+	}
+	if body := login(url.Values{"identifier": {"viewer"}}, ""); !strings.Contains(body, "Password wajib diisi") {
+		t.Errorf("missing password: %s", body)
+	}
+	if body := login(url.Values{"identifier": {"viewer"}, "password": {"Password-viewer"}}, "?password=Password-viewer"); !strings.Contains(body, "dilarang dikirim melalui URL") {
+		t.Errorf("password in the URL: %s", body)
+	}
+
+	// A forged session id is not a session.
 	c.cookies[authn.SessionCookieName] = &http.Cookie{Name: authn.SessionCookieName, Value: "forged-session-id"}
-	if code := c.get("/api/auth/me").Code; code != http.StatusUnauthorized {
-		t.Errorf("/api/auth/me with a forged id: status %d", code)
+	if code := c.get("/dashboard").Code; code != http.StatusSeeOther {
+		t.Errorf("forged session id: status %d", code)
 	}
+	delete(c.cookies, authn.SessionCookieName)
 
-	// Deactivated accounts cannot log in, even with the right password.
-	if code := postJSON("/api/auth/login", `{"username":"viewer","password":"Password-viewer"}`); code != http.StatusOK {
-		t.Fatalf("valid login: status %d", code)
-	}
+	// Deactivation ends the current session and blocks new logins, even with the right password.
+	c.login("viewer", "Password-viewer")
 	u, _ := env.store.GetUserByUsername(context.Background(), "viewer")
 	if err := env.store.RevokeUserAccess(context.Background(), u.ID); err != nil {
 		t.Fatal(err)
 	}
-	if code := c.get("/api/auth/me").Code; code != http.StatusUnauthorized {
+	if code := c.get("/dashboard").Code; code != http.StatusSeeOther {
 		t.Errorf("session of a deactivated user: status %d", code)
 	}
-	if code := postJSON("/api/auth/login", `{"username":"viewer","password":"Password-viewer"}`); code != http.StatusUnauthorized {
-		t.Errorf("login of a deactivated user: status %d", code)
+	delete(c.cookies, authn.SessionCookieName)
+	if body := login(url.Values{"identifier": {"viewer"}, "password": {"Password-viewer"}}, ""); !strings.Contains(body, generic) {
+		t.Errorf("login of a deactivated user: %s", body)
 	}
 }
 

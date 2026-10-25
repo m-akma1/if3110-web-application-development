@@ -48,12 +48,33 @@ func (s *Server) layoutUser(ctx context.Context, u *authn.User) (*domain.AuthLay
 			layout.Databases = append(layout.Databases, domain.DatabaseAccessSummary{
 				DatabaseID:      db.DatabaseID,
 				DatabaseName:    db.DatabaseName,
-				DBMS:            "POSTGRESQL",
 				EffectiveAccess: string(db.Level),
 			})
 		}
 	}
 	return layout, nil
+}
+
+// validateRequestSession memeriksa idle timeout, absolute expiration, dan rotasi sesi otomatis pada setiap request.
+// Hanya mengidentifikasi principal; hak akses diperiksa terpisah lewat rbac (lihat authorizeDB).
+func (s *Server) validateRequestSession(w http.ResponseWriter, r *http.Request) (*authn.User, bool) {
+	sidCookie, err := r.Cookie(authn.SessionCookieName)
+	if err != nil || sidCookie.Value == "" {
+		return nil, false
+	}
+
+	res, err := s.sessions.ValidateAndRefresh(r.Context(), sidCookie.Value)
+	if err != nil || res == nil || res.User == nil {
+		clearSessionCookie(w)
+		return nil, false
+	}
+
+	// Jika Session Lifecycle Engine merotasi session identifier, perbarui cookie di sisi klien
+	if res.Rotated && res.NewOpaqueID != "" {
+		setSessionCookie(w, res.NewOpaqueID)
+	}
+
+	return res.User, true
 }
 
 // requireSession identifies the user or sends them to /login (HX-Redirect for HTMX requests).

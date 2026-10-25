@@ -21,8 +21,9 @@ func GenerateCSRFToken() (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
-// CSRFGuardMiddleWare memvalidasi token CSRF
-func CSRFGuardMiddleWare(next http.Handler) http.Handler {
+// CSRFGuardMiddleware rejects state-changing requests unless the X-CSRF-Token header matches
+// the CSRF cookie (double-submit cookie). GET and HEAD are not checked.
+func CSRFGuardMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:

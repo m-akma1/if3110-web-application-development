@@ -18,6 +18,26 @@ import (
 // Admin console. Every admin action re-renders the whole console (#admin-console), so all tabs
 // stay consistent; the active tab lives in Alpine state outside the swapped element.
 
+func (s *Server) registerAdminRoutes() {
+	s.mux.HandleFunc("GET /admin", s.handleAdminPage)
+	s.mux.HandleFunc("POST /admin/users", s.handleAdminCreateUser)
+	s.mux.HandleFunc("POST /admin/users/{id}/role", s.handleAdminSetUserRole)
+	s.mux.HandleFunc("POST /admin/users/{id}/active", s.handleAdminSetUserActive)
+	s.mux.HandleFunc("POST /admin/users/{id}/password", s.handleAdminResetPassword)
+	s.mux.HandleFunc("POST /admin/groups", s.handleAdminCreateGroup)
+	s.mux.HandleFunc("POST /admin/groups/{id}", s.handleAdminRenameGroup)
+	s.mux.HandleFunc("DELETE /admin/groups/{id}", s.handleAdminDeleteGroup)
+	s.mux.HandleFunc("POST /admin/groups/{id}/members", s.handleAdminAddMember)
+	s.mux.HandleFunc("DELETE /admin/groups/{id}/members/{userID}", s.handleAdminRemoveMember)
+	s.mux.HandleFunc("POST /admin/grants", s.handleAdminSetGrant)
+	s.mux.HandleFunc("POST /admin/databases", s.handleAdminCreateTarget)
+	s.mux.HandleFunc("POST /admin/databases/{id}", s.handleAdminUpdateTarget)
+	s.mux.HandleFunc("POST /admin/databases/{id}/test", s.handleAdminTestTarget)
+	s.mux.HandleFunc("DELETE /admin/databases/{id}", s.handleAdminDeleteTarget)
+	s.mux.HandleFunc("POST /admin/codes", s.handleAdminCreateCode)
+	s.mux.HandleFunc("POST /admin/codes/{code}/active", s.handleAdminSetCodeActive)
+}
+
 var adminTabs = map[string]bool{"users": true, "groups": true, "databases": true, "codes": true}
 
 func (s *Server) handleAdminPage(w http.ResponseWriter, r *http.Request) {
