@@ -141,7 +141,7 @@ func (s *Server) handleDashboardQuery(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		// Usually a mistake in the query (syntax, unknown column, timeout): the user can fix it.
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = components.DataGridError("Eksekusi query gagal: " + err.Error()).Render(r.Context(), w)
+		_ = components.DataGridError("Eksekusi query gagal: "+err.Error()).Render(r.Context(), w)
 		return
 	}
 

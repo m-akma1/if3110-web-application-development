@@ -69,8 +69,8 @@ func TestValidateReadOnlySQL_BlocksServerFunctions(t *testing.T) {
 	allowed := []string{
 		"SELECT 'pg_terminate_backend(1)' AS text_only",
 		"SELECT pg_terminate_backend FROM audit_columns", // a column, not a call
-		"SELECT pg_try_advisory_xact_lock(1)",           // released with the transaction
-		"SELECT pg_sleep(0.1)",                          // bounded by statement_timeout
+		"SELECT pg_try_advisory_xact_lock(1)",            // released with the transaction
+		"SELECT pg_sleep(0.1)",                           // bounded by statement_timeout
 		"SELECT $q$ pg_read_file('x') $q$",
 	}
 	for _, q := range allowed {
