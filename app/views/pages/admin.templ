@@ -404,11 +404,11 @@ func getGrantLevel(grants []domain.UserAccessGrant, dbID string) string {
 templ AdminFeedback(success bool, message string) {
 	if success {
 		<div class="p-3.5 rounded-xl bg-[#7dff95]/10 border border-[#7dff95]/30 text-[#7dff95] text-xs font-mono">
-			✓ { message }
+			Success: { message }
 		</div>
 	} else {
 		<div class="p-3.5 rounded-xl bg-[#ff8080]/10 border border-[#ff8080]/30 text-[#ff8080] text-xs font-mono">
-			✗ { message }
+			Failure: { message }
 		</div>
 	}
 }
