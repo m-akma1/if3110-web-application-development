@@ -7,6 +7,8 @@ import (
 
 	"dbplatform/app/internal/authn"
 	"dbplatform/app/internal/bootstrap"
+	"dbplatform/app/internal/groups"
+	"dbplatform/app/internal/testutil"
 )
 
 func TestEnsureAdmin_CreatesFirstAdminOnce(t *testing.T) {
@@ -61,26 +63,55 @@ func TestSeedDemo_InsertOnly(t *testing.T) {
 	ctx := context.Background()
 	store := authn.NewMemorySessionStore()
 
-	created, err := bootstrap.SeedDemo(ctx, store, bootstrap.DemoConfig{Password: "DemoPassword123"})
+	created, err := bootstrap.SeedDemo(ctx, store, nil, bootstrap.DemoConfig{Password: "DemoPassword123"})
 	if err != nil || len(created) != len(bootstrap.DemoUsers) {
 		t.Fatalf("seed pertama seharusnya membuat semua akun demo: %v, %v", created, err)
 	}
 
 	// Seed ulang dengan password berbeda tidak boleh menimpa apa pun
-	created, err = bootstrap.SeedDemo(ctx, store, bootstrap.DemoConfig{Password: "PasswordLainLagi9"})
+	created, err = bootstrap.SeedDemo(ctx, store, nil, bootstrap.DemoConfig{Password: "PasswordLainLagi9"})
 	if err != nil || len(created) != 0 {
 		t.Fatalf("seed kedua tidak boleh membuat/mengubah akun: %v, %v", created, err)
 	}
-	if _, _, err := store.Login(ctx, "dhia", "DemoPassword123", ""); err != nil {
+	if _, _, err := store.Login(ctx, "akmal", "DemoPassword123", ""); err != nil {
 		t.Fatalf("password demo tidak boleh berubah setelah seed ulang: %v", err)
 	}
-	if _, _, err := store.Login(ctx, "caca", "DemoPassword123", ""); err != nil {
+	if _, _, err := store.Login(ctx, "dzaki", "DemoPassword123", ""); err != nil {
 		t.Fatalf("akun demo tanpa email seharusnya bisa login via username: %v", err)
 	}
 }
 
 func TestSeedDemo_RequiresPassword(t *testing.T) {
-	if _, err := bootstrap.SeedDemo(context.Background(), authn.NewMemorySessionStore(), bootstrap.DemoConfig{}); err == nil {
+	if _, err := bootstrap.SeedDemo(context.Background(), authn.NewMemorySessionStore(), nil, bootstrap.DemoConfig{}); err == nil {
 		t.Fatalf("seed tanpa password seharusnya gagal")
+	}
+}
+
+func TestSeedDemo_Groups_Integration(t *testing.T) {
+	db := testutil.NewPlatformDB(t)
+	ctx := context.Background()
+	store := authn.NewPostgresSessionStore(db, authn.DefaultSessionConfig())
+	repo := groups.NewRepository(db)
+
+	if _, err := bootstrap.SeedDemo(ctx, store, repo, bootstrap.DemoConfig{Password: "DemoPassword123"}); err != nil {
+		t.Fatalf("seed gagal: %v", err)
+	}
+	eng, err := repo.ResolveInviteCode(ctx, "ENGINEERS-DEMO")
+	if err != nil || eng.Name != "Engineers" || eng.MemberCount != 1 {
+		t.Fatalf("group Engineers + kode undangan seharusnya dibuat dengan 1 anggota: %+v, %v", eng, err)
+	}
+
+	// Admin mengeluarkan akmal dari Engineers; restart (seed ulang) tidak boleh memasukkannya kembali.
+	akmal, _ := store.GetUserByUsername(ctx, "akmal")
+	if _, err := db.ExecContext(ctx, `DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`, eng.ID, akmal.ID); err != nil {
+		t.Fatal(err)
+	}
+	created, err := bootstrap.SeedDemo(ctx, store, repo, bootstrap.DemoConfig{Password: "DemoPassword123"})
+	if err != nil || len(created) != 0 {
+		t.Fatalf("seed ulang tidak boleh membuat apa pun: %v, %v", created, err)
+	}
+	eng, _ = repo.Get(ctx, eng.ID)
+	if eng.MemberCount != 0 {
+		t.Fatalf("seed ulang tidak boleh mengembalikan keanggotaan yang dihapus admin, anggota: %d", eng.MemberCount)
 	}
 }

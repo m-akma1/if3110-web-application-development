@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"dbplatform/app/internal/authn"
+	"dbplatform/app/internal/groups"
 )
 
 // ErrNoAdminConfigured means the platform has no active admin and BOOTSTRAP_ADMIN_* is not set.
@@ -65,22 +66,67 @@ var DemoUsers = []authn.RegisterInput{
 	{Username: "dzaki", Role: authn.RoleUser}, // no email: logs in by username only
 }
 
-// SeedDemo inserts the demo accounts that do not exist yet and returns the usernames it created.
-func SeedDemo(ctx context.Context, store *authn.SessionStore, cfg DemoConfig) ([]string, error) {
+// DemoGroup is a demo group with its invite code and the demo users placed in it.
+type DemoGroup struct {
+	Name        string
+	Description string
+	InviteCode  string
+	Members     []string // usernames from DemoUsers
+}
+
+// DemoGroups are created by SeedDemo when a groups repository is given.
+var DemoGroups = []DemoGroup{
+	{Name: "Engineers", Description: "Demo: tim yang boleh membuat dan menjalankan migrasi.", InviteCode: "ENGINEERS-DEMO", Members: []string{"akmal"}},
+	{Name: "Analysts", Description: "Demo: tim yang hanya melihat schema dan data.", InviteCode: "ANALYSTS-DEMO", Members: []string{"dzaki"}},
+}
+
+// SeedDemo inserts demo data that does not exist yet and returns what it created.
+// It never re-adds anything an admin removed: memberships are only added for users created in
+// this run, and invite codes only for groups created in this run. groupRepo may be nil (users only).
+func SeedDemo(ctx context.Context, store *authn.SessionStore, groupRepo *groups.Repository, cfg DemoConfig) ([]string, error) {
 	if cfg.Password == "" {
 		return nil, errors.New("bootstrap: SEED_DEMO_PASSWORD must be set when SEED_DEMO_DATA=true")
 	}
 	var created []string
+	newUserIDs := map[string]string{} // username -> id, only users created now
 	for _, u := range DemoUsers {
 		u.Password = cfg.Password
-		_, err := store.RegisterUser(ctx, u)
+		user, err := store.RegisterUser(ctx, u)
 		if errors.Is(err, authn.ErrUsernameTaken) || errors.Is(err, authn.ErrEmailTaken) {
 			continue
 		}
 		if err != nil {
 			return created, fmt.Errorf("bootstrap: seed %s: %w", u.Username, err)
 		}
-		created = append(created, u.Username)
+		newUserIDs[user.Username] = user.ID
+		created = append(created, "user "+u.Username)
+	}
+	if groupRepo == nil {
+		return created, nil
+	}
+
+	for _, dg := range DemoGroups {
+		g, err := groupRepo.GetByName(ctx, dg.Name)
+		switch {
+		case errors.Is(err, groups.ErrGroupNotFound):
+			g, err = groupRepo.Create(ctx, dg.Name, dg.Description)
+			if err != nil {
+				return created, fmt.Errorf("bootstrap: seed group %s: %w", dg.Name, err)
+			}
+			created = append(created, "group "+dg.Name)
+			if _, err := groupRepo.CreateInviteCode(ctx, dg.InviteCode, g.ID, ""); err != nil && !errors.Is(err, groups.ErrInviteCodeTaken) {
+				return created, fmt.Errorf("bootstrap: seed invite code %s: %w", dg.InviteCode, err)
+			}
+		case err != nil:
+			return created, fmt.Errorf("bootstrap: look up group %s: %w", dg.Name, err)
+		}
+		for _, username := range dg.Members {
+			if id, ok := newUserIDs[username]; ok {
+				if err := groupRepo.AddMember(ctx, g.ID, id); err != nil {
+					return created, fmt.Errorf("bootstrap: add %s to %s: %w", username, dg.Name, err)
+				}
+			}
+		}
 	}
 	return created, nil
 }
