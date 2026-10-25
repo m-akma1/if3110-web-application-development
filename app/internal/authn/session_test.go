@@ -202,33 +202,6 @@ func TestSessionLifecycle_RotationAndParallelGracePeriod(t *testing.T) {
 	if _, err := store.ValidateAndRefresh(ctx, token2); err != nil {
 		t.Fatalf("token baru (token2) seharusnya tetap valid: %v", err)
 	}
-
-	// 5. Rotasi saat Peningkatan Privilege (USER -> PLATFORM_ADMIN)
-	token3, elevatedProfile, err := store.RotateOnPrivilegeChange(ctx, token2, authn.RolePlatformAdmin)
-	if err != nil {
-		t.Fatalf("rotasi saat peningkatan privilege gagal: %v", err)
-	}
-	if token3 == "" || token3 == token2 {
-		t.Fatalf("peningkatan privilege wajib menghasilkan session identifier baru")
-	}
-	if elevatedProfile.Role != authn.RolePlatformAdmin {
-		t.Fatalf("role pengguna seharusnya meningkat menjadi PLATFORM_ADMIN, dapat: %s", elevatedProfile.Role)
-	}
-
-	// Selama grace period 15 detik setelah peningkatan privilege, token2 masih diizinkan untuk request paralel yang sedang terbang
-	currentTime = currentTime.Add(3 * time.Second)
-	if _, err := store.ValidateAndRefresh(ctx, token2); err != nil {
-		t.Fatalf("token sebelum peningkatan privilege (token2) seharusnya masih diizinkan selama grace period singkat: %v", err)
-	}
-
-	// Pastikan token3 memiliki absolute_expires_at yang tetap sama dengan saat login awal
-	resToken3, err := store.ValidateAndRefresh(ctx, token3)
-	if err != nil {
-		t.Fatalf("token3 seharusnya valid: %v", err)
-	}
-	if !resToken3.Session.AbsoluteExpiresAt.Equal(initialAbsExpiry) {
-		t.Fatalf("rotasi peningkatan privilege dilarang memperpanjang absolute_expires_at")
-	}
 }
 
 // 4. Menguji Penonaktifan Sesi Seketika (Logout & Pencabutan Akses Pengguna)
@@ -238,16 +211,20 @@ func TestSessionLifecycle_InstantRevocationOnLogoutAndAccessRevoke(t *testing.T)
 	seedTestUsers(t, store)
 
 	// Skenario A: Logout menonaktifkan sesi seketika (termasuk token dalam grace period)
-	tokenA, _, err := store.Login(ctx, "carol", "PasswordCarol123!", "")
+	tokenA, carol, err := store.Login(ctx, "carol", "PasswordCarol123!", "")
 	if err != nil {
 		t.Fatalf("login carol gagal: %v", err)
 	}
 
 	// Rotasi sesi carol sehingga ada tokenA (dalam grace period) dan tokenB (aktif)
-	tokenB, _, err := store.RotateOnPrivilegeChange(ctx, tokenA, authn.RolePlatformAdmin)
-	if err != nil {
-		t.Fatalf("rotasi privilege gagal: %v", err)
+	if err := store.ForceRotateUserSessions(ctx, carol.ID); err != nil {
+		t.Fatalf("menandai rotasi gagal: %v", err)
 	}
+	rotated, err := store.ValidateAndRefresh(ctx, tokenA)
+	if err != nil || !rotated.Rotated {
+		t.Fatalf("rotasi sesi gagal: %+v, %v", rotated, err)
+	}
+	tokenB := rotated.NewOpaqueID
 
 	// Pengguna logout menggunakan tokenB
 	if err := store.RevokeSession(ctx, tokenB); err != nil {

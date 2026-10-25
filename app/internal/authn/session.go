@@ -334,58 +334,6 @@ func (s *SessionStore) ValidateAndRefresh(ctx context.Context, rawOpaqueToken st
 	}, nil
 }
 
-// RotateOnPrivilegeChange merotasi session identifier seketika saat terjadi peningkatan/perubahan privilege
-// dengan tetap mempertahankan grace period singkat untuk request paralel dan TIDAK memperpanjang absolute expiration.
-func (s *SessionStore) RotateOnPrivilegeChange(ctx context.Context, rawOpaqueToken string, newRole string) (string, *User, error) {
-	res, err := s.ValidateAndRefresh(ctx, rawOpaqueToken)
-	if err != nil {
-		return "", nil, err
-	}
-
-	if newRole != "" && newRole != res.User.Role {
-		if err := s.repo.UpdateUserRole(ctx, res.User.ID, newRole); err != nil {
-			return "", nil, err
-		}
-	}
-
-	user, err := s.repo.GetUserByID(ctx, res.User.ID)
-	if err != nil {
-		return "", nil, err
-	}
-
-	// Jika ValidateAndRefresh di atas sudah kebetulan merotasi token, gunakan token baru tersebut
-	if res.Rotated && res.NewOpaqueID != "" {
-		return res.NewOpaqueID, user, nil
-	}
-
-	now := s.nowFunc()
-	newRawToken, err := GenerateOpaqueToken()
-	if err != nil {
-		return "", nil, err
-	}
-	newTokenHash := HashOpaqueToken(newRawToken)
-	graceUntil := now.Add(s.cfg.GracePeriod)
-	newIdleExp := minTime(now.Add(s.cfg.IdleTimeout), res.Session.AbsoluteExpiresAt)
-
-	rotated, err := s.repo.RotateSessionToken(
-		ctx,
-		res.Session.ID,
-		res.Session.TokenHash,
-		newTokenHash,
-		graceUntil,
-		now,
-		newIdleExp,
-	)
-	if err != nil {
-		return "", nil, err
-	}
-	if !rotated {
-		return "", nil, ErrSessionExpired
-	}
-
-	return newRawToken, user, nil
-}
-
 // RevokeSession menonaktifkan sesi seketika di backend saat pengguna logout
 func (s *SessionStore) RevokeSession(ctx context.Context, rawOpaqueToken string) error {
 	if rawOpaqueToken == "" {
