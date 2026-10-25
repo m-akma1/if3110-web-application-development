@@ -13,16 +13,17 @@ var (
 	ErrSessionExpired     = errors.New("sesi telah berakhir (idle atau absolute expiration)")
 	ErrSessionRevoked     = errors.New("sesi telah dinonaktifkan")
 	ErrUserInactive       = errors.New("akun pengguna tidak aktif")
+	ErrUserNotFound       = errors.New("pengguna tidak ditemukan")
 )
 
 // User adalah model internal di Backend
 type User struct {
-	ID           string    `json:"id"`        // Unique identifier seumur hidup untuk security principal
-	Username     string    `json:"username"`  // Username untuk login / tampilan
-	Email        string    `json:"email"`     // Email pengguna untuk login & identifikasi
-	PasswordHash string    `json:"-"`         // Tag json:"-" menjamin password hash TIDAK PERNAH ikut ter-serialize ke JSON response
-	Role         string    `json:"role"`      // Contoh: "PLATFORM_ADMIN" atau "USER"
-	IsActive     bool      `json:"is_active"` // Status aktif security principal
+	ID           string    `json:"id"`              // UUID seumur hidup untuk security principal
+	Username     string    `json:"username"`        // Username unik (huruf kecil) untuk login / tampilan
+	Email        string    `json:"email,omitempty"` // Email opsional; jika diisi juga dapat dipakai untuk login
+	PasswordHash string    `json:"-"`               // Tag json:"-" menjamin password hash TIDAK PERNAH ikut ter-serialize ke JSON response
+	Role         string    `json:"role"`            // Contoh: "PLATFORM_ADMIN" atau "USER"
+	IsActive     bool      `json:"is_active"`       // Status aktif security principal
 	CreatedAt    time.Time `json:"created_at"`
 }
 

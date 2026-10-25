@@ -24,6 +24,29 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      target-postgres:
+        condition: service_healthy
+    networks:
+      - app_net
+
+  # Demo target database, separate from the platform DB,
+  target-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${TARGET_POSTGRES_USER:-target_admin}
+      POSTGRES_PASSWORD: ${TARGET_POSTGRES_PASSWORD:-change-me-target-admin}
+      POSTGRES_DB: ${TARGET_POSTGRES_DB:-demo_target}
+      TARGET_APP_USER: ${TARGET_APP_USER:-app_target}
+      TARGET_APP_PASSWORD: ${TARGET_APP_PASSWORD:-change-me-app-target}
+    volumes:
+      - target_postgres_data:/var/lib/postgresql/data
+      - ./docker/target-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     networks:
       - app_net
 
@@ -33,13 +56,13 @@ services:
     env_file:
       - .env
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-dbplatform}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-supersecretpassword}
+      POSTGRES_USER: ${POSTGRES_USER:-if3110}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-webdev-sangat-mengasyikkan}
       POSTGRES_DB: ${POSTGRES_DB:-dbplatform_core}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-dbplatform} -d $${POSTGRES_DB:-dbplatform_core}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-if3110} -d $${POSTGRES_DB:-dbplatform_core}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -50,6 +73,7 @@ volumes:
   caddy_data:
   caddy_config:
   postgres_data:
+  target_postgres_data:
 
 networks:
   app_net:

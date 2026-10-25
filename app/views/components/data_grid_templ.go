@@ -83,453 +83,472 @@ func DataGrid(data domain.TableDataResult) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<!-- Header Tabel & Tab Switcher (Data Viewer vs Schema Viewer) --><div class=\"flex flex-wrap items-center justify-between gap-3\"><div class=\"flex items-center gap-2.5\"><h2 class=\"text-lg font-bold text-white flex items-center gap-1.5\"><span class=\"text-zinc-400 font-mono text-sm\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
+		if data.Truncated && data.QueryError == "" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"p-3 rounded-xl bg-[#ffbc5e]/10 border border-[#ffbc5e]/30 text-[#ffbc5e] text-xs\">Hasil dipotong: hanya ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var4 string
+			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(data.Rows)))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 35, Col: 61}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, " baris pertama yang ditampilkan. Tambahkan LIMIT atau filter WHERE untuk mempersempit hasil.</div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		}
-		var templ_7745c5c3_Var4 string
-		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(resolveSchemaName(data.SchemaName))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 37, Col: 87}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, ".</span> <span class=\"text-[#ceafa3] font-mono\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<!-- Header Tabel & Tab Switcher (Data Viewer vs Schema Viewer) --><div class=\"flex flex-wrap items-center justify-between gap-3\"><div class=\"flex items-center gap-2.5\"><h2 class=\"text-lg font-bold text-white flex items-center gap-1.5\"><span class=\"text-zinc-400 font-mono text-sm\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var5 string
-		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(data.TableName)
+		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(resolveSchemaName(data.SchemaName))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 38, Col: 60}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 43, Col: 87}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</span></h2><span class=\"text-xs text-zinc-400 bg-[#1a1a1a] px-2.5 py-1 rounded-lg border border-[#2a2a2a]\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, ".</span> <span class=\"text-[#ceafa3] font-mono\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 string
-		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d Baris", data.TotalRows))
+		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(data.TableName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 41, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 44, Col: 60}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</span></div><!-- Tombol Tab: Data Tabel & Schema Viewer --><div class=\"inline-flex rounded-lg bg-[#121212] p-1 border border-[#2a2a2a]\"><button type=\"button\" @click=\"activeView = 'data'\" :class=\"activeView === 'data' ? 'bg-[#ceafa3] text-[#121212] shadow' : 'text-zinc-400 hover:text-zinc-200'\" class=\"px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer\">Data Tabel</button> <button type=\"button\" @click=\"activeView = 'schema'\" :class=\"activeView === 'schema' ? 'bg-[#ceafa3] text-[#121212] shadow' : 'text-zinc-400 hover:text-zinc-200'\" class=\"px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1.5\"><span>Schema Viewer</span> <span class=\"px-1.5 py-0.2 rounded text-[10px] bg-[#1a1a1a] text-zinc-300\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</span></h2><span class=\"text-xs text-zinc-400 bg-[#1a1a1a] px-2.5 py-1 rounded-lg border border-[#2a2a2a]\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var7 string
-		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d Kolom", len(data.ColumnsMeta)))
+		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d Baris", data.TotalRows))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 63, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 47, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</span></button></div></div><!-- TAB 1: DATA VIEWER --><div x-show=\"activeView === 'data'\" class=\"bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl\"><div class=\"overflow-x-auto\"><table class=\"w-full text-left text-sm text-zinc-300\"><thead class=\"bg-[#121212] text-xs uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]\"><tr>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</span></div><!-- Tombol Tab: Data Tabel & Schema Viewer --><div class=\"inline-flex rounded-lg bg-[#121212] p-1 border border-[#2a2a2a]\"><button type=\"button\" @click=\"activeView = 'data'\" :class=\"activeView === 'data' ? 'bg-[#ceafa3] text-[#121212] shadow' : 'text-zinc-400 hover:text-zinc-200'\" class=\"px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer\">Data Tabel</button> <button type=\"button\" @click=\"activeView = 'schema'\" :class=\"activeView === 'schema' ? 'bg-[#ceafa3] text-[#121212] shadow' : 'text-zinc-400 hover:text-zinc-200'\" class=\"px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer flex items-center gap-1.5\"><span>Schema Viewer</span> <span class=\"px-1.5 py-0.2 rounded text-[10px] bg-[#1a1a1a] text-zinc-300\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var8 string
+		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d Kolom", len(data.ColumnsMeta)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 69, Col: 54}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</span></button></div></div><!-- TAB 1: DATA VIEWER --><div x-show=\"activeView === 'data'\" class=\"bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl\"><div class=\"overflow-x-auto\"><table class=\"w-full text-left text-sm text-zinc-300\"><thead class=\"bg-[#121212] text-xs uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]\"><tr>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, col := range data.Columns {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<th class=\"px-4 py-3 font-semibold\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<th class=\"px-4 py-3 font-semibold\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var8 string
-			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(col)
+			var templ_7745c5c3_Var9 string
+			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(col)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 76, Col: 49}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 82, Col: 49}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</th>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</th>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</tr></thead> <tbody class=\"divide-y divide-[#2a2a2a]\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</tr></thead> <tbody class=\"divide-y divide-[#2a2a2a]\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(data.Rows) > 0 {
 			for _, row := range data.Rows {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<tr class=\"hover:bg-[#252525]/50 transition\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<tr class=\"hover:bg-[#252525]/50 transition\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				for _, val := range row {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<td class=\"px-4 py-3 whitespace-nowrap font-mono text-xs\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<td class=\"px-4 py-3 whitespace-nowrap font-mono text-xs\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var9 string
-					templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(val)
+					var templ_7745c5c3_Var10 string
+					templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(val)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 85, Col: 73}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 91, Col: 73}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</td>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</td>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "<tr><td colspan=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<tr><td colspan=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var10 string
-			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", len(data.Columns)))
+			var templ_7745c5c3_Var11 string
+			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", len(data.Columns)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 91, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 97, Col: 58}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" class=\"px-4 py-8 text-center text-zinc-500\">Tabel ini tidak memiliki data.</td></tr>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</tbody></table></div><div class=\"p-4 border-t border-[#2a2a2a] flex items-center justify-between text-xs text-zinc-400\"><span>Halaman ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var11 string
-		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d dari %d", data.CurrentPage, data.TotalPages))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 101, Col: 80}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</span><div class=\"flex gap-2\"><button")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if data.CurrentPage <= 1 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, " disabled")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" class=\"px-4 py-8 text-center text-zinc-500\">Tabel ini tidak memiliki data.</td></tr>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, " hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</tbody></table></div><div class=\"p-4 border-t border-[#2a2a2a] flex items-center justify-between text-xs text-zinc-400\"><span>Halaman ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var12 string
-		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/dashboard/table?name=%s&page=%d", data.TableName, data.CurrentPage-1))
+		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d dari %d", data.CurrentPage, data.TotalPages))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 105, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 107, Col: 80}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" hx-target=\"#data-grid-container\" hx-swap=\"outerHTML\" class=\"px-3 py-1.5 rounded bg-[#252525] hover:bg-[#333] disabled:opacity-40 text-white transition\">Sebelumnya</button> <button")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if data.CurrentPage >= data.TotalPages {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, " disabled")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</span><div class=\"flex gap-2\"><button")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if data.CurrentPage <= 1 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, " disabled")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, " hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, " hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var13 string
-		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/dashboard/table?name=%s&page=%d", data.TableName, data.CurrentPage+1))
+		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/dashboard/table?name=%s&page=%d", data.TableName, data.CurrentPage-1))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 114, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 111, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" hx-target=\"#data-grid-container\" hx-swap=\"outerHTML\" class=\"px-3 py-1.5 rounded bg-[#252525] hover:bg-[#333] disabled:opacity-40 text-white transition\">Selanjutnya</button></div></div></div><!-- TAB 2: SCHEMA VIEWER (Columns, Constraints, Indexes) --><div x-show=\"activeView === 'schema'\" x-cloak class=\"space-y-4\"><!-- 1. Struktur Kolom --><div class=\"bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl\"><div class=\"px-4 py-3 bg-[#121212] border-b border-[#2a2a2a] flex items-center justify-between\"><span class=\"text-xs font-bold text-white uppercase tracking-wider\">Daftar Kolom (Columns)</span> <span class=\"text-[10px] font-mono text-zinc-400\">Schema: ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" hx-target=\"#data-grid-container\" hx-swap=\"outerHTML\" class=\"px-3 py-1.5 rounded bg-[#252525] hover:bg-[#333] disabled:opacity-40 text-white transition\">Sebelumnya</button> <button")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if data.CurrentPage >= data.TotalPages {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, " disabled")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, " hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var14 string
-		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(resolveSchemaName(data.SchemaName))
+		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/dashboard/table?name=%s&page=%d", data.TableName, data.CurrentPage+1))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 131, Col: 99}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 120, Col: 98}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</span></div><div class=\"overflow-x-auto\"><table class=\"w-full text-left text-xs text-zinc-300\"><thead class=\"bg-[#121212] uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]\"><tr><th class=\"px-4 py-2.5 font-semibold\">Nama Kolom</th><th class=\"px-4 py-2.5 font-semibold\">Tipe Data</th><th class=\"px-4 py-2.5 font-semibold\">Nullable</th><th class=\"px-4 py-2.5 font-semibold\">Default</th><th class=\"px-4 py-2.5 font-semibold\">Atribut</th></tr></thead> <tbody class=\"divide-y divide-[#2a2a2a]\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\" hx-target=\"#data-grid-container\" hx-swap=\"outerHTML\" class=\"px-3 py-1.5 rounded bg-[#252525] hover:bg-[#333] disabled:opacity-40 text-white transition\">Selanjutnya</button></div></div></div><!-- TAB 2: SCHEMA VIEWER (Columns, Constraints, Indexes) --><div x-show=\"activeView === 'schema'\" x-cloak class=\"space-y-4\"><!-- 1. Struktur Kolom --><div class=\"bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl\"><div class=\"px-4 py-3 bg-[#121212] border-b border-[#2a2a2a] flex items-center justify-between\"><span class=\"text-xs font-bold text-white uppercase tracking-wider\">Daftar Kolom (Columns)</span> <span class=\"text-[10px] font-mono text-zinc-400\">Schema: ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var15 string
+		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(resolveSchemaName(data.SchemaName))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 137, Col: 99}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</span></div><div class=\"overflow-x-auto\"><table class=\"w-full text-left text-xs text-zinc-300\"><thead class=\"bg-[#121212] uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]\"><tr><th class=\"px-4 py-2.5 font-semibold\">Nama Kolom</th><th class=\"px-4 py-2.5 font-semibold\">Tipe Data</th><th class=\"px-4 py-2.5 font-semibold\">Nullable</th><th class=\"px-4 py-2.5 font-semibold\">Default</th><th class=\"px-4 py-2.5 font-semibold\">Atribut</th></tr></thead> <tbody class=\"divide-y divide-[#2a2a2a]\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(data.ColumnsMeta) > 0 {
 			for _, colMeta := range data.ColumnsMeta {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<tr class=\"hover:bg-[#252525]/50 transition\"><td class=\"px-4 py-2.5 font-mono font-semibold text-white\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var15 string
-				templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(colMeta.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 148, Col: 83}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</td><td class=\"px-4 py-2.5 font-mono text-[#87d1ff]\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<tr class=\"hover:bg-[#252525]/50 transition\"><td class=\"px-4 py-2.5 font-mono font-semibold text-white\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var16 string
-				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(colMeta.DataType)
+				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(colMeta.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 149, Col: 77}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 154, Col: 83}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</td><td class=\"px-4 py-2.5\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</td><td class=\"px-4 py-2.5 font-mono text-[#87d1ff]\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var17 string
+				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(colMeta.DataType)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 155, Col: 77}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</td><td class=\"px-4 py-2.5\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if colMeta.IsNullable {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<span class=\"px-2 py-0.5 rounded bg-[#252525] text-zinc-300 text-[10px] font-mono\">NULL</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<span class=\"px-2 py-0.5 rounded bg-[#252525] text-zinc-300 text-[10px] font-mono\">NULL</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<span class=\"px-2 py-0.5 rounded bg-[#ffbc5e]/10 border border-[#ffbc5e]/20 text-[#ffbc5e] text-[10px] font-mono\">NOT NULL</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<span class=\"px-2 py-0.5 rounded bg-[#ffbc5e]/10 border border-[#ffbc5e]/20 text-[#ffbc5e] text-[10px] font-mono\">NOT NULL</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</td><td class=\"px-4 py-2.5 font-mono text-zinc-400\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</td><td class=\"px-4 py-2.5 font-mono text-zinc-400\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if colMeta.DefaultValue != "" {
-					var templ_7745c5c3_Var17 string
-					templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(colMeta.DefaultValue)
+					var templ_7745c5c3_Var18 string
+					templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(colMeta.DefaultValue)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 159, Col: 34}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 165, Col: 34}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<span>-</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<span>-</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</td><td class=\"px-4 py-2.5\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</td><td class=\"px-4 py-2.5\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if colMeta.IsPK {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<span class=\"px-2 py-0.5 rounded bg-[#ceafa3]/20 border border-[#ceafa3]/30 text-[#ceafa3] text-[10px] font-bold\">PRIMARY KEY</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<span class=\"px-2 py-0.5 rounded bg-[#ceafa3]/20 border border-[#ceafa3]/30 text-[#ceafa3] text-[10px] font-bold\">PRIMARY KEY</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<span class=\"text-zinc-500\">-</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<span class=\"text-zinc-500\">-</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</td></tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "</td></tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<tr><td colspan=\"5\" class=\"px-4 py-6 text-center text-zinc-500\">Informasi kolom belum tersedia untuk tabel ini.</td></tr>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<tr><td colspan=\"5\" class=\"px-4 py-6 text-center text-zinc-500\">Informasi kolom belum tersedia untuk tabel ini.</td></tr>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "</tbody></table></div></div><!-- 2. Constraints & Indexes Grid --><div class=\"grid grid-cols-1 lg:grid-cols-2 gap-4\"><!-- Constraints --><div class=\"bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl\"><div class=\"px-4 py-3 bg-[#121212] border-b border-[#2a2a2a] flex items-center justify-between\"><span class=\"text-xs font-bold text-white uppercase tracking-wider\">Constraints</span> <span class=\"text-[10px] text-zinc-400\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "</tbody></table></div></div><!-- 2. Constraints & Indexes Grid --><div class=\"grid grid-cols-1 lg:grid-cols-2 gap-4\"><!-- Constraints --><div class=\"bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl\"><div class=\"px-4 py-3 bg-[#121212] border-b border-[#2a2a2a] flex items-center justify-between\"><span class=\"text-xs font-bold text-white uppercase tracking-wider\">Constraints</span> <span class=\"text-[10px] text-zinc-400\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var18 string
-		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d Constraint", len(data.Constraints)))
+		var templ_7745c5c3_Var19 string
+		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d Constraint", len(data.Constraints)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 191, Col: 99}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 197, Col: 99}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</span></div><div class=\"overflow-x-auto\"><table class=\"w-full text-left text-xs text-zinc-300\"><thead class=\"bg-[#121212] uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]\"><tr><th class=\"px-4 py-2.5 font-semibold\">Nama</th><th class=\"px-4 py-2.5 font-semibold\">Tipe</th><th class=\"px-4 py-2.5 font-semibold\">Definisi</th></tr></thead> <tbody class=\"divide-y divide-[#2a2a2a]\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</span></div><div class=\"overflow-x-auto\"><table class=\"w-full text-left text-xs text-zinc-300\"><thead class=\"bg-[#121212] uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]\"><tr><th class=\"px-4 py-2.5 font-semibold\">Nama</th><th class=\"px-4 py-2.5 font-semibold\">Tipe</th><th class=\"px-4 py-2.5 font-semibold\">Definisi</th></tr></thead> <tbody class=\"divide-y divide-[#2a2a2a]\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(data.Constraints) > 0 {
 			for _, cst := range data.Constraints {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<tr class=\"hover:bg-[#252525]/50 transition\"><td class=\"px-4 py-2.5 font-mono text-white\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var19 string
-				templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(cst.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 206, Col: 66}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</td><td class=\"px-4 py-2.5\"><span class=\"px-2 py-0.5 rounded bg-[#ceafa3]/10 border border-[#ceafa3]/20 text-[#ceafa3] text-[10px] font-semibold\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<tr class=\"hover:bg-[#252525]/50 transition\"><td class=\"px-4 py-2.5 font-mono text-white\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var20 string
-				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(cst.Type)
+				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(cst.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 209, Col: 23}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 212, Col: 66}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "</span></td><td class=\"px-4 py-2.5 font-mono text-zinc-400\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "</td><td class=\"px-4 py-2.5\"><span class=\"px-2 py-0.5 rounded bg-[#ceafa3]/10 border border-[#ceafa3]/20 text-[#ceafa3] text-[10px] font-semibold\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var21 string
-				templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(cst.Definition)
+				templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(cst.Type)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 212, Col: 75}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 215, Col: 23}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "</td></tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "</span></td><td class=\"px-4 py-2.5 font-mono text-zinc-400\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var22 string
+				templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(cst.Definition)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 218, Col: 75}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</td></tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<tr><td colspan=\"3\" class=\"px-4 py-5 text-center text-zinc-500\">Tidak ada constraint terdaftar.</td></tr>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<tr><td colspan=\"3\" class=\"px-4 py-5 text-center text-zinc-500\">Tidak ada constraint terdaftar.</td></tr>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</tbody></table></div></div><!-- Indexes --><div class=\"bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl\"><div class=\"px-4 py-3 bg-[#121212] border-b border-[#2a2a2a] flex items-center justify-between\"><span class=\"text-xs font-bold text-white uppercase tracking-wider\">Indexes</span> <span class=\"text-[10px] text-zinc-400\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "</tbody></table></div></div><!-- Indexes --><div class=\"bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl overflow-hidden shadow-xl\"><div class=\"px-4 py-3 bg-[#121212] border-b border-[#2a2a2a] flex items-center justify-between\"><span class=\"text-xs font-bold text-white uppercase tracking-wider\">Indexes</span> <span class=\"text-[10px] text-zinc-400\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d Index", len(data.Indexes)))
+		var templ_7745c5c3_Var23 string
+		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d Index", len(data.Indexes)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 229, Col: 90}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 235, Col: 90}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "</span></div><div class=\"overflow-x-auto\"><table class=\"w-full text-left text-xs text-zinc-300\"><thead class=\"bg-[#121212] uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]\"><tr><th class=\"px-4 py-2.5 font-semibold\">Nama Index</th><th class=\"px-4 py-2.5 font-semibold\">Kolom</th><th class=\"px-4 py-2.5 font-semibold\">Tipe</th><th class=\"px-4 py-2.5 font-semibold\">Sifat</th></tr></thead> <tbody class=\"divide-y divide-[#2a2a2a]\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "</span></div><div class=\"overflow-x-auto\"><table class=\"w-full text-left text-xs text-zinc-300\"><thead class=\"bg-[#121212] uppercase tracking-wider text-zinc-400 border-b border-[#2a2a2a]\"><tr><th class=\"px-4 py-2.5 font-semibold\">Nama Index</th><th class=\"px-4 py-2.5 font-semibold\">Kolom</th><th class=\"px-4 py-2.5 font-semibold\">Tipe</th><th class=\"px-4 py-2.5 font-semibold\">Sifat</th></tr></thead> <tbody class=\"divide-y divide-[#2a2a2a]\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(data.Indexes) > 0 {
 			for _, idx := range data.Indexes {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "<tr class=\"hover:bg-[#252525]/50 transition\"><td class=\"px-4 py-2.5 font-mono text-white\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var23 string
-				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(idx.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 245, Col: 66}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "</td><td class=\"px-4 py-2.5 font-mono text-[#87d1ff]\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<tr class=\"hover:bg-[#252525]/50 transition\"><td class=\"px-4 py-2.5 font-mono text-white\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var24 string
-				templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(idx.Columns)
+				templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(idx.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 246, Col: 73}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 251, Col: 66}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "</td><td class=\"px-4 py-2.5 font-mono text-zinc-400\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "</td><td class=\"px-4 py-2.5 font-mono text-[#87d1ff]\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var25 string
-				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(idx.IndexType)
+				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(idx.Columns)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 247, Col: 74}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 252, Col: 73}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "</td><td class=\"px-4 py-2.5\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "</td><td class=\"px-4 py-2.5 font-mono text-zinc-400\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var26 string
+				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(idx.IndexType)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/components/data_grid.templ`, Line: 253, Col: 74}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "</td><td class=\"px-4 py-2.5\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if idx.IsUnique {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<span class=\"px-2 py-0.5 rounded bg-[#7dff95]/10 border border-[#7dff95]/20 text-[#7dff95] text-[10px] font-bold\">UNIQUE</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<span class=\"px-2 py-0.5 rounded bg-[#7dff95]/10 border border-[#7dff95]/20 text-[#7dff95] text-[10px] font-bold\">UNIQUE</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<span class=\"px-2 py-0.5 rounded bg-[#252525] text-zinc-300 text-[10px]\">NON-UNIQUE</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<span class=\"px-2 py-0.5 rounded bg-[#252525] text-zinc-300 text-[10px]\">NON-UNIQUE</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "</td></tr>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "</td></tr>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<tr><td colspan=\"4\" class=\"px-4 py-5 text-center text-zinc-500\">Tidak ada index terdaftar.</td></tr>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "<tr><td colspan=\"4\" class=\"px-4 py-5 text-center text-zinc-500\">Tidak ada index terdaftar.</td></tr>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "</tbody></table></div></div></div></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</tbody></table></div></div></div></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

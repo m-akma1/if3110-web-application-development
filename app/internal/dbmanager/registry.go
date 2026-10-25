@@ -15,13 +15,15 @@ var validIdentifierRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // ConnectionRegistry mengelola pool koneksi (*sql.DB) untuk setiap database target berdasarkan ID database
 type ConnectionRegistry struct {
-	mu    sync.RWMutex
-	pools map[string]*sql.DB
+	mu     sync.RWMutex
+	pools  map[string]*sql.DB
+	limits QueryLimits
 }
 
 func NewConnectionRegistry() *ConnectionRegistry {
 	return &ConnectionRegistry{
-		pools: make(map[string]*sql.DB),
+		pools:  make(map[string]*sql.DB),
+		limits: DefaultQueryLimits(),
 	}
 }
 
@@ -69,7 +71,7 @@ func (r *ConnectionRegistry) ExecuteQueryOnDB(ctx context.Context, dbID, rawSQL 
 		return nil, fmt.Errorf("pool koneksi aktif untuk database '%s' tidak tersedia", dbID)
 	}
 
-	res, err := ExecuteReadOnlyQuery(ctx, db, cleanedSQL)
+	res, err := ExecuteReadOnlyQuery(ctx, db, cleanedSQL, r.limits)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +146,7 @@ func (r *ConnectionRegistry) InspectTableDataAndSchema(ctx context.Context, dbID
 
 	// 2. Ambil baris data dengan Read-Only Query
 	dataSQL := fmt.Sprintf(`SELECT * FROM "%s" LIMIT %d OFFSET %d`, tableName, pageSize, offset)
-	dataRes, err := ExecuteReadOnlyQuery(ctx, db, dataSQL)
+	dataRes, err := ExecuteReadOnlyQuery(ctx, db, dataSQL, r.limits)
 	if err != nil {
 		return nil, err
 	}

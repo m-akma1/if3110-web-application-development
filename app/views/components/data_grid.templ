@@ -30,6 +30,12 @@ templ DataGrid(data domain.TableDataResult) {
 			</div>
 		}
 
+		if data.Truncated && data.QueryError == "" {
+			<div class="p-3 rounded-xl bg-[#ffbc5e]/10 border border-[#ffbc5e]/30 text-[#ffbc5e] text-xs">
+				Hasil dipotong: hanya { fmt.Sprintf("%d", len(data.Rows)) } baris pertama yang ditampilkan. Tambahkan LIMIT atau filter WHERE untuk mempersempit hasil.
+			</div>
+		}
+
 		<!-- Header Tabel & Tab Switcher (Data Viewer vs Schema Viewer) -->
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="flex items-center gap-2.5">

@@ -33,7 +33,7 @@ func TestSanitizeURL_Unit(t *testing.T) {
 // 2.  Menguji CSRF Guard & Handler Tanpa HTTP Server
 func TestCSRFGuard_BlocksPostWithoutToken(t *testing.T) {
 	var logBuf bytes.Buffer
-	srv := apphttp.NewServer(&logBuf)
+	srv := newTestServer(t, &logBuf)
 
 	// Kirim POST tanpa Cookie & Header CSRF
 	body := strings.NewReader(`{"username":"admin","password":"SecretPassword123"}`)
@@ -51,7 +51,7 @@ func TestCSRFGuard_BlocksPostWithoutToken(t *testing.T) {
 // 3.  Alur Lengkap (Ambil CSRF -> POST Login -> Cek Sanitasi Log & Cookie)
 func TestLoginFlow_CSRFAndSanitizedLog_Integration(t *testing.T) {
 	var logBuf bytes.Buffer
-	srv := apphttp.NewServer(&logBuf)
+	srv := newTestServer(t, &logBuf)
 
 	//  Ambil Token CSRF (GET /api/csrf-token)
 	reqCSRF := httptest.NewRequest(http.MethodGet, "/api/csrf-token", nil)
@@ -133,7 +133,7 @@ func TestLoginFlow_CSRFAndSanitizedLog_Integration(t *testing.T) {
 // 4. Menguji Alur UI GOTTH (GET /login -> POST /login via HTMX -> GET /dashboard)
 func TestGOTTH_LoginAndDashboardFlow(t *testing.T) {
 	var logBuf bytes.Buffer
-	srv := apphttp.NewServer(&logBuf)
+	srv := newTestServer(t, &logBuf)
 
 	// 1. GET /login -> menerbitkan cookie __Host-csrf dan merender halaman Login
 	reqGetLogin := httptest.NewRequest(http.MethodGet, "/login", nil)
@@ -184,7 +184,7 @@ func TestGOTTH_LoginAndDashboardFlow(t *testing.T) {
 		t.Fatalf("seharusnya GET /dashboard dengan sesi valid berhasil (200 OK), dapat: %d", recDash.Code)
 	}
 	body := recDash.Body.String()
-	if !strings.Contains(body, "Database Viewer") || !strings.Contains(body, "Moreno") {
+	if !strings.Contains(body, "Database Viewer") || !strings.Contains(body, "moreno") {
 		t.Fatalf("halaman /dashboard tidak memuat konten user atau komponen Database Viewer")
 	}
 	if !strings.Contains(body, "X-CSRF-Token") || !strings.Contains(body, csrfCookie.Value) {
@@ -223,7 +223,7 @@ func TestGOTTH_LoginAndDashboardFlow(t *testing.T) {
 // 5. Menguji Alur Sign Up & Login menggunakan Email dan Password (/auth/signup & /auth/login)
 func TestGOTTH_EmailSignupAndLoginFlow(t *testing.T) {
 	var logBuf bytes.Buffer
-	srv := apphttp.NewServer(&logBuf)
+	srv := newTestServer(t, &logBuf)
 
 	// 1. GET /auth/signup
 	reqGetSignup := httptest.NewRequest(http.MethodGet, "/auth/signup", nil)
@@ -264,6 +264,7 @@ func TestGOTTH_EmailSignupAndLoginFlow(t *testing.T) {
 
 	// 3. POST /auth/signup dengan email, password, dan kode tim valid (TEAM-BACKEND)
 	signupForm := url.Values{}
+	signupForm.Set("username", "userbaru")
 	signupForm.Set("email", "userbaru@email.com")
 	signupForm.Set("password", "PasswordBaru123!")
 	signupForm.Set("account_type", "USER")
@@ -362,9 +363,10 @@ func TestGOTTH_EmailSignupAndLoginFlow(t *testing.T) {
 		t.Fatalf("seharusnya PLATFORM_ADMIN dapat membuka /admin dan melihat kode TEAM-BACKEND, status=%d", recAdminPage.Code)
 	}
 
-	// 8. Admin mengubah hak akses user dhia (usr-dhia-003) melalui POST /admin/users/access
+	// 8. Admin mengubah hak akses user dhia melalui POST /admin/users/access
+	dhiaID := userID(t, srv, "dhia")
 	grantForm := url.Values{}
-	grantForm.Set("user_id", "usr-dhia-003")
+	grantForm.Set("user_id", dhiaID)
 	grantForm.Set("role", "USER")
 	grantForm.Set("access_db_1", "VIEW_ONLY")
 	grantForm.Set("access_db_2", "VIEW_EDIT")
@@ -377,7 +379,7 @@ func TestGOTTH_EmailSignupAndLoginFlow(t *testing.T) {
 	}
 	recGrant := httptest.NewRecorder()
 	srv.ServeHTTP(recGrant, reqGrant)
-	if recGrant.Code != http.StatusOK || !strings.Contains(recGrant.Body.String(), "usr-dhia-003") || !strings.Contains(recGrant.Body.String(), "berhasil diperbarui") {
+	if recGrant.Code != http.StatusOK || !strings.Contains(recGrant.Body.String(), dhiaID) || !strings.Contains(recGrant.Body.String(), "berhasil diperbarui") {
 		t.Fatalf("seharusnya update hak akses user berhasil, status=%d, body=%s", recGrant.Code, recGrant.Body.String())
 	}
 }

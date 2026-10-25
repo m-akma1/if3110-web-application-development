@@ -12,17 +12,18 @@ import "dbplatform/app/views/layouts"
 
 // Struct untuk menampung pesan error & nilai input sebelumnya
 type AuthFormState struct {
-	Email         string
-	InviteCode    string
-	EmailError    string
-	PasswordError string
-	CodeError     string
-	GeneralError  string
+	Identifier      string // login: username atau email
+	Username        string // signup
+	Email           string // signup (opsional)
+	InviteCode      string // signup (opsional)
+	IdentifierError string
+	UsernameError   string
+	EmailError      string
+	PasswordError   string
+	CodeError       string
+	GeneralError    string
 }
 
-// ==========================================
-// 1. HALAMAN & FORM LOGIN
-// ==========================================
 func LoginPage(csrfToken string, state AuthFormState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -114,19 +115,19 @@ func LoginForm(state AuthFormState) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<!-- Form Login --><form hx-post=\"/auth/login\" hx-target=\"#auth-form-container\" hx-swap=\"innerHTML\" class=\"space-y-5\"><!-- Input Email + Error di Samping Label --><div class=\"space-y-1.5\"><div class=\"flex items-center justify-between gap-2\"><label for=\"email\" class=\"block text-xs font-semibold text-zinc-200\">Your email</label> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<!-- Form Login --><form hx-post=\"/auth/login\" hx-target=\"#auth-form-container\" hx-swap=\"innerHTML\" class=\"space-y-5\"><!-- Input Username atau Email + Error di Samping Label --><div class=\"space-y-1.5\"><div class=\"flex items-center justify-between gap-2\"><label for=\"identifier\" class=\"block text-xs font-semibold text-zinc-200\">Username or email</label> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if state.EmailError != "" {
+		if state.IdentifierError != "" {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<span class=\"text-xs font-medium text-[#ff8080] flex items-center gap-1 animate-pulse\"><svg class=\"w-3.5 h-3.5 shrink-0\" viewBox=\"0 0 20 20\" fill=\"currentColor\"><path fill-rule=\"evenodd\" d=\"M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z\" clip-rule=\"evenodd\"></path></svg> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var5 string
-			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(state.EmailError)
+			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(state.IdentifierError)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 61, Col: 25}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 61, Col: 30}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 			if templ_7745c5c3_Err != nil {
@@ -142,26 +143,26 @@ func LoginForm(state AuthFormState) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 = []any{"w-full px-3.5 py-2.5 text-sm rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
-			templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.EmailError != ""),
-			templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.EmailError == "")}
+			templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.IdentifierError != ""),
+			templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.IdentifierError == "")}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var6...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<input type=\"email\" id=\"email\" name=\"email\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<input type=\"text\" id=\"identifier\" name=\"identifier\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var7 string
-		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(state.Email)
+		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(state.Identifier)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 69, Col: 24}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 69, Col: 29}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" placeholder=\"nama@email.com\" required autofocus class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" placeholder=\"username atau nama@email.com\" autocomplete=\"username\" autocapitalize=\"none\" spellcheck=\"false\" required autofocus class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -186,7 +187,7 @@ func LoginForm(state AuthFormState) templ.Component {
 			var templ_7745c5c3_Var9 string
 			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(state.PasswordError)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 90, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 93, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 			if templ_7745c5c3_Err != nil {
@@ -208,7 +209,7 @@ func LoginForm(state AuthFormState) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<input :type=\"show ? 'text' : 'password'\" id=\"password\" name=\"password\" placeholder=\"••••••••••\" required class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<input :type=\"show ? 'text' : 'password'\" id=\"password\" name=\"password\" placeholder=\"••••••••••\" autocomplete=\"current-password\" required class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -229,9 +230,6 @@ func LoginForm(state AuthFormState) templ.Component {
 	})
 }
 
-// ==========================================
-// 2. HALAMAN & FORM SIGN UP
-// ==========================================
 func SignupPage(csrfToken string, state AuthFormState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -300,7 +298,7 @@ func SignupForm(state AuthFormState) templ.Component {
 			templ_7745c5c3_Var14 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<div class=\"space-y-6\" x-data=\"{ show: false }\"><!-- Header --><div class=\"space-y-2.5\"><div class=\"text-[#ceafa3]\"><svg class=\"w-8 h-8\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9\"></path></svg></div><h1 class=\"text-2xl font-bold text-white tracking-tight\">Create an account</h1><p class=\"text-xs sm:text-sm text-zinc-400 leading-relaxed\">Masukkan kode tim dari Platform Admin untuk bergabung dan mulai melihat database.</p></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<div class=\"space-y-6\" x-data=\"{ show: false }\"><!-- Header --><div class=\"space-y-2.5\"><div class=\"text-[#ceafa3]\"><svg class=\"w-8 h-8\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9\"></path></svg></div><h1 class=\"text-2xl font-bold text-white tracking-tight\">Create an account</h1><p class=\"text-xs sm:text-sm text-zinc-400 leading-relaxed\">Daftar dengan username Anda. Kode tim bersifat opsional. Tanpa kode, Anda tetap dapat masuk dan Platform Admin dapat memberi akses nanti.</p></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -323,19 +321,19 @@ func SignupForm(state AuthFormState) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<!-- Form Sign Up --><form hx-post=\"/auth/signup\" hx-target=\"#auth-form-container\" hx-swap=\"innerHTML\" class=\"space-y-4\"><!-- Input Email + Error di Samping Label --><div class=\"space-y-1.5\"><div class=\"flex items-center justify-between gap-2\"><label for=\"signup-email\" class=\"block text-xs font-semibold text-zinc-200\">Your email</label> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<!-- Form Sign Up --><form hx-post=\"/auth/signup\" hx-target=\"#auth-form-container\" hx-swap=\"innerHTML\" class=\"space-y-4\"><!-- Input Username + Error di Samping Label --><div class=\"space-y-1.5\"><div class=\"flex items-center justify-between gap-2\"><label for=\"signup-username\" class=\"block text-xs font-semibold text-zinc-200\">Username</label> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if state.EmailError != "" {
+		if state.UsernameError != "" {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<span class=\"text-xs font-medium text-[#ff8080] flex items-center gap-1\"><svg class=\"w-3.5 h-3.5 shrink-0\" viewBox=\"0 0 20 20\" fill=\"currentColor\"><path fill-rule=\"evenodd\" d=\"M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z\" clip-rule=\"evenodd\"></path></svg> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var16 string
-			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(state.EmailError)
+			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(state.UsernameError)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 205, Col: 25}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 205, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 			if templ_7745c5c3_Err != nil {
@@ -351,26 +349,26 @@ func SignupForm(state AuthFormState) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var17 = []any{"w-full px-3.5 py-2.5 text-sm rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
-			templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.EmailError != ""),
-			templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.EmailError == "")}
+			templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.UsernameError != ""),
+			templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.UsernameError == "")}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var17...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<input type=\"email\" id=\"signup-email\" name=\"email\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<input type=\"text\" id=\"signup-username\" name=\"username\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var18 string
-		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(state.Email)
+		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(state.Username)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 213, Col: 24}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 213, Col: 27}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" placeholder=\"nama@email.com\" required class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" placeholder=\"contoh: budi.santoso\" autocomplete=\"username\" autocapitalize=\"none\" spellcheck=\"false\" minlength=\"3\" maxlength=\"32\" required autofocus class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -383,19 +381,19 @@ func SignupForm(state AuthFormState) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\"></div><!-- Input Password + Error di Samping Label --><div class=\"space-y-1.5\"><div class=\"flex items-center justify-between gap-2\"><label for=\"signup-password\" class=\"block text-xs font-semibold text-zinc-200\">Password</label> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\"></div><!-- Input Email + Error di Samping Label --><div class=\"space-y-1.5\"><div class=\"flex items-center justify-between gap-2\"><label for=\"signup-email\" class=\"block text-xs font-semibold text-zinc-200\">Email <span class=\"font-normal text-zinc-500\">(opsional)</span></label> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if state.PasswordError != "" {
+		if state.EmailError != "" {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<span class=\"text-xs font-medium text-[#ff8080] flex items-center gap-1\"><svg class=\"w-3.5 h-3.5 shrink-0\" viewBox=\"0 0 20 20\" fill=\"currentColor\"><path fill-rule=\"evenodd\" d=\"M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z\" clip-rule=\"evenodd\"></path></svg> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var20 string
-			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(state.PasswordError)
+			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(state.EmailError)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 233, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 239, Col: 25}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 			if templ_7745c5c3_Err != nil {
@@ -406,83 +404,83 @@ func SignupForm(state AuthFormState) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</div><div class=\"relative\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var21 = []any{"w-full pl-3.5 pr-10 py-2.5 text-sm rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
-			templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.PasswordError != ""),
-			templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.PasswordError == "")}
+		var templ_7745c5c3_Var21 = []any{"w-full px-3.5 py-2.5 text-sm rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
+			templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.EmailError != ""),
+			templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.EmailError == "")}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var21...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<input :type=\"show ? 'text' : 'password'\" id=\"signup-password\" name=\"password\" placeholder=\"Minimal 8 karakter\" required class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<input type=\"email\" id=\"signup-email\" name=\"email\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var21).String())
+		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(state.Email)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 1, Col: 0}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 247, Col: 24}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\"> <button type=\"button\" @click=\"show = !show\" tabindex=\"-1\" class=\"absolute inset-y-0 right-0 pr-3 flex items-center text-zinc-400 hover:text-zinc-200 focus:outline-none cursor-pointer\"><svg x-show=\"!show\" class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg x-show=\"show\" x-cloak class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div><!-- Input Kode Undangan Tim --><div class=\"space-y-1.5\"><div class=\"flex items-center justify-between gap-2\"><label for=\"signup-invite-code\" class=\"block text-xs font-semibold text-zinc-200\">Team Invite Code</label> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" placeholder=\"nama@email.com\" autocomplete=\"email\" class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if state.CodeError != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<span class=\"text-xs font-medium text-[#ff8080] flex items-center gap-1\"><svg class=\"w-3.5 h-3.5 shrink-0\" viewBox=\"0 0 20 20\" fill=\"currentColor\"><path fill-rule=\"evenodd\" d=\"M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z\" clip-rule=\"evenodd\"></path></svg> ")
+		var templ_7745c5c3_Var23 string
+		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var21).String())
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 1, Col: 0}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "\"></div><!-- Input Password + Error di Samping Label --><div class=\"space-y-1.5\"><div class=\"flex items-center justify-between gap-2\"><label for=\"signup-password\" class=\"block text-xs font-semibold text-zinc-200\">Password</label> ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if state.PasswordError != "" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<span class=\"text-xs font-medium text-[#ff8080] flex items-center gap-1\"><svg class=\"w-3.5 h-3.5 shrink-0\" viewBox=\"0 0 20 20\" fill=\"currentColor\"><path fill-rule=\"evenodd\" d=\"M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z\" clip-rule=\"evenodd\"></path></svg> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var23 string
-			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(state.CodeError)
+			var templ_7745c5c3_Var24 string
+			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(state.PasswordError)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 279, Col: 24}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 267, Col: 28}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</span>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</span>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</div><div class=\"relative\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var24 = []any{"w-full px-3.5 py-2.5 text-sm font-mono rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
-			templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.CodeError != ""),
-			templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.CodeError == "")}
-		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var24...)
+		var templ_7745c5c3_Var25 = []any{"w-full pl-3.5 pr-10 py-2.5 text-sm rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
+			templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.PasswordError != ""),
+			templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.PasswordError == "")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var25...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<input type=\"text\" id=\"signup-invite-code\" name=\"invite_code\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var25 string
-		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(state.InviteCode)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 287, Col: 29}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\" placeholder=\"Masukkan kode tim\" required class=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<input :type=\"show ? 'text' : 'password'\" id=\"signup-password\" name=\"password\" placeholder=\"Minimal 8 karakter\" autocomplete=\"new-password\" required class=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var26 string
-		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var24).String())
+		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var25).String())
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 1, Col: 0}
 		}
@@ -490,7 +488,67 @@ func SignupForm(state AuthFormState) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\"></div><!-- Tombol Submit --><div class=\"pt-1\"><button type=\"submit\" class=\"w-full py-2.5 px-4 bg-[#ceafa3] hover:bg-[#c2a195] text-[#121212] text-xs sm:text-sm font-semibold rounded-lg shadow-lg shadow-[#ceafa3]/20 transition cursor-pointer\">Create Account</button></div></form><!-- Footer Link ke Login --><p class=\"text-center text-xs text-zinc-400 pt-1\">Already have an account? <a href=\"/auth/login\" hx-get=\"/auth/login\" hx-target=\"#auth-form-container\" hx-push-url=\"true\" class=\"font-semibold text-[#ceafa3] hover:text-[#c2a195] hover:underline ml-1\">Log in</a></p></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\"> <button type=\"button\" @click=\"show = !show\" tabindex=\"-1\" class=\"absolute inset-y-0 right-0 pr-3 flex items-center text-zinc-400 hover:text-zinc-200 focus:outline-none cursor-pointer\"><svg x-show=\"!show\" class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg x-show=\"show\" x-cloak class=\"w-4 h-4\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div><!-- Input Kode Undangan Tim (opsional) --><div class=\"space-y-1.5\"><div class=\"flex items-center justify-between gap-2\"><label for=\"signup-invite-code\" class=\"block text-xs font-semibold text-zinc-200\">Team Invite Code <span class=\"font-normal text-zinc-500\">(opsional)</span></label> ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if state.CodeError != "" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<span class=\"text-xs font-medium text-[#ff8080] flex items-center gap-1\"><svg class=\"w-3.5 h-3.5 shrink-0\" viewBox=\"0 0 20 20\" fill=\"currentColor\"><path fill-rule=\"evenodd\" d=\"M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z\" clip-rule=\"evenodd\"></path></svg> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var27 string
+			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(state.CodeError)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 314, Col: 24}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</span>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</div>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var28 = []any{"w-full px-3.5 py-2.5 text-sm font-mono rounded-lg border bg-[#18171b] text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 transition",
+			templ.KV("border-[#ff8080] focus:border-[#ff8080] focus:ring-[#ff8080]/30", state.CodeError != ""),
+			templ.KV("border-[#333138] focus:border-[#ceafa3] focus:ring-[#ceafa3]/50", state.CodeError == "")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var28...)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<input type=\"text\" id=\"signup-invite-code\" name=\"invite_code\" value=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var29 string
+		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue(state.InviteCode)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 322, Col: 29}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\" placeholder=\"Kode Tim dari Platform Admin\" class=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var30 string
+		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.CSSClasses(templ_7745c5c3_Var28).String())
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/pages/auth.templ`, Line: 1, Col: 0}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\"></div><!-- Tombol Submit --><div class=\"pt-1\"><button type=\"submit\" class=\"w-full py-2.5 px-4 bg-[#ceafa3] hover:bg-[#c2a195] text-[#121212] text-xs sm:text-sm font-semibold rounded-lg shadow-lg shadow-[#ceafa3]/20 transition cursor-pointer\">Create Account</button></div></form><!-- Footer Link ke Login --><p class=\"text-center text-xs text-zinc-400 pt-1\">Already have an account? <a href=\"/auth/login\" hx-get=\"/auth/login\" hx-target=\"#auth-form-container\" hx-push-url=\"true\" class=\"font-semibold text-[#ceafa3] hover:text-[#c2a195] hover:underline ml-1\">Log in</a></p></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
