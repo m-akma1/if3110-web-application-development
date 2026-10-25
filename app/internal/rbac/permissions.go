@@ -84,8 +84,3 @@ func Normalize(l AccessLevel) AccessLevel {
 		return AccessNone
 	}
 }
-
-// ParseLevel converts form input to a level; anything unrecognized becomes NONE.
-func ParseLevel(s string) AccessLevel {
-	return Normalize(AccessLevel(s))
-}
