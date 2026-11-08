@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { MigrationView } from '../types'
+import { BatchProgressMonitor } from '../components/BatchProgressMonitor'
 
 function fmtTime(t?: string): string {
   if (!t || t.startsWith('0001-01-01')) {
@@ -34,9 +35,9 @@ export const MigrationDetailPage: React.FC = () => {
   const [actionLoading, setActionLoading] = useState(false)
   const [sqlTab, setSqlTab] = useState<'up' | 'down'>('up')
 
-  const fetchDetail = () => {
+  const fetchDetail = (showSpinner = true) => {
     if (!id) return
-    setLoading(true)
+    if (showSpinner) setLoading(true)
     api
       .getMigrationDetail(id)
       .then((res) => {
@@ -47,13 +48,24 @@ export const MigrationDetailPage: React.FC = () => {
         setError(err.message || 'Gagal memuat detail migration')
       })
       .finally(() => {
-        setLoading(false)
+        if (showSpinner) setLoading(false)
       })
   }
 
   useEffect(() => {
-    fetchDetail()
+    fetchDetail(true)
   }, [id])
+
+  // Polling when migration is currently running or queued
+  useEffect(() => {
+    if (!migration) return
+    if (migration.status === 'RUNNING' || migration.status === 'QUEUED') {
+      const interval = setInterval(() => {
+        fetchDetail(false)
+      }, 2000)
+      return () => clearInterval(interval)
+    }
+  }, [migration?.status, id])
 
   const handleDuplicate = async () => {
     if (!id) return
@@ -199,9 +211,21 @@ export const MigrationDetailPage: React.FC = () => {
               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-success/15 text-sem-success border border-sem-success/30">
                 SUCCESS
               </span>
+            ) : migration.status === 'PARTIAL' ? (
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30">
+                PARTIAL
+              </span>
             ) : migration.status === 'FAILED' ? (
               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-danger/15 text-sem-danger border border-sem-danger/30">
                 FAILED
+              </span>
+            ) : migration.status === 'RUNNING' ? (
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-info/15 text-sem-info border border-sem-info/30 animate-pulse">
+                RUNNING
+              </span>
+            ) : migration.status === 'QUEUED' ? (
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-info/15 text-sem-info border border-sem-info/30">
+                QUEUED
               </span>
             ) : migration.status === 'ROLLED_BACK' ? (
               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-500/15 text-zinc-400 border border-zinc-500/30">
@@ -218,6 +242,10 @@ export const MigrationDetailPage: React.FC = () => {
             ) : migration.status === 'REJECTED' ? (
               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-danger/15 text-sem-danger border border-sem-danger/30">
                 REJECTED
+              </span>
+            ) : migration.status === 'ABORTED' ? (
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-500/15 text-zinc-400 border border-zinc-500/30">
+                ABORTED
               </span>
             ) : (
               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30">
@@ -346,6 +374,20 @@ export const MigrationDetailPage: React.FC = () => {
             {migration.rejection_reason}
           </p>
         </div>
+      )}
+
+      {/* Batch Progress & PARTIAL Monitor */}
+      {(migration.execution_mode === 'BATCH' ||
+        migration.status === 'RUNNING' ||
+        migration.status === 'QUEUED' ||
+        migration.status === 'PARTIAL' ||
+        migration.status === 'ABORTED' ||
+        (migration.batch_total_count && migration.batch_total_count > 0)) && (
+        <BatchProgressMonitor
+          migration={migration}
+          canEdit={canEdit}
+          onUpdated={() => fetchDetail(false)}
+        />
       )}
 
       {/* Approvals Table */}

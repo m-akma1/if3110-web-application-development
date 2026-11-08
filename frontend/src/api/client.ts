@@ -120,6 +120,12 @@ export const api = {
     request(`/api/migration/${encodeURIComponent(id)}/approve`, { method: 'POST', body: JSON.stringify({ note }) }),
   rejectMigration: (id: string, reason: string) =>
     request(`/api/migration/${encodeURIComponent(id)}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  resumeMigration: (id: string) =>
+    request(`/api/migration/${encodeURIComponent(id)}/resume`, { method: 'POST' }),
+  abortPartialMigration: (id: string, data?: { rollback?: boolean }) =>
+    request(`/api/migration/${encodeURIComponent(id)}/abort`, { method: 'POST', body: JSON.stringify(data || {}) }),
+  getMigrationStatus: (id: string) =>
+    request(`/api/migration/${encodeURIComponent(id)}/status`),
 
   // Admin
   getAdminOverview: () => request('/api/admin/overview'),

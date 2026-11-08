@@ -84,8 +84,8 @@ export const MigrationPage: React.FC = () => {
     setSqlTab('up')
   }
 
-  const fetchOverview = async (dbId: string, currentDraftId?: string) => {
-    setLoading(true)
+  const fetchOverview = async (dbId: string, currentDraftId?: string, showSpinner = true) => {
+    if (showSpinner) setLoading(true)
     try {
       const res = await api.getMigrationOverview(dbId, currentDraftId)
       setCanEdit(res.can_edit)
@@ -106,19 +106,30 @@ export const MigrationPage: React.FC = () => {
     } catch (err: any) {
       // handled
     } finally {
-      setLoading(false)
+      if (showSpinner) setLoading(false)
     }
   }
 
   useEffect(() => {
     if (activeDBID) {
-      fetchOverview(activeDBID, draftParam)
+      fetchOverview(activeDBID, draftParam, true)
     } else {
       setLoading(false)
     }
     setFeedback(null)
     setDryRunReport(null)
   }, [activeDBID, draftParam])
+
+  // Polling when any migration in history is RUNNING or QUEUED
+  useEffect(() => {
+    const hasRunning = history.some((h) => h.status === 'RUNNING' || h.status === 'QUEUED')
+    if (!hasRunning || !activeDBID) return
+
+    const interval = setInterval(() => {
+      fetchOverview(activeDBID, draftParam, false)
+    }, 2500)
+    return () => clearInterval(interval)
+  }, [history, activeDBID, draftParam])
 
   const handleSelectDraft = (d: MigrationView | null) => {
     setFeedback(null)
@@ -358,9 +369,46 @@ export const MigrationPage: React.FC = () => {
     try {
       await api.forwardMigration(m.id)
       setFeedback({ success: true, message: `Forward untuk migrasi "${m.name}" berhasil dijalankan.` })
-      await fetchOverview(activeDBID, draftParam)
+      await fetchOverview(activeDBID, draftParam, false)
     } catch (err: any) {
       setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal menjalankan forward' })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleResumeBatch = async (m: MigrationView) => {
+    const cursor = m.checkpoint_cursor ?? m.batch_committed_count ?? 0
+    const ok = window.confirm(`Lanjutkan eksekusi migrasi "${m.name}" dari checkpoint cursor (${cursor})?`)
+    if (!ok) return
+
+    setActionLoading(true)
+    setFeedback(null)
+    try {
+      await api.resumeMigration(m.id)
+      setFeedback({ success: true, message: `Eksekusi migrasi "${m.name}" berhasil dilanjutkan.` })
+      await fetchOverview(activeDBID, draftParam, false)
+    } catch (err: any) {
+      setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal melanjutkan migrasi dari checkpoint' })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleAbortBatch = async (m: MigrationView) => {
+    const ok = window.confirm(
+      `Konfirmasi Pembatalan: Apakah Anda yakin ingin membatalkan migrasi "${m.name}" dan me-rollback ${m.batch_committed_count || 0} batch yang sudah tersimpan?`
+    )
+    if (!ok) return
+
+    setActionLoading(true)
+    setFeedback(null)
+    try {
+      await api.abortPartialMigration(m.id, { rollback: true })
+      setFeedback({ success: true, message: `Migrasi "${m.name}" berhasil dibatalkan dan di-rollback.` })
+      await fetchOverview(activeDBID, draftParam, false)
+    } catch (err: any) {
+      setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal membatalkan migrasi' })
     } finally {
       setActionLoading(false)
     }
@@ -945,8 +993,28 @@ export const MigrationPage: React.FC = () => {
                             REJECTED
                           </span>
                         ) : h.status === 'RUNNING' ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-info/15 text-sem-info border border-sem-info/30 animate-pulse">
-                            RUNNING
+                          <div className="flex flex-col gap-0.5">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-info/15 text-sem-info border border-sem-info/30 animate-pulse text-center">
+                              RUNNING
+                            </span>
+                            {h.batch_total_count && h.batch_total_count > 0 ? (
+                              <span className="text-[10px] font-mono text-zinc-400">
+                                {Math.round(((h.batch_committed_count || 0) / h.batch_total_count) * 100)}% ({h.batch_committed_count || 0}/{h.batch_total_count})
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : h.status === 'PARTIAL' ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30 text-center">
+                              PARTIAL
+                            </span>
+                            <span className="text-[10px] font-mono text-sem-warning">
+                              Batch {h.batch_committed_count || 0}/{h.batch_total_count || '?'}
+                            </span>
+                          </div>
+                        ) : h.status === 'ABORTED' ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-500/15 text-zinc-400 border border-zinc-500/30">
+                            ABORTED
                           </span>
                         ) : (
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30">
@@ -957,6 +1025,28 @@ export const MigrationPage: React.FC = () => {
                       <td className="px-4 py-3 text-xs whitespace-nowrap">
                         {canEdit && (
                           <div className="flex items-center gap-1.5">
+                            {h.status === 'PARTIAL' && (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={actionLoading}
+                                  onClick={() => handleResumeBatch(h)}
+                                  className="px-2.5 py-1 rounded text-[11px] font-semibold text-app-bg bg-brand-primary hover:bg-brand-primary-hover transition cursor-pointer disabled:opacity-50"
+                                  title="Lanjutkan eksekusi dari checkpoint terakhir"
+                                >
+                                  Lanjutkan
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={actionLoading}
+                                  onClick={() => handleAbortBatch(h)}
+                                  className="px-2.5 py-1 rounded text-[11px] font-semibold text-sem-danger hover:bg-sem-danger/10 border border-sem-danger/30 transition cursor-pointer disabled:opacity-50"
+                                  title="Batalkan migrasi dan rollback batch yang sudah tersimpan"
+                                >
+                                  Batalkan
+                                </button>
+                              </>
+                            )}
                             {h.status === 'SUCCESS' && !h.is_irreversible && h.execution_type !== 'ROLLBACK' && (
                               <button
                                 type="button"
