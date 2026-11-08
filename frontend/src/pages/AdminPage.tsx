@@ -200,6 +200,17 @@ export const AdminPage: React.FC = () => {
     }
   }
 
+  const handleSetLeader = async (groupId: string, userId: string, username: string) => {
+    setFlash(null)
+    try {
+      const res = await api.setAdminGroupLeader(groupId, userId)
+      setFlash({ success: true, message: res.message || `${username} ditetapkan sebagai Group Leader.` })
+      await loadOverview()
+    } catch (err: any) {
+      setFlash({ success: false, message: err.data?.error || err.message || 'Gagal menetapkan Group Leader' })
+    }
+  }
+
   // --- Databases Handlers ---
   const [targetForm, setTargetForm] = useState({
     name: '',
@@ -662,122 +673,149 @@ export const AdminPage: React.FC = () => {
 
           {/* Group Cards Grid */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {groups.map((g) => (
-              <div key={g.id} className="bg-app-card border border-app-border rounded-2xl p-4 space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-bold text-white">
-                      {g.name}
-                      {g.is_system && (
-                        <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-app-active text-zinc-300">
-                          SISTEM
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[11px] text-zinc-400">{g.description}</div>
-                  </div>
-                  {!g.is_system && (
-                    <button type="button" onClick={() => handleDeleteGroup(g)} className={btnDanger}>
-                      Hapus
-                    </button>
-                  )}
-                </div>
+            {groups.map((g) => {
+              const members = g.members || []
+              const grants = g.grants || {}
+              const memberCount = g.member_count ?? members.length
 
-                <details className="text-xs">
-                  <summary className="cursor-pointer text-zinc-400 hover:text-zinc-200">Ubah nama / deskripsi</summary>
-                  <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2">
+              return (
+                <div key={g.id} className="bg-app-card border border-app-border rounded-2xl p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-bold text-white">
+                        {g.name}
+                        {g.is_system && (
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-app-active text-zinc-300">
+                            SISTEM
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-zinc-400">{g.description}</div>
+                    </div>
                     {!g.is_system && (
+                      <button type="button" onClick={() => handleDeleteGroup(g)} className={btnDanger}>
+                        Hapus
+                      </button>
+                    )}
+                  </div>
+
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-zinc-400 hover:text-zinc-200">Ubah nama / deskripsi</summary>
+                    <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2">
+                      {!g.is_system && (
+                        <input
+                          placeholder="Nama group"
+                          defaultValue={g.name}
+                          onChange={(e) =>
+                            setEditGroupData({
+                              ...editGroupData,
+                              [g.id]: { ...(editGroupData[g.id] || { name: g.name, description: g.description }), name: e.target.value },
+                            })
+                          }
+                          className={adminInput}
+                        />
+                      )}
                       <input
-                        placeholder="Nama group"
-                        defaultValue={g.name}
+                        placeholder="Deskripsi"
+                        defaultValue={g.description}
                         onChange={(e) =>
                           setEditGroupData({
                             ...editGroupData,
-                            [g.id]: { ...(editGroupData[g.id] || { name: g.name, description: g.description }), name: e.target.value },
+                            [g.id]: { ...(editGroupData[g.id] || { name: g.name, description: g.description }), description: e.target.value },
                           })
                         }
                         className={adminInput}
                       />
-                    )}
-                    <input
-                      placeholder="Deskripsi"
-                      defaultValue={g.description}
-                      onChange={(e) =>
-                        setEditGroupData({
-                          ...editGroupData,
-                          [g.id]: { ...(editGroupData[g.id] || { name: g.name, description: g.description }), description: e.target.value },
-                        })
-                      }
-                      className={adminInput}
-                    />
-                    <button type="button" onClick={() => handleRenameGroup(g)} className={btnSmall}>
-                      Simpan
-                    </button>
-                  </div>
-                </details>
-
-                {/* Anggota Section */}
-                <div className="pt-2 border-t border-app-border space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
-                      Anggota ({g.member_count})
-                    </span>
-                    {g.is_system && <span className="text-[10px] text-zinc-500">Semua user otomatis menjadi anggota</span>}
-                  </div>
-                  {!g.is_system && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {g.members.length === 0 ? (
-                        <span className="text-[11px] text-zinc-500">Belum ada anggota.</span>
-                      ) : (
-                        g.members.map((m) => (
-                          <span
-                            key={m.id}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs bg-app-input border border-app-border text-zinc-300"
-                          >
-                            <span>{m.username}</span>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveMember(g.id, m.id)}
-                              className="text-zinc-500 hover:text-sem-danger font-bold text-xs cursor-pointer"
-                              title="Keluarkan dari group"
-                            >
-                              ×
-                            </button>
-                          </span>
-                        ))
-                      )}
-                    </div>
-                  )}
-
-                  {!g.is_system && (
-                    <div className="pt-1 flex items-center gap-2">
-                      <select
-                        value={addMemberSelect[g.id] || ''}
-                        onChange={(e) => setAddMemberSelect({ ...addMemberSelect, [g.id]: e.target.value })}
-                        className={`${adminSelect} text-xs flex-1`}
-                      >
-                        <option value="">Tambah anggota…</option>
-                        {users
-                          .filter((u) => !g.members.some((m) => m.id === u.id))
-                          .map((u) => (
-                            <option key={u.id} value={u.id}>
-                              {u.username}
-                            </option>
-                          ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => handleAddMember(g.id)}
-                        disabled={!addMemberSelect[g.id]}
-                        className={`${btnSmall} disabled:opacity-40`}
-                      >
-                        + Tambah
+                      <button type="button" onClick={() => handleRenameGroup(g)} className={btnSmall}>
+                        Simpan
                       </button>
                     </div>
-                  )}
+                  </details>
+
+                  {/* Anggota Section */}
+                  <div className="pt-2 border-t border-app-border space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                        Anggota ({memberCount})
+                      </span>
+                      {g.is_system && <span className="text-[10px] text-zinc-500">Semua user otomatis menjadi anggota</span>}
+                    </div>
+                    {!g.is_system && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {members.length === 0 ? (
+                          <span className="text-[11px] text-zinc-500">Belum ada anggota.</span>
+                        ) : (
+                          members.map((m) => {
+                            const isLeader = m.is_leader || g.leader_id === m.id
+                            return (
+                              <span
+                                key={m.id}
+                                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-xs border ${
+                                  isLeader
+                                    ? 'bg-brand-primary/15 border-brand-primary/40 text-brand-primary font-semibold'
+                                    : 'bg-app-input border-app-border text-zinc-300'
+                                }`}
+                              >
+                                {isLeader ? (
+                                  <span className="text-[9px] px-1 py-0.2 rounded bg-brand-primary text-app-bg font-bold">
+                                    LEADER
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetLeader(g.id, m.id, m.username)}
+                                    className="text-[10px] text-zinc-500 hover:text-brand-primary transition cursor-pointer"
+                                    title="Tetapkan sebagai Group Leader"
+                                  >
+                                    👑
+                                  </button>
+                                )}
+                                <span>{m.username}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveMember(g.id, m.id)}
+                                  className="text-zinc-500 hover:text-sem-danger font-bold text-xs cursor-pointer ml-0.5"
+                                  title="Keluarkan dari group"
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            )
+                          })
+                        )}
+                      </div>
+                    )}
+
+                    {!g.is_system && (
+                      <div className="pt-1 flex items-center gap-2">
+                        <select
+                          value={addMemberSelect[g.id] || ''}
+                          onChange={(e) => setAddMemberSelect({ ...addMemberSelect, [g.id]: e.target.value })}
+                          className={`${adminSelect} text-xs flex-1`}
+                        >
+                          <option value="">Tambah anggota…</option>
+                          {users
+                            .filter((u) => !members.some((m) => m.id === u.id))
+                            .map((u) => (
+                              <option key={u.id} value={u.id}>
+                                {u.username}
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => handleAddMember(g.id)}
+                          disabled={!addMemberSelect[g.id]}
+                          className={`${btnSmall} disabled:opacity-40`}
+                        >
+                          + Tambah
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}

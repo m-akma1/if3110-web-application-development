@@ -44,6 +44,8 @@ function stepLabel(kind: string): string {
 }
 
 export const DryRunReport: React.FC<{ report: DryRunView }> = ({ report }) => {
+  const steps = report.steps || []
+
   return (
     <div className="space-y-3">
       {report.ok ? (
@@ -57,7 +59,7 @@ export const DryRunReport: React.FC<{ report: DryRunView }> = ({ report }) => {
         </div>
       )}
 
-      {report.steps.map((st) => (
+      {steps.map((st) => (
         <div key={st.index} className="bg-app-bg border border-app-border rounded-lg overflow-hidden">
           <div className="flex items-start justify-between gap-3 px-3 py-2 border-b border-app-border">
             <pre className="font-mono text-[11px] text-zinc-300 whitespace-pre-wrap break-all flex-1">

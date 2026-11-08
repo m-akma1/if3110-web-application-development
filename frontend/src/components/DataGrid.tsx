@@ -8,10 +8,16 @@ export const DataGrid: React.FC<{
   const [activeView, setActiveView] = useState<'data' | 'schema'>('data')
   const [copied, setCopied] = useState(false)
 
+  const rows = data.rows || []
+  const columns = data.columns || []
+  const columnsMeta = data.columns_meta || []
+  const constraints = data.constraints || []
+  const indexes = data.indexes || []
+
   const handleCopy = () => {
-    if (!data.columns || !data.rows) return
-    const headerRow = data.columns.join('\t')
-    const rowLines = data.rows.map((row) => row.map((cell) => cell ?? '').join('\t'))
+    if (columns.length === 0 || rows.length === 0) return
+    const headerRow = columns.join('\t')
+    const rowLines = rows.map((row) => (row || []).map((cell) => cell ?? '').join('\t'))
     const fullText = [headerRow, ...rowLines].join('\n')
 
     navigator.clipboard.writeText(fullText).then(() => {
@@ -44,7 +50,7 @@ export const DataGrid: React.FC<{
 
       {data.truncated && !data.query_error && (
         <div className="p-3 rounded-xl bg-sem-warning/10 border border-sem-warning/30 text-sem-warning text-xs">
-          Hasil dipotong: hanya {data.rows.length} baris pertama yang ditampilkan. Tambahkan LIMIT atau filter WHERE untuk mempersempit hasil.
+          Hasil dipotong: hanya {rows.length} baris pertama yang ditampilkan. Tambahkan LIMIT atau filter WHERE untuk mempersempit hasil.
         </div>
       )}
 
@@ -69,9 +75,9 @@ export const DataGrid: React.FC<{
             </h2>
           )}
           <span className="text-xs text-zinc-400 bg-app-card px-2.5 py-1 rounded-lg border border-app-border">
-            {data.total_rows} Baris
+            {data.total_rows || rows.length} Baris
           </span>
-          {data.rows && data.rows.length > 0 && (
+          {rows.length > 0 && (
             <button
               type="button"
               onClick={handleCopy}
@@ -113,7 +119,7 @@ export const DataGrid: React.FC<{
             <table className="w-full text-left text-sm text-zinc-300">
               <thead className="bg-app-input text-xs uppercase tracking-wider text-zinc-400 border-b border-app-border">
                 <tr>
-                  {data.columns.map((col) => (
+                  {columns.map((col) => (
                     <th key={col} className="px-4 py-3 font-semibold whitespace-nowrap">
                       {col}
                     </th>
@@ -121,16 +127,16 @@ export const DataGrid: React.FC<{
                 </tr>
               </thead>
               <tbody className="divide-y divide-app-border font-mono text-xs text-zinc-200">
-                {data.rows.length === 0 ? (
+                {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={data.columns.length || 1} className="px-4 py-8 text-center text-zinc-500">
+                    <td colSpan={columns.length || 1} className="px-4 py-8 text-center text-zinc-500">
                       Tidak ada baris data.
                     </td>
                   </tr>
                 ) : (
-                  data.rows.map((row, idx) => (
+                  rows.map((row, idx) => (
                     <tr key={idx} className="hover:bg-app-active/40 transition">
-                      {row.map((val, cellIdx) => (
+                      {(row || []).map((val, cellIdx) => (
                         <td key={cellIdx} className="px-4 py-2.5 whitespace-nowrap">
                           {val === null || val === undefined ? (
                             <span className="text-zinc-600 italic">NULL</span>
@@ -192,7 +198,7 @@ export const DataGrid: React.FC<{
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-app-border font-mono">
-                  {data.columns_meta?.map((col) => (
+                  {columnsMeta.map((col) => (
                     <tr key={col.name}>
                       <td className="px-4 py-2 font-semibold text-zinc-100 flex items-center gap-1.5">
                         {col.is_pk && (
@@ -213,7 +219,7 @@ export const DataGrid: React.FC<{
           </div>
 
           {/* Constraints */}
-          {data.constraints && data.constraints.length > 0 && (
+          {constraints.length > 0 && (
             <div className="bg-app-card border border-app-border rounded-xl overflow-hidden shadow-xl">
               <div className="px-4 py-3 bg-app-input border-b border-app-border font-bold text-xs text-white uppercase tracking-wider">
                 Constraints
@@ -228,7 +234,7 @@ export const DataGrid: React.FC<{
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-app-border font-mono">
-                    {data.constraints.map((c) => (
+                    {constraints.map((c) => (
                       <tr key={c.name}>
                         <td className="px-4 py-2 font-semibold text-zinc-200">{c.name}</td>
                         <td className="px-4 py-2">
@@ -246,7 +252,7 @@ export const DataGrid: React.FC<{
           )}
 
           {/* Indexes */}
-          {data.indexes && data.indexes.length > 0 && (
+          {indexes.length > 0 && (
             <div className="bg-app-card border border-app-border rounded-xl overflow-hidden shadow-xl">
               <div className="px-4 py-3 bg-app-input border-b border-app-border font-bold text-xs text-white uppercase tracking-wider">
                 Indexes
@@ -262,7 +268,7 @@ export const DataGrid: React.FC<{
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-app-border font-mono">
-                    {data.indexes.map((idx) => (
+                    {indexes.map((idx) => (
                       <tr key={idx.name}>
                         <td className="px-4 py-2 font-semibold text-zinc-200">
                           {idx.is_unique && (
