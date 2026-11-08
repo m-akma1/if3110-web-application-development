@@ -9,7 +9,6 @@ import (
 	"dbplatform/domain"
 	"dbplatform/internal/authn"
 	"dbplatform/internal/rbac"
-	"dbplatform/views/pages"
 )
 
 // This file is the HTTP side of access control: identify the principal (authn), then ask
@@ -151,6 +150,10 @@ func accessDeniedMessage(err error) string {
 
 // renderForbiddenPage renders a full page with 403 (or 500 when the check itself failed).
 func (s *Server) renderForbiddenPage(w http.ResponseWriter, r *http.Request, layout *domain.AuthLayoutUser, csrfToken, activeTab string, err error) {
+	if dist := findDistDir(); dist != "" && isBrowserNavigate(r) {
+		http.ServeFile(w, r, dist+"/index.html")
+		return
+	}
 	writeFragmentStatus(w, err)
-	_ = pages.Forbidden(layout, activeTab, accessDeniedMessage(err), csrfToken).Render(r.Context(), w)
+	writeJSONError(w, http.StatusForbidden, accessDeniedMessage(err))
 }

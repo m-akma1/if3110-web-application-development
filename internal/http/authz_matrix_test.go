@@ -30,33 +30,41 @@ func TestAuthorizationMatrix_Integration(t *testing.T) {
 	accesstest.Grant(t, env.db, viewers.ID, target, "VIEW_ONLY")
 	accesstest.Grant(t, env.db, editors.ID, target, "VIEW_EDIT")
 
-	register := func(name string, role string, groupIDs ...string) {
-		u, err := env.sessions.RegisterUser(ctx, authn.RegisterInput{Username: name, Password: "Password-" + name, Role: role})
+	principals := []struct {
+		name   string
+		role   string
+		groups []string
+	}{
+		{"nogrant", authn.RoleUser, nil},
+		{"adminnogrant", authn.RolePlatformAdmin, nil},
+		{"viewer", authn.RoleUser, []string{viewers.ID}},
+		{"editor", authn.RoleUser, []string{editors.ID}},
+		{"both", authn.RoleUser, []string{viewers.ID, editors.ID}},
+	}
+	for _, p := range principals {
+		u, err := env.sessions.RegisterUser(ctx, authn.RegisterInput{
+			Username: p.name,
+			Password: "Password-" + p.name,
+			Role:     p.role,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, g := range groupIDs {
-			if err := env.groups.AddMember(ctx, g, u.ID); err != nil {
+		for _, gid := range p.groups {
+			if err := env.groups.AddMember(ctx, gid, u.ID); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
-	register("nogrant", authn.RoleUser)
-	register("viewer", authn.RoleUser, viewers.ID)
-	register("editor", authn.RoleUser, editors.ID)
-	register("both", authn.RoleUser, viewers.ID, editors.ID) // most permissive wins
-	register("adminnogrant", authn.RolePlatformAdmin)        // admin is not a DB access level
 
-	// Migration routes need a live target, an executed migration (history) and, per principal,
-	// a draft of their own so one principal's execute does not affect the next.
-	pool := env.connectTarget(t, target)
-	// The table fragment route reads a real table (there is no placeholder data any more).
-	if _, err := pool.ExecContext(ctx, `CREATE TABLE customers (id int PRIMARY KEY)`); err != nil {
-		t.Fatal(err)
-	}
 	engine := migration.NewEngine(env.db, env.registry, migration.Limits{})
 	newDraft := func() string {
-		d, err := env.migrations.CreateDraft(ctx, migration.NewDraft{DatabaseID: target, Name: "matrix", SQL: "SELECT 1"})
+		d, err := env.migrations.CreateDraft(ctx, migration.NewDraft{
+			DatabaseID: target,
+			CreatedBy:  userID(t, env.srv, "editor"),
+			Name:       "seed",
+			SQL:        "SELECT 1",
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -76,16 +84,16 @@ func TestAuthorizationMatrix_Integration(t *testing.T) {
 	routesFor := func(draft string) []route {
 		script := url.Values{"name": {"matrix"}, "sql_script": {"SELECT 1"}}
 		return []route{
-			{"viewer page", http.MethodGet, "/dashboard?db_id=" + target, nil},
-			{"table fragment", http.MethodGet, "/dashboard/table?db_id=" + target + "&name=customers", nil},
-			{"read-only query", http.MethodPost, "/dashboard/query", url.Values{"db_id": {target}, "sql_query": {"SELECT 1"}}},
-			{"migration page", http.MethodGet, "/migration?db_id=" + target, nil},
-			{"migration detail", http.MethodGet, "/migration/" + executed.ID, nil},
-			{"create draft", http.MethodPost, "/migration/drafts", url.Values{"db_id": {target}, "name": {"x"}, "sql_script": {"SELECT 1"}}},
-			{"save draft", http.MethodPost, "/migration/" + draft, script},
-			{"dry run", http.MethodPost, "/migration/" + draft + "/dry-run", script},
-			{"execute", http.MethodPost, "/migration/" + draft + "/execute", script},
-			{"duplicate", http.MethodPost, "/migration/" + executed.ID + "/duplicate", nil},
+			{"viewer overview", http.MethodGet, "/api/viewer?db_id=" + target, nil},
+			{"table data", http.MethodGet, "/api/viewer/table?db_id=" + target + "&name=customers", nil},
+			{"read-only query", http.MethodPost, "/api/viewer/query", url.Values{"db_id": {target}, "sql_query": {"SELECT 1"}}},
+			{"migration overview", http.MethodGet, "/api/migration?db_id=" + target, nil},
+			{"migration detail", http.MethodGet, "/api/migration/" + executed.ID, nil},
+			{"create draft", http.MethodPost, "/api/migration/drafts", url.Values{"db_id": {target}, "name": {"x"}, "sql_script": {"SELECT 1"}}},
+			{"save draft", http.MethodPost, "/api/migration/" + draft, script},
+			{"dry run", http.MethodPost, "/api/migration/" + draft + "/dry-run", script},
+			{"execute", http.MethodPost, "/api/migration/" + draft + "/execute", script},
+			{"duplicate", http.MethodPost, "/api/migration/" + executed.ID + "/duplicate", nil},
 		}
 	}
 
@@ -120,7 +128,7 @@ func TestAuthorizationMatrix_Integration(t *testing.T) {
 		}
 	}
 
-	// No session at all: pages redirect to /login, HTMX posts get 401 + HX-Redirect.
+	// No session at all: API requests get 401 Unauthorized
 	anon := newClient(t, env.srv)
 	for _, rt := range routesFor(newDraft()) {
 		var code int
@@ -129,8 +137,8 @@ func TestAuthorizationMatrix_Integration(t *testing.T) {
 		} else {
 			code = anon.post(rt.path, rt.form).Code
 		}
-		if code != http.StatusSeeOther && code != http.StatusUnauthorized {
-			t.Errorf("tanpa sesi %s: status %d, ingin redirect/401", rt.name, code)
+		if code != http.StatusUnauthorized {
+			t.Errorf("tanpa sesi %s: status %d, ingin 401", rt.name, code)
 		}
 	}
 
@@ -138,7 +146,7 @@ func TestAuthorizationMatrix_Integration(t *testing.T) {
 	editor := newClient(t, env.srv)
 	editor.login("editor", "Password-editor")
 	for _, bad := range []string{"db-1", "00000000-0000-0000-0000-00000000dead", "'; DROP TABLE users; --"} {
-		if code := editor.get("/dashboard?db_id=" + url.QueryEscape(bad)).Code; code != denied {
+		if code := editor.get("/api/viewer?db_id=" + url.QueryEscape(bad)).Code; code != denied {
 			t.Errorf("db_id %q: status %d, ingin 403", bad, code)
 		}
 	}
@@ -148,12 +156,12 @@ func TestAdminRoutes_ForbiddenForUsers_Integration(t *testing.T) {
 	env := newTestEnv(t, nil)
 	c := loggedIn(t, env.srv, "bob")
 
-	if code := c.get("/admin").Code; code != http.StatusForbidden {
-		t.Errorf("GET /admin oleh USER: status %d, ingin 403", code)
+	if code := c.get("/api/admin/overview").Code; code != http.StatusForbidden {
+		t.Errorf("GET /api/admin/overview oleh USER: status %d, ingin 403", code)
 	}
-	rec := c.post("/admin/users/"+userID(t, env.srv, "bob")+"/role", url.Values{"role": {authn.RolePlatformAdmin}})
+	rec := c.post("/api/admin/users/"+userID(t, env.srv, "bob")+"/role", url.Values{"role": {authn.RolePlatformAdmin}})
 	if rec.Code != http.StatusForbidden {
-		t.Errorf("POST /admin/users/{id}/role oleh USER: status %d, ingin 403", rec.Code)
+		t.Errorf("POST /api/admin/users/{id}/role oleh USER: status %d, ingin 403", rec.Code)
 	}
 	u, _ := env.sessions.GetUserByUsername(context.Background(), "bob")
 	if u.Role != authn.RoleUser {

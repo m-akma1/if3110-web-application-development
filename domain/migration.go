@@ -7,20 +7,20 @@ import (
 
 // MigrationView is one draft or executed migration as the pages show it.
 type MigrationView struct {
-	ID             string
-	DatabaseID     string
-	DatabaseName   string
-	Version        int // 0 unless Status is SUCCESS
-	Name           string
-	SQL            string
-	Status         string // DRAFT, SUCCESS or FAILED
-	CreatedByName  string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	ExecutedByName string
-	ExecutedAt     time.Time // zero for drafts
-	DurationMs     int64
-	Error          string
+	ID             string    `json:"id"`
+	DatabaseID     string    `json:"database_id"`
+	DatabaseName   string    `json:"database_name"`
+	Version        int       `json:"version"` // 0 unless Status is SUCCESS
+	Name           string    `json:"name"`
+	SQL            string    `json:"sql"`
+	Status         string    `json:"status"` // DRAFT, SUCCESS or FAILED
+	CreatedByName  string    `json:"created_by_name"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	ExecutedByName string    `json:"executed_by_name"`
+	ExecutedAt     time.Time `json:"executed_at"` // zero for drafts
+	DurationMs     int64     `json:"duration_ms"`
+	Error          string    `json:"error"`
 }
 
 // VersionLabel is "v3" for executed migrations and "-" otherwise.
@@ -33,57 +33,57 @@ func (m MigrationView) VersionLabel() string {
 
 // MigrationPageView is the migration page of one database.
 type MigrationPageView struct {
-	DatabaseID   string // empty: the user has no database (empty state)
-	DatabaseName string
-	AccessLevel  string // VIEW_ONLY or VIEW_EDIT
-	CanEdit      bool   // VIEW_EDIT: drafts, dry runs and execution
-	Drafts       []MigrationView
-	History      []MigrationView
-	Editing      *MigrationView // the draft open in the editor; nil shows the "new draft" form
+	DatabaseID   string          `json:"database_id"` // empty: the user has no database (empty state)
+	DatabaseName string          `json:"database_name"`
+	AccessLevel  string          `json:"access_level"` // VIEW_ONLY or VIEW_EDIT
+	CanEdit      bool            `json:"can_edit"`     // VIEW_EDIT: drafts, dry runs and execution
+	Drafts       []MigrationView `json:"drafts"`
+	History      []MigrationView `json:"history"`
+	Editing      *MigrationView  `json:"editing"` // the draft open in the editor; nil shows the "new draft" form
 }
 
 // MigrationDetailView is the detail page of one migration.
 type MigrationDetailView struct {
-	Migration MigrationView
-	CanEdit   bool
+	Migration MigrationView `json:"migration"`
+	CanEdit   bool          `json:"can_edit"`
 }
 
 // DryRunView is the result of a dry run, with a query plan per DML statement.
 type DryRunView struct {
-	OK         bool
-	Statements int
-	DurationMs float64
-	Error      string // formatted error when OK is false
-	Steps      []DryRunStepView
+	OK         bool             `json:"ok"`
+	Statements int              `json:"statements"`
+	DurationMs float64          `json:"duration_ms"`
+	Error      string           `json:"error"` // formatted error when OK is false
+	Steps      []DryRunStepView `json:"steps"`
 }
 
 // DryRunStepView is what the dry run did with one statement.
 type DryRunStepView struct {
-	Index       int
-	SQL         string
-	Kind        string // EXPLAINED, EXECUTED, FAILED or SKIPPED
-	DurationMs  float64
-	PlanningMs  float64
-	ExecutionMs float64
-	Nodes       []PlanNodeView // depth-first; empty unless Kind is EXPLAINED
+	Index       int            `json:"index"`
+	SQL         string         `json:"sql"`
+	Kind        string         `json:"kind"` // EXPLAINED, EXECUTED, FAILED or SKIPPED
+	DurationMs  float64        `json:"duration_ms"`
+	PlanningMs  float64        `json:"planning_ms"`
+	ExecutionMs float64        `json:"execution_ms"`
+	Nodes       []PlanNodeView `json:"nodes"` // depth-first; empty unless Kind is EXPLAINED
 }
 
 // PlanNodeView is one node of an EXPLAIN ANALYZE plan.
 type PlanNodeView struct {
-	Depth         int
-	Title         string // e.g. "Index Scan using orders_pkey on orders o"
-	NodeType      string
-	JoinType      string
-	EstRows       float64 // planner estimate, per loop
-	ActualRows    float64 // per loop
-	Loops         float64
-	StartupCost   float64
-	TotalCost     float64
-	ActualMs      float64 // actual total time per loop
-	Conditions    []string
-	RowsRemoved   float64 // by filter
-	SharedHit     int64
-	SharedRead    int64
-	NeverExecuted bool
-	Misestimated  bool // estimate off by 10x or more
+	Depth         int      `json:"depth"`
+	Title         string   `json:"title"` // e.g. "Index Scan using orders_pkey on orders o"
+	NodeType      string   `json:"node_type"`
+	JoinType      string   `json:"join_type"`
+	EstRows       float64  `json:"est_rows"` // planner estimate, per loop
+	ActualRows    float64  `json:"actual_rows"` // per loop
+	Loops         float64  `json:"loops"`
+	StartupCost   float64  `json:"startup_cost"`
+	TotalCost     float64  `json:"total_cost"`
+	ActualMs      float64  `json:"actual_ms"` // actual total time per loop
+	Conditions    []string `json:"conditions"`
+	RowsRemoved   float64  `json:"rows_removed"` // by filter
+	SharedHit     int64    `json:"shared_hit"`
+	SharedRead    int64    `json:"shared_read"`
+	NeverExecuted bool     `json:"never_executed"`
+	Misestimated  bool     `json:"misestimated"` // estimate off by 10x or more
 }
