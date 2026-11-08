@@ -175,9 +175,9 @@ export const DashboardPage: React.FC = () => {
   }
 
   return (
-    <div className="flex gap-6 h-full">
+    <div className="flex flex-col md:flex-row gap-6 h-full">
       {/* Sidebar Daftar Tabel */}
-      <div className="w-60 bg-app-card border border-app-border rounded-2xl p-4 flex flex-col shrink-0">
+      <div className="w-full md:w-60 bg-app-card border border-app-border rounded-2xl p-4 flex flex-col shrink-0 max-h-60 md:max-h-none">
         <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 px-2">
           Daftar Tabel
         </h3>
