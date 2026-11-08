@@ -86,7 +86,19 @@ export interface MigrationView {
   version: number
   name: string
   sql: string
-  status: 'DRAFT' | 'SUCCESS' | 'FAILED' | string
+  sql_up?: string
+  sql_down?: string
+  is_irreversible?: boolean
+  irreversible_reason?: string
+  execution_type?: 'UP' | 'ROLLBACK' | 'FORWARD' | string
+  execution_id?: string
+  rollback_target_id?: string
+  execution_mode?: 'STANDARD' | 'BATCH' | string
+  batch_attribute?: string
+  batch_size?: number
+  batch_committed_count?: number
+  batch_total_count?: number
+  status: 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'PARTIAL' | string
   created_by_name: string
   created_at: string
   updated_at: string

@@ -76,16 +76,42 @@ export const api = {
     return request(`/api/migration${qs ? `?${qs}` : ''}`)
   },
   getMigrationDetail: (id: string) => request(`/api/migration/${encodeURIComponent(id)}`),
-  createMigrationDraft: (data: { db_id: string; name: string; sql_script: string }) =>
-    request('/api/migration/drafts', { method: 'POST', body: JSON.stringify(data) }),
-  saveMigrationDraft: (id: string, data: { name: string; sql_script: string }) =>
-    request(`/api/migration/${encodeURIComponent(id)}`, { method: 'POST', body: JSON.stringify(data) }),
+  createMigrationDraft: (data: {
+    db_id: string
+    name: string
+    sql_script?: string
+    sql_up?: string
+    sql_down?: string
+    is_irreversible?: boolean
+    irreversible_reason?: string
+    execution_mode?: string
+    batch_attribute?: string
+    batch_size?: number
+  }) => request('/api/migration/drafts', { method: 'POST', body: JSON.stringify(data) }),
+  saveMigrationDraft: (
+    id: string,
+    data: {
+      name: string
+      sql_script?: string
+      sql_up?: string
+      sql_down?: string
+      is_irreversible?: boolean
+      irreversible_reason?: string
+      execution_mode?: string
+      batch_attribute?: string
+      batch_size?: number
+    }
+  ) => request(`/api/migration/${encodeURIComponent(id)}`, { method: 'POST', body: JSON.stringify(data) }),
   deleteMigrationDraft: (id: string) =>
     request(`/api/migration/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  dryRunMigration: (id: string, data?: { name: string; sql_script: string }) =>
+  dryRunMigration: (id: string, data?: any) =>
     request(`/api/migration/${encodeURIComponent(id)}/dry-run`, { method: 'POST', body: JSON.stringify(data || {}) }),
-  executeMigration: (id: string, data?: { name: string; sql_script: string }) =>
+  executeMigration: (id: string, data?: any) =>
     request(`/api/migration/${encodeURIComponent(id)}/execute`, { method: 'POST', body: JSON.stringify(data || {}) }),
+  rollbackMigration: (id: string) =>
+    request(`/api/migration/${encodeURIComponent(id)}/rollback`, { method: 'POST' }),
+  forwardMigration: (id: string) =>
+    request(`/api/migration/${encodeURIComponent(id)}/forward`, { method: 'POST' }),
   duplicateMigration: (id: string) =>
     request(`/api/migration/${encodeURIComponent(id)}/duplicate`, { method: 'POST' }),
 

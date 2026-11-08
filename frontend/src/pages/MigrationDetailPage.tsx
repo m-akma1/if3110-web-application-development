@@ -32,8 +32,9 @@ export const MigrationDetailPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<{ success: boolean; message: string } | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
+  const [sqlTab, setSqlTab] = useState<'up' | 'down'>('up')
 
-  useEffect(() => {
+  const fetchDetail = () => {
     if (!id) return
     setLoading(true)
     api
@@ -48,6 +49,10 @@ export const MigrationDetailPage: React.FC = () => {
       .finally(() => {
         setLoading(false)
       })
+  }
+
+  useEffect(() => {
+    fetchDetail()
   }, [id])
 
   const handleDuplicate = async () => {
@@ -59,6 +64,46 @@ export const MigrationDetailPage: React.FC = () => {
       navigate(`/migration?draft=${res.draft.id}`)
     } catch (err: any) {
       setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal menduplikat migration' })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleRollback = async () => {
+    if (!migration) return
+    if (migration.is_irreversible) {
+      alert(`Migrasi tidak dapat di-rollback karena ditandai sebagai irreversible.\nAlasan: ${migration.irreversible_reason || '-'}`)
+      return
+    }
+    const ok = window.confirm(`Apakah Anda yakin ingin melakukan ROLLBACK untuk migrasi "${migration.name}"?`)
+    if (!ok) return
+
+    setActionLoading(true)
+    setFeedback(null)
+    try {
+      await api.rollbackMigration(migration.id)
+      setFeedback({ success: true, message: `Rollback untuk "${migration.name}" berhasil dijalankan.` })
+      fetchDetail()
+    } catch (err: any) {
+      setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal menjalankan rollback' })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleForward = async () => {
+    if (!migration) return
+    const ok = window.confirm(`Apakah Anda yakin ingin melakukan FORWARD (mengaplikasikan kembali) migrasi "${migration.name}"?`)
+    if (!ok) return
+
+    setActionLoading(true)
+    setFeedback(null)
+    try {
+      await api.forwardMigration(migration.id)
+      setFeedback({ success: true, message: `Forward untuk "${migration.name}" berhasil dijalankan.` })
+      fetchDetail()
+    } catch (err: any) {
+      setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal menjalankan forward' })
     } finally {
       setActionLoading(false)
     }
@@ -81,6 +126,8 @@ export const MigrationDetailPage: React.FC = () => {
     )
   }
 
+  const isRolledBack = migration.status === 'ROLLED_BACK' || migration.execution_type === 'ROLLBACK'
+
   return (
     <div className="space-y-5 max-w-5xl">
       <Link to="/migration" className="text-xs font-semibold text-brand-primary hover:underline">
@@ -89,7 +136,7 @@ export const MigrationDetailPage: React.FC = () => {
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold text-zinc-100">{migration.name}</h1>
             {migration.status === 'SUCCESS' ? (
               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-success/15 text-sem-success border border-sem-success/30">
@@ -99,9 +146,29 @@ export const MigrationDetailPage: React.FC = () => {
               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-danger/15 text-sem-danger border border-sem-danger/30">
                 FAILED
               </span>
+            ) : migration.status === 'ROLLED_BACK' ? (
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-500/15 text-zinc-400 border border-zinc-500/30">
+                ROLLED_BACK
+              </span>
             ) : (
               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30">
-                DRAFT
+                {migration.status}
+              </span>
+            )}
+
+            {migration.execution_type === 'ROLLBACK' ? (
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-danger/15 text-sem-danger border border-sem-danger/30">
+                ROLLBACK RUN
+              </span>
+            ) : migration.execution_type === 'FORWARD' ? (
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-info/15 text-sem-info border border-sem-info/30">
+                FORWARD RUN
+              </span>
+            ) : null}
+
+            {migration.is_irreversible && (
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30">
+                IRREVERSIBLE
               </span>
             )}
           </div>
@@ -109,7 +176,7 @@ export const MigrationDetailPage: React.FC = () => {
         </div>
 
         {canEdit && (
-          <div>
+          <div className="flex flex-wrap items-center gap-2">
             {migration.status === 'DRAFT' ? (
               <Link
                 to={`/migration?draft=${migration.id}`}
@@ -118,14 +185,38 @@ export const MigrationDetailPage: React.FC = () => {
                 Buka di Editor
               </Link>
             ) : (
-              <button
-                type="button"
-                disabled={actionLoading}
-                onClick={handleDuplicate}
-                className="px-4 py-1.5 rounded-lg text-xs font-bold bg-app-active hover:bg-app-border-strong text-white transition cursor-pointer disabled:opacity-50"
-              >
-                {actionLoading ? 'Menduplikat...' : 'Duplikat sebagai Draft Baru'}
-              </button>
+              <>
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={handleDuplicate}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-app-active hover:bg-app-border-strong text-white transition cursor-pointer disabled:opacity-50"
+                >
+                  {actionLoading ? 'Menduplikat...' : 'Duplikat Draft'}
+                </button>
+
+                {migration.status === 'SUCCESS' && !migration.is_irreversible && migration.execution_type !== 'ROLLBACK' && (
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={handleRollback}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold text-sem-danger hover:bg-sem-danger/15 bg-sem-danger/10 border border-sem-danger/30 transition cursor-pointer disabled:opacity-50"
+                  >
+                    Rollback
+                  </button>
+                )}
+
+                {isRolledBack && (
+                  <button
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={handleForward}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold text-sem-success hover:bg-sem-success/15 bg-sem-success/10 border border-sem-success/30 transition cursor-pointer disabled:opacity-50"
+                  >
+                    Forward
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}
@@ -143,6 +234,24 @@ export const MigrationDetailPage: React.FC = () => {
         </div>
       )}
 
+      {/* Irreversible notice */}
+      {migration.is_irreversible && (
+        <div className="p-4 rounded-xl bg-sem-warning/10 border border-sem-warning/30 space-y-1.5 text-xs text-sem-warning">
+          <div className="font-bold flex items-center gap-2">
+            <span>⚠️</span> Migrasi ini ditandai sebagai Irreversible
+          </div>
+          <p className="text-zinc-300">
+            Perubahan skema atau data yang dilakukan oleh migrasi ini tidak dapat dikembalikan secara otomatis.
+          </p>
+          {migration.irreversible_reason && (
+            <div className="mt-2 text-[11px] font-mono bg-app-card p-2.5 rounded border border-sem-warning/20 text-zinc-200">
+              <span className="text-sem-warning font-semibold">Alasan: </span>
+              {migration.irreversible_reason}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Metadata Grid */}
       <dl className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-app-card border border-app-border rounded-xl p-5">
         <div>
@@ -152,6 +261,26 @@ export const MigrationDetailPage: React.FC = () => {
         <div>
           <dt className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Versi</dt>
           <dd className="mt-0.5 text-xs text-zinc-200 font-mono">{versionLabel(migration.version)}</dd>
+        </div>
+        <div>
+          <dt className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Mode Eksekusi</dt>
+          <dd className="mt-0.5 text-xs text-zinc-200 font-mono">
+            {migration.execution_mode === 'BATCH'
+              ? `BATCH (${migration.batch_size || 1000} baris / ${migration.batch_attribute || 'id'})`
+              : 'STANDARD (Direct)'}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Status Rollback</dt>
+          <dd className="mt-0.5 text-xs text-zinc-200">
+            {migration.is_irreversible ? (
+              <span className="text-sem-warning font-semibold">Irreversible</span>
+            ) : isRolledBack ? (
+              <span className="text-zinc-400">Telah di-rollback</span>
+            ) : (
+              <span className="text-sem-success">Reversible</span>
+            )}
+          </dd>
         </div>
         <div>
           <dt className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Dibuat oleh</dt>
@@ -196,11 +325,63 @@ export const MigrationDetailPage: React.FC = () => {
         </div>
       )}
 
-      <div className="space-y-2">
-        <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider px-1">Script SQL</h3>
-        <pre className="p-4 rounded-xl bg-app-bg border border-app-border text-sem-info text-xs font-mono whitespace-pre-wrap overflow-x-auto">
-          {migration.sql}
-        </pre>
+      {/* Dual SQL Viewer */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between border-b border-app-border">
+          <div className="flex space-x-1">
+            <button
+              type="button"
+              onClick={() => setSqlTab('up')}
+              className={`px-4 py-2 text-xs font-semibold rounded-t-lg transition flex items-center gap-1.5 cursor-pointer ${
+                sqlTab === 'up'
+                  ? 'bg-app-card text-brand-primary border-t-2 border-brand-primary border-x border-app-border'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-app-active/40'
+              }`}
+            >
+              <span>SQL Up (Apply)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSqlTab('down')}
+              className={`px-4 py-2 text-xs font-semibold rounded-t-lg transition flex items-center gap-1.5 cursor-pointer ${
+                sqlTab === 'down'
+                  ? 'bg-app-card text-brand-primary border-t-2 border-brand-primary border-x border-app-border'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-app-active/40'
+              }`}
+            >
+              <span>SQL Down (Rollback)</span>
+              {migration.is_irreversible && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded bg-sem-warning/15 text-sem-warning font-semibold">
+                  Irreversible
+                </span>
+              )}
+            </button>
+          </div>
+          <div className="text-[11px] text-zinc-400 hidden sm:block px-2">
+            {sqlTab === 'up'
+              ? 'Perubahan skema yang diterapkan'
+              : migration.is_irreversible
+              ? 'Rollback dinonaktifkan (Irreversible)'
+              : 'Perintah pemulihan skema'}
+          </div>
+        </div>
+
+        {sqlTab === 'up' ? (
+          <pre className="p-4 rounded-b-xl bg-app-bg border border-app-border text-sem-info text-xs font-mono whitespace-pre-wrap overflow-x-auto">
+            {migration.sql_up || migration.sql || '-- Tidak ada script SQL Up'}
+          </pre>
+        ) : migration.is_irreversible ? (
+          <div className="p-6 bg-app-bg border border-app-border rounded-b-xl space-y-2 text-xs text-zinc-400">
+            <div className="text-sem-warning font-semibold">Tidak Ada Script SQL Down</div>
+            <p>
+              Migrasi ini ditandai sebagai irreversible. Tidak ada script pembatalan (rollback) yang disimpan untuk migrasi ini.
+            </p>
+          </div>
+        ) : (
+          <pre className="p-4 rounded-b-xl bg-app-bg border border-app-border text-sem-info text-xs font-mono whitespace-pre-wrap overflow-x-auto">
+            {migration.sql_down || '-- Belum ada script SQL Down'}
+          </pre>
+        )}
       </div>
     </div>
   )
