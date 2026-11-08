@@ -109,6 +109,63 @@ export const MigrationDetailPage: React.FC = () => {
     }
   }
 
+  const handleSubmitReview = async () => {
+    if (!id) return
+    const ok = window.confirm(`Ajukan migrasi "${migration?.name}" untuk ditinjau oleh Group Leader?`)
+    if (!ok) return
+
+    setActionLoading(true)
+    setFeedback(null)
+    try {
+      await api.submitMigrationForReview(id)
+      setFeedback({ success: true, message: 'Migrasi berhasil diajukan untuk review Group Leader.' })
+      fetchDetail()
+    } catch (err: any) {
+      setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal mengajukan review' })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleApprove = async () => {
+    if (!id) return
+    const note = window.prompt('Tambahkan catatan persetujuan (opsional):', '')
+    if (note === null) return
+
+    setActionLoading(true)
+    setFeedback(null)
+    try {
+      await api.approveMigration(id, note)
+      setFeedback({ success: true, message: 'Migrasi telah disetujui (Approved) dan siap dieksekusi.' })
+      fetchDetail()
+    } catch (err: any) {
+      setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal menyetujui migrasi' })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleReject = async () => {
+    if (!id) return
+    const reason = window.prompt('Masukkan alasan penolakan migrasi (wajib):', '')
+    if (!reason || !reason.trim()) {
+      alert('Alasan penolakan wajib diisi.')
+      return
+    }
+
+    setActionLoading(true)
+    setFeedback(null)
+    try {
+      await api.rejectMigration(id, reason.trim())
+      setFeedback({ success: true, message: 'Migrasi telah ditolak.' })
+      fetchDetail()
+    } catch (err: any) {
+      setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal menolak migrasi' })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   if (loading) {
     return <div className="text-xs text-zinc-400">Memuat detail migration...</div>
   }
@@ -150,6 +207,18 @@ export const MigrationDetailPage: React.FC = () => {
               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-500/15 text-zinc-400 border border-zinc-500/30">
                 ROLLED_BACK
               </span>
+            ) : migration.status === 'PENDING_REVIEW' ? (
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30">
+                PENDING REVIEW
+              </span>
+            ) : migration.status === 'APPROVED' ? (
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-success/15 text-sem-success border border-sem-success/30">
+                APPROVED
+              </span>
+            ) : migration.status === 'REJECTED' ? (
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-danger/15 text-sem-danger border border-sem-danger/30">
+                REJECTED
+              </span>
             ) : (
               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30">
                 {migration.status}
@@ -177,14 +246,47 @@ export const MigrationDetailPage: React.FC = () => {
 
         {canEdit && (
           <div className="flex flex-wrap items-center gap-2">
-            {migration.status === 'DRAFT' ? (
-              <Link
-                to={`/migration?draft=${migration.id}`}
-                className="px-4 py-1.5 rounded-lg text-xs font-bold bg-brand-primary hover:bg-brand-primary-hover text-app-bg transition shadow-md inline-block"
-              >
-                Buka di Editor
-              </Link>
-            ) : (
+            {migration.status === 'PENDING_REVIEW' && (
+              <>
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={handleApprove}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-sem-success text-app-bg hover:opacity-90 transition cursor-pointer disabled:opacity-50"
+                >
+                  Setujui
+                </button>
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={handleReject}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-sem-danger/15 text-sem-danger hover:bg-sem-danger/25 border border-sem-danger/30 transition cursor-pointer disabled:opacity-50"
+                >
+                  Tolak
+                </button>
+              </>
+            )}
+
+            {(migration.status === 'DRAFT' || migration.status === 'REJECTED') && (
+              <>
+                <Link
+                  to={`/migration?draft=${migration.id}`}
+                  className="px-4 py-1.5 rounded-lg text-xs font-bold bg-brand-primary hover:bg-brand-primary-hover text-app-bg transition shadow-md inline-block"
+                >
+                  Buka di Editor
+                </Link>
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={handleSubmitReview}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-sem-info/15 text-sem-info hover:bg-sem-info/25 border border-sem-info/30 transition cursor-pointer disabled:opacity-50"
+                >
+                  Ajukan Review
+                </button>
+              </>
+            )}
+
+            {migration.status !== 'DRAFT' && migration.status !== 'PENDING_REVIEW' && migration.status !== 'REJECTED' && (
               <>
                 <button
                   type="button"
@@ -230,7 +332,60 @@ export const MigrationDetailPage: React.FC = () => {
               : 'bg-sem-danger/10 border-sem-danger/30 text-sem-danger'
           }`}
         >
-          {feedback.success ? `✓ ${feedback.message}` : `✗ ${feedback.message}`}
+          {feedback.message}
+        </div>
+      )}
+
+      {/* Rejection notice */}
+      {migration.rejection_reason && (
+        <div className="p-4 rounded-xl bg-sem-danger/10 border border-sem-danger/30 space-y-1.5 text-xs text-sem-danger">
+          <div className="font-bold flex items-center gap-1.5">
+            Catatan Penolakan Review
+          </div>
+          <p className="text-zinc-200 font-mono text-[11px] bg-app-card p-2.5 rounded border border-sem-danger/20">
+            {migration.rejection_reason}
+          </p>
+        </div>
+      )}
+
+      {/* Approvals Table */}
+      {migration.approvals && migration.approvals.length > 0 && (
+        <div className="space-y-2 bg-app-card border border-app-border rounded-xl p-4">
+          <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
+            Riwayat Review & Persetujuan
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-zinc-300">
+              <thead className="text-[10px] uppercase tracking-wider text-zinc-500 border-b border-app-border">
+                <tr>
+                  <th className="py-2 px-3 font-semibold">Group</th>
+                  <th className="py-2 px-3 font-semibold">Reviewer</th>
+                  <th className="py-2 px-3 font-semibold">Status</th>
+                  <th className="py-2 px-3 font-semibold">Waktu</th>
+                  <th className="py-2 px-3 font-semibold">Catatan</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-app-border font-mono text-[11px]">
+                {migration.approvals.map((app, idx) => (
+                  <tr key={idx}>
+                    <td className="py-2 px-3">{app.group_name}</td>
+                    <td className="py-2 px-3">{app.leader_name || '-'}</td>
+                    <td className="py-2 px-3">
+                      {app.status === 'APPROVED' ? (
+                        <span className="text-sem-success font-semibold">APPROVED</span>
+                      ) : app.status === 'REJECTED' ? (
+                        <span className="text-sem-danger font-semibold">REJECTED</span>
+                      ) : (
+                        <span className="text-sem-warning font-semibold">PENDING</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-3">{fmtTime(app.reviewed_at)}</td>
+                    <td className="py-2 px-3 text-zinc-400 font-sans">{app.note || app.rejection_reason || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -321,7 +476,7 @@ export const MigrationDetailPage: React.FC = () => {
 
       {migration.status === 'SUCCESS' && (
         <div className="p-3 rounded-lg bg-sem-success/10 border border-sem-success/30 text-sem-success text-xs font-mono">
-          ✓ Seluruh statement berhasil dan di-COMMIT sebagai {versionLabel(migration.version)}.
+          Seluruh statement berhasil dan di-COMMIT sebagai {versionLabel(migration.version)}.
         </div>
       )}
 

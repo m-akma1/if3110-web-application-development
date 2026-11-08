@@ -50,11 +50,11 @@ export const DryRunReport: React.FC<{ report: DryRunView }> = ({ report }) => {
     <div className="space-y-3">
       {report.ok ? (
         <div className="p-3 rounded-lg bg-sem-success/10 border border-sem-success/30 text-sem-success text-xs font-mono">
-          ✓ Dry run berhasil: {report.statements} statement dijalankan dalam {fmtMs(report.duration_ms)}, lalu di-ROLLBACK. Database target tidak berubah.
+          Dry run berhasil: {report.statements} statement dijalankan dalam {fmtMs(report.duration_ms)}, lalu di-ROLLBACK. Database target tidak berubah.
         </div>
       ) : (
         <div className="p-3 rounded-lg bg-sem-danger/10 border border-sem-danger/30 text-sem-danger text-xs font-mono whitespace-pre-wrap">
-          ✗ Dry run gagal (seluruh perubahan di-ROLLBACK):{'\n'}
+          Dry run gagal (seluruh perubahan di-ROLLBACK):{'\n'}
           {report.error}
         </div>
       )}

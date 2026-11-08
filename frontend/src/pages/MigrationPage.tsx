@@ -271,6 +271,63 @@ export const MigrationPage: React.FC = () => {
     }
   }
 
+  const handleSubmitReview = async () => {
+    if (!selectedDraft) return
+    const ok = window.confirm(`Ajukan migrasi "${name || selectedDraft.name}" untuk ditinjau oleh Group Leader?`)
+    if (!ok) return
+
+    setActionLoading(true)
+    setFeedback(null)
+    try {
+      await api.submitMigrationForReview(selectedDraft.id)
+      setFeedback({ success: true, message: 'Migrasi berhasil diajukan untuk review Group Leader.' })
+      await fetchOverview(activeDBID, selectedDraft.id)
+    } catch (err: any) {
+      setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal mengajukan review' })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleApprove = async () => {
+    if (!selectedDraft) return
+    const note = window.prompt('Tambahkan catatan persetujuan (opsional):', '')
+    if (note === null) return
+
+    setActionLoading(true)
+    setFeedback(null)
+    try {
+      await api.approveMigration(selectedDraft.id, note)
+      setFeedback({ success: true, message: 'Migrasi telah disetujui (Approved) dan siap dieksekusi.' })
+      await fetchOverview(activeDBID, selectedDraft.id)
+    } catch (err: any) {
+      setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal menyetujui migrasi' })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleReject = async () => {
+    if (!selectedDraft) return
+    const reason = window.prompt('Masukkan alasan penolakan migrasi (wajib):', '')
+    if (!reason || !reason.trim()) {
+      alert('Alasan penolakan wajib diisi.')
+      return
+    }
+
+    setActionLoading(true)
+    setFeedback(null)
+    try {
+      await api.rejectMigration(selectedDraft.id, reason.trim())
+      setFeedback({ success: true, message: 'Migrasi telah ditolak.' })
+      await fetchOverview(activeDBID, selectedDraft.id)
+    } catch (err: any) {
+      setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal menolak migrasi' })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
   const handleRollback = async (m: MigrationView) => {
     if (m.is_irreversible) {
       alert(`Migrasi "${m.name}" tidak dapat di-rollback karena ditandai sebagai irreversible.\nAlasan: ${m.irreversible_reason || '-'}`)
@@ -369,7 +426,24 @@ export const MigrationPage: React.FC = () => {
                         : 'border-transparent text-zinc-300 hover:bg-app-hover'
                     }`}
                   >
-                    <div className="font-semibold truncate">{d.name}</div>
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-semibold truncate">{d.name}</span>
+                      {d.status === 'PENDING_REVIEW' && (
+                        <span className="text-[9px] px-1 py-0.2 rounded bg-sem-warning/20 text-sem-warning font-semibold shrink-0">
+                          Review
+                        </span>
+                      )}
+                      {d.status === 'APPROVED' && (
+                        <span className="text-[9px] px-1 py-0.2 rounded bg-sem-success/20 text-sem-success font-semibold shrink-0">
+                          Approved
+                        </span>
+                      )}
+                      {d.status === 'REJECTED' && (
+                        <span className="text-[9px] px-1 py-0.2 rounded bg-sem-danger/20 text-sem-danger font-semibold shrink-0">
+                          Rejected
+                        </span>
+                      )}
+                    </div>
                     <div className="text-[10px] text-zinc-500 mt-0.5">
                       {d.created_by_name || '-'} · {fmtTime(d.updated_at)}
                     </div>
@@ -605,6 +679,63 @@ export const MigrationPage: React.FC = () => {
                 </div>
               </div>
 
+              {/* Workflow Review Banners */}
+              {selectedDraft && selectedDraft.status === 'PENDING_REVIEW' && (
+                <div className="p-3.5 rounded-xl bg-sem-warning/10 border border-sem-warning/30 text-xs text-sem-warning flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="font-bold flex items-center gap-1.5">
+                      <span>⏳</span> Menunggu Review Group Leader
+                    </div>
+                    <p className="text-zinc-300 text-[11px] mt-0.5">
+                      Migrasi ini diajukan untuk peninjauan dan memerlukan persetujuan sebelum dieksekusi.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      disabled={actionLoading}
+                      onClick={handleApprove}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-sem-success text-app-bg hover:opacity-90 transition cursor-pointer disabled:opacity-50"
+                    >
+                      Setujui
+                    </button>
+                    <button
+                      type="button"
+                      disabled={actionLoading}
+                      onClick={handleReject}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-sem-danger/15 text-sem-danger hover:bg-sem-danger/25 border border-sem-danger/30 transition cursor-pointer disabled:opacity-50"
+                    >
+                      Tolak
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {selectedDraft && selectedDraft.status === 'APPROVED' && (
+                <div className="p-3 rounded-xl bg-sem-success/10 border border-sem-success/30 text-xs text-sem-success flex items-center gap-2">
+                  <div>
+                    <span className="font-bold">Migrasi Telah Disetujui (Approved)</span>
+                    <span className="text-zinc-300 ml-1.5 text-[11px]">Siap dieksekusi ke database target.</span>
+                  </div>
+                </div>
+              )}
+
+              {selectedDraft && selectedDraft.status === 'REJECTED' && (
+                <div className="p-3.5 rounded-xl bg-sem-danger/10 border border-sem-danger/30 text-xs text-sem-danger space-y-1">
+                  <div className="font-bold flex items-center gap-1.5">
+                    Pengajuan Migrasi Ditolak
+                  </div>
+                  {selectedDraft.rejection_reason && (
+                    <p className="text-zinc-300 text-[11px]">
+                      Alasan: <span className="font-mono text-sem-danger font-semibold">{selectedDraft.rejection_reason}</span>
+                    </p>
+                  )}
+                  <p className="text-zinc-400 text-[10px]">
+                    Anda dapat merevisi script SQL di atas lalu menyimpannya atau mengajukan review ulang.
+                  </p>
+                </div>
+              )}
+
               {/* Action Buttons */}
               <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
                 {!selectedDraft ? (
@@ -648,6 +779,17 @@ export const MigrationPage: React.FC = () => {
                       >
                         Dry Run + EXPLAIN
                       </button>
+                      {(!selectedDraft.status || selectedDraft.status === 'DRAFT' || selectedDraft.status === 'REJECTED') && (
+                        <button
+                          type="button"
+                          disabled={actionLoading}
+                          onClick={handleSubmitReview}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-sem-info/15 hover:bg-sem-info/25 text-sem-info border border-sem-info/30 transition cursor-pointer disabled:opacity-50"
+                          title="Ajukan migrasi ini untuk direview oleh Group Leader"
+                        >
+                          Ajukan Review
+                        </button>
+                      )}
                       <button
                         type="button"
                         disabled={actionLoading}
@@ -670,7 +812,7 @@ export const MigrationPage: React.FC = () => {
                     : 'bg-sem-danger/10 border-sem-danger/30 text-sem-danger'
                 }`}
               >
-                {feedback.success ? `✓ ${feedback.message}` : `✗ ${feedback.message}`}
+                {feedback.message}
               </div>
             )}
 
@@ -789,6 +931,22 @@ export const MigrationPage: React.FC = () => {
                         ) : h.status === 'ROLLED_BACK' ? (
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-500/15 text-zinc-400 border border-zinc-500/30">
                             ROLLED_BACK
+                          </span>
+                        ) : h.status === 'PENDING_REVIEW' ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30">
+                            PENDING REVIEW
+                          </span>
+                        ) : h.status === 'APPROVED' ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-success/15 text-sem-success border border-sem-success/30">
+                            APPROVED
+                          </span>
+                        ) : h.status === 'REJECTED' ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-danger/15 text-sem-danger border border-sem-danger/30">
+                            REJECTED
+                          </span>
+                        ) : h.status === 'RUNNING' ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-info/15 text-sem-info border border-sem-info/30 animate-pulse">
+                            RUNNING
                           </span>
                         ) : (
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30">

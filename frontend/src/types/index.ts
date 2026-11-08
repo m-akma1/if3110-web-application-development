@@ -79,6 +79,19 @@ export interface TableDataResult {
   has_schema?: boolean
 }
 
+export interface MigrationApproval {
+  id?: string
+  migration_id: string
+  group_id: string
+  group_name: string
+  leader_id?: string
+  leader_name?: string
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | string
+  reviewed_at?: string
+  rejection_reason?: string
+  note?: string
+}
+
 export interface MigrationView {
   id: string
   database_id: string
@@ -98,7 +111,11 @@ export interface MigrationView {
   batch_size?: number
   batch_committed_count?: number
   batch_total_count?: number
-  status: 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'PARTIAL' | string
+  status: 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'PARTIAL' | 'REJECTED' | string
+  review_required?: boolean
+  can_approve?: boolean
+  rejection_reason?: string
+  approvals?: MigrationApproval[]
   created_by_name: string
   created_at: string
   updated_at: string
@@ -157,6 +174,7 @@ export interface UserManagementItem {
 export interface MemberItem {
   id: string
   username: string
+  is_leader?: boolean
 }
 
 export interface GroupItem {
@@ -164,6 +182,8 @@ export interface GroupItem {
   name: string
   description: string
   is_system: boolean
+  leader_id?: string
+  leader_name?: string
   member_count: number
   members: MemberItem[]
   grants: Record<string, string>

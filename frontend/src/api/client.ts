@@ -114,6 +114,12 @@ export const api = {
     request(`/api/migration/${encodeURIComponent(id)}/forward`, { method: 'POST' }),
   duplicateMigration: (id: string) =>
     request(`/api/migration/${encodeURIComponent(id)}/duplicate`, { method: 'POST' }),
+  submitMigrationForReview: (id: string) =>
+    request(`/api/migration/${encodeURIComponent(id)}/submit-review`, { method: 'POST' }),
+  approveMigration: (id: string, note?: string) =>
+    request(`/api/migration/${encodeURIComponent(id)}/approve`, { method: 'POST', body: JSON.stringify({ note }) }),
+  rejectMigration: (id: string, reason: string) =>
+    request(`/api/migration/${encodeURIComponent(id)}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
 
   // Admin
   getAdminOverview: () => request('/api/admin/overview'),
@@ -135,6 +141,8 @@ export const api = {
     request(`/api/admin/groups/${encodeURIComponent(groupId)}/members`, { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
   removeAdminGroupMember: (groupId: string, userId: string) =>
     request(`/api/admin/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
+  setAdminGroupLeader: (groupId: string, userId: string) =>
+    request(`/api/admin/groups/${encodeURIComponent(groupId)}/leader`, { method: 'POST', body: JSON.stringify({ user_id: userId }) }),
 
   setAdminGrant: (data: { group_id: string; database_id: string; level: string }) =>
     request('/api/admin/grants', { method: 'POST', body: JSON.stringify(data) }),
