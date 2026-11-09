@@ -162,8 +162,12 @@ func (s *Server) handleAPIMigrationDryRun(w http.ResponseWriter, r *http.Request
 		req.SQLScript = r.FormValue("sql_script")
 	}
 
+	// Only update draft if it is currently in an editable draft state (DRAFT or REJECTED).
+	// Once approved, the approved script must be executed without modification.
 	if req.SQLScript != "" {
-		_, _ = s.migrations.SaveDraft(r.Context(), user.ID, r.PathValue("id"), req.Name, req.SQLScript)
+		if cur, _, err := s.migrations.Get(r.Context(), user.ID, r.PathValue("id")); err == nil && cur.IsDraft() {
+			_, _ = s.migrations.SaveDraft(r.Context(), user.ID, r.PathValue("id"), req.Name, req.SQLScript)
+		}
 	}
 
 	_, res, err := s.migrations.DryRun(r.Context(), user.ID, r.PathValue("id"))
@@ -189,8 +193,12 @@ func (s *Server) handleAPIMigrationExecute(w http.ResponseWriter, r *http.Reques
 		req.SQLScript = r.FormValue("sql_script")
 	}
 
+	// Only update draft if it is currently in an editable draft state (DRAFT or REJECTED).
+	// Once approved, the approved script must be executed without modification.
 	if req.SQLScript != "" {
-		_, _ = s.migrations.SaveDraft(r.Context(), user.ID, r.PathValue("id"), req.Name, req.SQLScript)
+		if cur, _, err := s.migrations.Get(r.Context(), user.ID, r.PathValue("id")); err == nil && cur.IsDraft() {
+			_, _ = s.migrations.SaveDraft(r.Context(), user.ID, r.PathValue("id"), req.Name, req.SQLScript)
+		}
 	}
 
 	m, _, err := s.migrations.Execute(r.Context(), user.ID, r.PathValue("id"))
@@ -219,6 +227,95 @@ func (s *Server) handleAPIMigrationDuplicate(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, map[string]any{"draft": toMigrationView(m)})
 }
 
+func (s *Server) handleAPIMigrationPendingReviews(w http.ResponseWriter, r *http.Request) {
+	user, _, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	isPlatformAdmin := user.Role == authn.RolePlatformAdmin
+	list, err := s.migrations.ListPendingReviews(r.Context(), user.ID, isPlatformAdmin)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Gagal memuat antrean review migrasi")
+		return
+	}
+	views := toMigrationViews(list)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"reviews": views,
+	})
+}
+
+func (s *Server) handleAPIMigrationSubmitReview(w http.ResponseWriter, r *http.Request) {
+	user, _, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	m, err := s.migrations.SubmitReview(r.Context(), user.ID, r.PathValue("id"))
+	if err != nil {
+		status, msg := migrationErrorResponse(err)
+		writeJSON(w, status, map[string]any{"error": msg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"migration": toMigrationView(m),
+		"message":   "Migration berhasil diajukan untuk review Group Leader.",
+	})
+}
+
+func (s *Server) handleAPIMigrationApprove(w http.ResponseWriter, r *http.Request) {
+	user, _, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Note string `json:"note"`
+	}
+	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+		_ = readJSONBody(r, &body)
+	} else {
+		body.Note = r.FormValue("note")
+	}
+	m, err := s.migrations.Approve(r.Context(), user.ID, r.PathValue("id"), strings.TrimSpace(body.Note))
+	if err != nil {
+		status, msg := migrationErrorResponse(err)
+		writeJSON(w, status, map[string]any{"error": msg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"migration": toMigrationView(m),
+		"message":   "Migration berhasil disetujui.",
+	})
+}
+
+func (s *Server) handleAPIMigrationReject(w http.ResponseWriter, r *http.Request) {
+	user, _, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+		_ = readJSONBody(r, &body)
+	} else {
+		body.Reason = r.FormValue("reason")
+	}
+	reason := strings.TrimSpace(body.Reason)
+	if reason == "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "Alasan penolakan wajib diisi."})
+		return
+	}
+	m, err := s.migrations.Reject(r.Context(), user.ID, r.PathValue("id"), reason)
+	if err != nil {
+		status, msg := migrationErrorResponse(err)
+		writeJSON(w, status, map[string]any{"error": msg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"migration": toMigrationView(m),
+		"message":   "Migration berhasil ditolak.",
+	})
+}
+
 func migrationErrorResponse(err error) (int, string) {
 	var rejected *migration.RejectedError
 	switch {
@@ -228,7 +325,11 @@ func migrationErrorResponse(err error) (int, string) {
 		return http.StatusUnprocessableEntity, "Script ditolak sebelum dijalankan: " + rejected.Error()
 	case errors.Is(err, migration.ErrTargetUnavailable):
 		return http.StatusUnprocessableEntity, "Database target sedang tidak terhubung. Minta Platform Admin memeriksa koneksinya, lalu coba lagi."
-	case errors.Is(err, migration.ErrInvalidName),
+	case errors.Is(err, migration.ErrNotApproved),
+		errors.Is(err, migration.ErrNotPendingReview),
+		errors.Is(err, migration.ErrNotLeader),
+		errors.Is(err, migration.ErrAlreadyReviewed),
+		errors.Is(err, migration.ErrInvalidName),
 		errors.Is(err, migration.ErrEmptyScript),
 		errors.Is(err, migration.ErrScriptTooLarge),
 		errors.Is(err, migration.ErrNotDraft),
@@ -247,21 +348,40 @@ func (s *Server) logMigrationError(user *authn.User, op string, err error) {
 }
 
 func toMigrationView(m *migration.Migration) domain.MigrationView {
+	approvals := make([]domain.MigrationApproval, 0, len(m.Approvals))
+	for _, a := range m.Approvals {
+		approvals = append(approvals, domain.MigrationApproval{
+			ID:              a.ID,
+			MigrationID:     a.MigrationID,
+			GroupID:         a.GroupID,
+			GroupName:       a.GroupName,
+			LeaderID:        a.LeaderID,
+			LeaderName:      a.LeaderName,
+			Status:          a.Status,
+			ReviewedAt:      a.ReviewedAt,
+			Note:            a.Note,
+			RejectionReason: a.RejectionReason,
+		})
+	}
 	return domain.MigrationView{
-		ID:             m.ID,
-		DatabaseID:     m.DatabaseID,
-		DatabaseName:   m.DatabaseName,
-		Version:        m.Version,
-		Name:           m.Name,
-		SQL:            m.SQL,
-		Status:         string(m.Status),
-		CreatedByName:  orDash(m.CreatedByName),
-		CreatedAt:      m.CreatedAt,
-		UpdatedAt:      m.UpdatedAt,
-		ExecutedByName: orDash(m.ExecutedByName),
-		ExecutedAt:     m.ExecutedAt,
-		DurationMs:     m.DurationMs,
-		Error:          m.Error,
+		ID:              m.ID,
+		DatabaseID:      m.DatabaseID,
+		DatabaseName:    m.DatabaseName,
+		Version:         m.Version,
+		Name:            m.Name,
+		SQL:             m.SQL,
+		Status:          string(m.Status),
+		ReviewRequired:  m.ReviewRequired,
+		CanApprove:      m.CanApprove,
+		RejectionReason: m.RejectionReason,
+		Approvals:       approvals,
+		CreatedByName:   orDash(m.CreatedByName),
+		CreatedAt:       m.CreatedAt,
+		UpdatedAt:       m.UpdatedAt,
+		ExecutedByName:  orDash(m.ExecutedByName),
+		ExecutedAt:      m.ExecutedAt,
+		DurationMs:      m.DurationMs,
+		Error:           m.Error,
 	}
 }
 

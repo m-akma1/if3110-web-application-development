@@ -4,6 +4,7 @@ type GroupSummary struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	IsSystem bool   `json:"is_system"`
+	IsLeader bool   `json:"is_leader"`
 }
 
 type DatabaseAccessSummary struct {
@@ -18,6 +19,7 @@ type AuthLayoutUser struct {
 	Email           string                  `json:"email"`
 	Role            string                  `json:"role"`
 	IsPlatformAdmin bool                    `json:"is_platform_admin"`
+	IsLeader        bool                    `json:"is_leader"`
 	Groups          []GroupSummary          `json:"groups"`
 	Databases       []DatabaseAccessSummary `json:"databases"`
 }

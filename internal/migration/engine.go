@@ -103,7 +103,7 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	if err != nil {
 		return nil, nil, err
 	}
-	if !m.IsDraft() {
+	if !m.IsDraft() && m.Status != StatusApproved {
 		return nil, nil, ErrNotDraft
 	}
 	pool, ok := e.pools.GetPool(m.DatabaseID)
@@ -130,7 +130,7 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	if err != nil {
 		return nil, nil, err
 	}
-	if !m.IsDraft() {
+	if !m.IsDraft() && m.Status != StatusApproved {
 		return nil, nil, ErrNotDraft
 	}
 	stmts, err := CheckScript(m.SQL)

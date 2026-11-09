@@ -1,3 +1,5 @@
+import { MigrationView } from '../types'
+
 let csrfToken: string = ''
 
 export function setCSRFToken(token: string) {
@@ -114,6 +116,8 @@ export const api = {
     request(`/api/migration/${encodeURIComponent(id)}/forward`, { method: 'POST' }),
   duplicateMigration: (id: string) =>
     request(`/api/migration/${encodeURIComponent(id)}/duplicate`, { method: 'POST' }),
+  listPendingReviews: () =>
+    request<{ reviews: MigrationView[] }>('/api/migration/pending-reviews'),
   submitMigrationForReview: (id: string) =>
     request(`/api/migration/${encodeURIComponent(id)}/submit-review`, { method: 'POST' }),
   approveMigration: (id: string, note?: string) =>

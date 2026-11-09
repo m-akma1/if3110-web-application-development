@@ -35,7 +35,16 @@ func (s *Server) layoutUser(ctx context.Context, u *authn.User) (*domain.AuthLay
 			return nil, err
 		}
 		for _, g := range gs {
-			layout.Groups = append(layout.Groups, domain.GroupSummary{ID: g.ID, Name: g.Name, IsSystem: g.IsSystem})
+			isLeader := g.LeaderID != "" && g.LeaderID == u.ID
+			if isLeader {
+				layout.IsLeader = true
+			}
+			layout.Groups = append(layout.Groups, domain.GroupSummary{
+				ID:       g.ID,
+				Name:     g.Name,
+				IsSystem: g.IsSystem,
+				IsLeader: isLeader,
+			})
 		}
 	}
 	if s.access != nil {

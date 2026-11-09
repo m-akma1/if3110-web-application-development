@@ -35,6 +35,8 @@ type Group struct {
 	Name        string
 	Description string
 	IsSystem    bool
+	LeaderID    string
+	LeaderName  string
 	MemberCount int
 	CreatedAt   time.Time
 }
@@ -88,7 +90,9 @@ func (r *Repository) Create(ctx context.Context, name, description string) (*Gro
 
 const groupSelect = `
 	SELECT g.id, g.name, g.description, g.is_system, g.created_at,
-	       (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id)
+	       (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id),
+	       COALESCE(g.leader_id::text, ''),
+	       COALESCE((SELECT u.username FROM users u WHERE u.id = g.leader_id), '')
 	FROM groups g`
 
 func scanGroups(rows *sql.Rows) ([]Group, error) {
@@ -96,7 +100,7 @@ func scanGroups(rows *sql.Rows) ([]Group, error) {
 	var list []Group
 	for rows.Next() {
 		var g Group
-		if err := rows.Scan(&g.ID, &g.Name, &g.Description, &g.IsSystem, &g.CreatedAt, &g.MemberCount); err != nil {
+		if err := rows.Scan(&g.ID, &g.Name, &g.Description, &g.IsSystem, &g.CreatedAt, &g.MemberCount, &g.LeaderID, &g.LeaderName); err != nil {
 			return nil, err
 		}
 		list = append(list, g)
@@ -166,7 +170,7 @@ func (r *Repository) ListForUser(ctx context.Context, userID string) ([]Group, e
 // MemberGroupsByUser returns, for every user, the names of their groups (used by the admin user list).
 func (r *Repository) MemberGroupsByUser(ctx context.Context) (map[string][]Group, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT m.user_id, g.id, g.name, g.is_system
+		SELECT m.user_id, g.id, g.name, g.is_system, COALESCE(g.leader_id::text, '')
 		FROM group_members m
 		JOIN groups g ON g.id = m.group_id
 		ORDER BY g.is_system DESC, LOWER(g.name)`)
@@ -178,7 +182,7 @@ func (r *Repository) MemberGroupsByUser(ctx context.Context) (map[string][]Group
 	for rows.Next() {
 		var userID string
 		var g Group
-		if err := rows.Scan(&userID, &g.ID, &g.Name, &g.IsSystem); err != nil {
+		if err := rows.Scan(&userID, &g.ID, &g.Name, &g.IsSystem, &g.LeaderID); err != nil {
 			return nil, err
 		}
 		out[userID] = append(out[userID], g)
@@ -186,7 +190,77 @@ func (r *Repository) MemberGroupsByUser(ctx context.Context) (map[string][]Group
 	return out, rows.Err()
 }
 
+// SetLeader sets or clears the leader of a group. The leader must be an existing member of the group.
+// Non-system groups with members cannot have their leader cleared to NULL; if userID is empty,
+// the earliest joined member is selected as leader.
+func (r *Repository) SetLeader(ctx context.Context, groupID, userID string) error {
+	if !ids.IsValid(groupID) {
+		return ErrGroupNotFound
+	}
+	if groupID == PublicGroupID {
+		return ErrSystemGroup
+	}
+	if userID != "" {
+		if !ids.IsValid(userID) {
+			return errors.New("user tidak valid")
+		}
+		var isMember bool
+		err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2)`, groupID, userID).Scan(&isMember)
+		if err != nil {
+			return err
+		}
+		if !isMember {
+			return errors.New("user bukan anggota dari group ini")
+		}
+		_, err = r.db.ExecContext(ctx, `UPDATE groups SET leader_id = $1 WHERE id = $2`, userID, groupID)
+		return err
+	}
+	// Fallback to earliest member if any members exist
+	var earliest string
+	err := r.db.QueryRowContext(ctx, `SELECT user_id FROM group_members WHERE group_id = $1 ORDER BY added_at ASC LIMIT 1`, groupID).Scan(&earliest)
+	if err == nil && earliest != "" {
+		_, err = r.db.ExecContext(ctx, `UPDATE groups SET leader_id = $1 WHERE id = $2`, earliest, groupID)
+		return err
+	}
+	_, err = r.db.ExecContext(ctx, `UPDATE groups SET leader_id = NULL WHERE id = $1`, groupID)
+	return err
+}
+
+// GetLeader returns the leader user id of a group, or empty string if no leader is set.
+func (r *Repository) GetLeader(ctx context.Context, groupID string) (string, error) {
+	if !ids.IsValid(groupID) {
+		return "", ErrGroupNotFound
+	}
+	var leaderID sql.NullString
+	err := r.db.QueryRowContext(ctx, `SELECT leader_id FROM groups WHERE id = $1`, groupID).Scan(&leaderID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrGroupNotFound
+		}
+		return "", err
+	}
+	return leaderID.String, nil
+}
+
+// EnsureLeaders sets leader_id to the earliest joined member for any non-system group that has members but no leader.
+func (r *Repository) EnsureLeaders(ctx context.Context) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE groups g
+		SET leader_id = (
+			SELECT gm.user_id
+			FROM group_members gm
+			WHERE gm.group_id = g.id
+			ORDER BY gm.added_at ASC
+			LIMIT 1
+		)
+		WHERE g.leader_id IS NULL AND g.is_system = FALSE AND EXISTS (
+			SELECT 1 FROM group_members gm WHERE gm.group_id = g.id
+		)`)
+	return err
+}
+
 // AddMember adds a user to a group. Adding an existing member is a no-op.
+// If the group is a non-system group and currently has no leader, the user is automatically set as leader.
 func (r *Repository) AddMember(ctx context.Context, groupID, userID string) error {
 	if !ids.IsValid(groupID) || !ids.IsValid(userID) {
 		return ErrGroupNotFound
@@ -197,7 +271,18 @@ func (r *Repository) AddMember(ctx context.Context, groupID, userID string) erro
 	if isForeignKeyViolation(err) {
 		return ErrGroupNotFound
 	}
-	return err
+	if err != nil {
+		return err
+	}
+
+	if groupID != PublicGroupID {
+		_, _ = r.db.ExecContext(ctx, `
+			UPDATE groups
+			SET leader_id = $1
+			WHERE id = $2 AND leader_id IS NULL`, userID, groupID)
+	}
+
+	return nil
 }
 
 // ResolveInviteCode returns the group of an active invite code (case-insensitive).
@@ -346,6 +431,8 @@ func (r *Repository) Delete(ctx context.Context, groupID string) error {
 }
 
 // RemoveMember removes a user from a group. Public membership cannot be removed.
+// If the removed user was the group leader, the earliest joined remaining member is promoted to leader.
+// If no members remain, leader_id is set to NULL.
 func (r *Repository) RemoveMember(ctx context.Context, groupID, userID string) error {
 	if groupID == PublicGroupID {
 		return ErrSystemGroup
@@ -354,7 +441,29 @@ func (r *Repository) RemoveMember(ctx context.Context, groupID, userID string) e
 		return ErrGroupNotFound
 	}
 	_, err := r.db.ExecContext(ctx, `DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`, groupID, userID)
-	return err
+	if err != nil {
+		return err
+	}
+
+	var currentLeader sql.NullString
+	_ = r.db.QueryRowContext(ctx, `SELECT leader_id FROM groups WHERE id = $1`, groupID).Scan(&currentLeader)
+
+	if !currentLeader.Valid || currentLeader.String == userID {
+		var nextLeader string
+		err := r.db.QueryRowContext(ctx, `
+			SELECT user_id
+			FROM group_members
+			WHERE group_id = $1
+			ORDER BY added_at ASC
+			LIMIT 1`, groupID).Scan(&nextLeader)
+		if err == nil && nextLeader != "" {
+			_, _ = r.db.ExecContext(ctx, `UPDATE groups SET leader_id = $1 WHERE id = $2`, nextLeader, groupID)
+		} else {
+			_, _ = r.db.ExecContext(ctx, `UPDATE groups SET leader_id = NULL WHERE id = $1`, groupID)
+		}
+	}
+
+	return nil
 }
 
 // MemberIDs returns the ids of every member of a group.

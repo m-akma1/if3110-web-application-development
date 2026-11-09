@@ -128,7 +128,9 @@ export const MigrationPage: React.FC = () => {
     const interval = setInterval(() => {
       fetchOverview(activeDBID, draftParam, false)
     }, 2500)
-    return () => clearInterval(interval)
+    const isLocked = Boolean(selectedDraft && (selectedDraft.status === 'APPROVED' || selectedDraft.status === 'PENDING_REVIEW'))
+
+  return () => clearInterval(interval)
   }, [history, activeDBID, draftParam])
 
   const handleSelectDraft = (d: MigrationView | null) => {
@@ -300,45 +302,6 @@ export const MigrationPage: React.FC = () => {
     }
   }
 
-  const handleApprove = async () => {
-    if (!selectedDraft) return
-    const note = window.prompt('Tambahkan catatan persetujuan (opsional):', '')
-    if (note === null) return
-
-    setActionLoading(true)
-    setFeedback(null)
-    try {
-      await api.approveMigration(selectedDraft.id, note)
-      setFeedback({ success: true, message: 'Migrasi telah disetujui (Approved) dan siap dieksekusi.' })
-      await fetchOverview(activeDBID, selectedDraft.id)
-    } catch (err: any) {
-      setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal menyetujui migrasi' })
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const handleReject = async () => {
-    if (!selectedDraft) return
-    const reason = window.prompt('Masukkan alasan penolakan migrasi (wajib):', '')
-    if (!reason || !reason.trim()) {
-      alert('Alasan penolakan wajib diisi.')
-      return
-    }
-
-    setActionLoading(true)
-    setFeedback(null)
-    try {
-      await api.rejectMigration(selectedDraft.id, reason.trim())
-      setFeedback({ success: true, message: 'Migrasi telah ditolak.' })
-      await fetchOverview(activeDBID, selectedDraft.id)
-    } catch (err: any) {
-      setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal menolak migrasi' })
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
   const handleRollback = async (m: MigrationView) => {
     if (m.is_irreversible) {
       alert(`Migrasi "${m.name}" tidak dapat di-rollback karena ditandai sebagai irreversible.\nAlasan: ${m.irreversible_reason || '-'}`)
@@ -427,6 +390,8 @@ export const MigrationPage: React.FC = () => {
     return <NoDatabaseAccess groups={groups} />
   }
 
+  const isLocked = Boolean(selectedDraft && (selectedDraft.status === 'APPROVED' || selectedDraft.status === 'PENDING_REVIEW'))
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -463,7 +428,9 @@ export const MigrationPage: React.FC = () => {
             ) : (
               drafts.map((d) => {
                 const isSelected = selectedDraft?.id === d.id
-                return (
+                const isLocked = Boolean(selectedDraft && (selectedDraft.status === 'APPROVED' || selectedDraft.status === 'PENDING_REVIEW'))
+
+  return (
                   <button
                     key={d.id}
                     type="button"
@@ -512,19 +479,22 @@ export const MigrationPage: React.FC = () => {
                   required
                   maxLength={200}
                   value={name}
+                  disabled={isLocked || actionLoading}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Nama migration, mis. tambah tabel orders"
-                  className="flex-1 min-w-[12rem] px-3 py-2 bg-app-bg border border-app-border rounded-lg text-xs text-zinc-100 focus:outline-none focus:ring-2 focus:ring-brand-primary/50"
+                  className="flex-1 min-w-[12rem] px-3 py-2 bg-app-bg border border-app-border rounded-lg text-xs text-zinc-100 focus:outline-none focus:ring-2 focus:ring-brand-primary/50 disabled:opacity-75 disabled:cursor-not-allowed"
                 />
-                <label className="px-3 py-2 rounded-lg text-xs font-medium bg-app-active hover:bg-app-border-strong text-zinc-200 cursor-pointer transition">
-                  Muat file .sql
-                  <input
-                    type="file"
-                    accept=".sql,text/plain"
-                    className="hidden"
-                    onChange={handleFileUpload}
-                  />
-                </label>
+                {!isLocked && (
+                  <label className="px-3 py-2 rounded-lg text-xs font-medium bg-app-active hover:bg-app-border-strong text-zinc-200 cursor-pointer transition">
+                    Muat file .sql
+                    <input
+                      type="file"
+                      accept=".sql,text/plain"
+                      className="hidden"
+                      onChange={handleFileUpload}
+                    />
+                  </label>
+                )}
               </div>
 
               {/* Dual SQL Tabs */}
@@ -581,10 +551,11 @@ export const MigrationPage: React.FC = () => {
                     name="sql_script_up"
                     rows={12}
                     spellCheck="false"
+                    readOnly={isLocked}
                     value={sqlUp}
                     onChange={(e) => setSqlUp(e.target.value)}
                     placeholder="-- Tulis perintah SQL perubahan skema di sini (SQL Up). Misal: CREATE TABLE users (...); ALTER TABLE orders ADD COLUMN..."
-                    className="w-full p-4 bg-app-bg border border-app-border rounded-b-lg font-mono text-xs text-sem-info focus:outline-none focus:ring-2 focus:ring-brand-primary/50 leading-relaxed resize-y"
+                    className="w-full p-4 bg-app-bg border border-app-border rounded-b-lg font-mono text-xs text-sem-info focus:outline-none focus:ring-2 focus:ring-brand-primary/50 leading-relaxed resize-y read-only:opacity-85"
                   />
                 ) : isIrreversible ? (
                   <div className="p-6 bg-app-bg border border-app-border rounded-b-lg space-y-3">
@@ -732,38 +703,30 @@ export const MigrationPage: React.FC = () => {
                 <div className="p-3.5 rounded-xl bg-sem-warning/10 border border-sem-warning/30 text-xs text-sem-warning flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <div className="font-bold flex items-center gap-1.5">
-                      <span>⏳</span> Menunggu Review Group Leader
+                      Menunggu Review Group Leader
                     </div>
                     <p className="text-zinc-300 text-[11px] mt-0.5">
-                      Migrasi ini diajukan untuk peninjauan dan memerlukan persetujuan sebelum dieksekusi.
+                      Migrasi ini diajukan untuk peninjauan dan memerlukan persetujuan Group Leader sebelum dapat dieksekusi.
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      disabled={actionLoading}
-                      onClick={handleApprove}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-sem-success text-app-bg hover:opacity-90 transition cursor-pointer disabled:opacity-50"
+                  {(user?.is_platform_admin || user?.is_leader || groups?.some((g) => g.is_leader)) && (
+                    <Link
+                      to="/migration/reviews"
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-sem-warning/20 hover:bg-sem-warning/30 text-sem-warning border border-sem-warning/40 transition shrink-0 inline-flex items-center gap-1.5"
                     >
-                      Setujui
-                    </button>
-                    <button
-                      type="button"
-                      disabled={actionLoading}
-                      onClick={handleReject}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-sem-danger/15 text-sem-danger hover:bg-sem-danger/25 border border-sem-danger/30 transition cursor-pointer disabled:opacity-50"
-                    >
-                      Tolak
-                    </button>
-                  </div>
+                      Buka Halaman Persetujuan →
+                    </Link>
+                  )}
                 </div>
               )}
 
               {selectedDraft && selectedDraft.status === 'APPROVED' && (
-                <div className="p-3 rounded-xl bg-sem-success/10 border border-sem-success/30 text-xs text-sem-success flex items-center gap-2">
+                <div className="p-3.5 rounded-xl bg-sem-success/10 border border-sem-success/30 text-xs text-sem-success flex items-center justify-between gap-3">
                   <div>
-                    <span className="font-bold">Migrasi Telah Disetujui (Approved)</span>
-                    <span className="text-zinc-300 ml-1.5 text-[11px]">Siap dieksekusi ke database target.</span>
+                    <div className="font-bold">Migrasi Telah Disetujui (Approved)</div>
+                    <p className="text-zinc-300 text-[11px] mt-0.5">
+                      Semua Group Leader telah menyetujui pengajuan migrasi ini. Script telah dikunci dan siap dieksekusi ke database target.
+                    </p>
                   </div>
                 </div>
               )}
@@ -811,14 +774,16 @@ export const MigrationPage: React.FC = () => {
                       Hapus Draft
                     </button>
                     <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={actionLoading}
-                        onClick={handleSaveDraft}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-app-active hover:bg-app-border-strong text-white transition cursor-pointer disabled:opacity-50"
-                      >
-                        Simpan
-                      </button>
+                      {!isLocked && (
+                        <button
+                          type="button"
+                          disabled={actionLoading}
+                          onClick={handleSaveDraft}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-app-active hover:bg-app-border-strong text-white transition cursor-pointer disabled:opacity-50"
+                        >
+                          Simpan
+                        </button>
+                      )}
                       <button
                         type="button"
                         disabled={actionLoading}
@@ -840,8 +805,15 @@ export const MigrationPage: React.FC = () => {
                       )}
                       <button
                         type="button"
-                        disabled={actionLoading}
+                        disabled={actionLoading || selectedDraft.status === 'PENDING_REVIEW' || selectedDraft.status === 'REJECTED'}
                         onClick={handleExecute}
+                        title={
+                          selectedDraft.status === 'PENDING_REVIEW'
+                            ? 'Migrasi masih menunggu persetujuan Group Leader'
+                            : selectedDraft.status === 'REJECTED'
+                            ? 'Migrasi ditolak. Silakan revisi lalu ajukan review ulang.'
+                            : undefined
+                        }
                         className="px-4 py-1.5 rounded-lg text-xs font-bold bg-brand-primary hover:bg-brand-primary-hover text-app-bg transition shadow-md cursor-pointer disabled:opacity-50"
                       >
                         Eksekusi Migration
@@ -922,7 +894,9 @@ export const MigrationPage: React.FC = () => {
               ) : (
                 filteredHistory.map((h) => {
                   const isRolledBack = h.status === 'ROLLED_BACK' || h.execution_type === 'ROLLBACK'
-                  return (
+                  const isLocked = Boolean(selectedDraft && (selectedDraft.status === 'APPROVED' || selectedDraft.status === 'PENDING_REVIEW'))
+
+  return (
                     <tr key={h.id} className="hover:bg-app-active/50 transition">
                       <td className="px-4 py-3 font-mono text-xs">{versionLabel(h.version)}</td>
                       <td className="px-4 py-3 text-xs font-semibold">

@@ -5,22 +5,40 @@ import (
 	"time"
 )
 
+// MigrationApproval is one group leader's approval record on a migration.
+type MigrationApproval struct {
+	ID              string     `json:"id"`
+	MigrationID     string     `json:"migration_id"`
+	GroupID         string     `json:"group_id"`
+	GroupName       string     `json:"group_name"`
+	LeaderID        string     `json:"leader_id,omitempty"`
+	LeaderName      string     `json:"leader_name,omitempty"`
+	Status          string     `json:"status"` // PENDING, APPROVED, REJECTED
+	ReviewedAt      *time.Time `json:"reviewed_at,omitempty"`
+	Note            string     `json:"note,omitempty"`
+	RejectionReason string     `json:"rejection_reason,omitempty"`
+}
+
 // MigrationView is one draft or executed migration as the pages show it.
 type MigrationView struct {
-	ID             string    `json:"id"`
-	DatabaseID     string    `json:"database_id"`
-	DatabaseName   string    `json:"database_name"`
-	Version        int       `json:"version"` // 0 unless Status is SUCCESS
-	Name           string    `json:"name"`
-	SQL            string    `json:"sql"`
-	Status         string    `json:"status"` // DRAFT, SUCCESS or FAILED
-	CreatedByName  string    `json:"created_by_name"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	ExecutedByName string    `json:"executed_by_name"`
-	ExecutedAt     time.Time `json:"executed_at"` // zero for drafts
-	DurationMs     int64     `json:"duration_ms"`
-	Error          string    `json:"error"`
+	ID              string              `json:"id"`
+	DatabaseID      string              `json:"database_id"`
+	DatabaseName    string              `json:"database_name"`
+	Version         int                 `json:"version"` // 0 unless Status is SUCCESS
+	Name            string              `json:"name"`
+	SQL             string              `json:"sql"`
+	Status          string              `json:"status"` // DRAFT, PENDING_REVIEW, APPROVED, REJECTED, SUCCESS, FAILED
+	ReviewRequired  bool                `json:"review_required,omitempty"`
+	CanApprove      bool                `json:"can_approve,omitempty"`
+	RejectionReason string              `json:"rejection_reason,omitempty"`
+	Approvals       []MigrationApproval `json:"approvals,omitempty"`
+	CreatedByName   string              `json:"created_by_name"`
+	CreatedAt       time.Time           `json:"created_at"`
+	UpdatedAt       time.Time           `json:"updated_at"`
+	ExecutedByName  string              `json:"executed_by_name"`
+	ExecutedAt      time.Time           `json:"executed_at"` // zero for drafts
+	DurationMs      int64               `json:"duration_ms"`
+	Error           string              `json:"error"`
 }
 
 // VersionLabel is "v3" for executed migrations and "-" otherwise.

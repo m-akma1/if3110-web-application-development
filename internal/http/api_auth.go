@@ -16,6 +16,7 @@ type apiAuthUser struct {
 	Email           string `json:"email"`
 	Role            string `json:"role"`
 	IsPlatformAdmin bool   `json:"is_platform_admin"`
+	IsLeader        bool   `json:"is_leader"`
 }
 
 type apiAuthResponse struct {
@@ -49,6 +50,7 @@ func (s *Server) handleAPIAuthMe(w http.ResponseWriter, r *http.Request) {
 			Email:           user.Email,
 			Role:            user.Role,
 			IsPlatformAdmin: user.Role == authn.RolePlatformAdmin,
+			IsLeader:        layout.IsLeader,
 		},
 		Groups:    layout.Groups,
 		Databases: layout.Databases,
@@ -119,6 +121,7 @@ func (s *Server) handleAPIAuthLogin(w http.ResponseWriter, r *http.Request) {
 			Email:           user.Email,
 			Role:            user.Role,
 			IsPlatformAdmin: user.Role == authn.RolePlatformAdmin,
+			IsLeader:        layout.IsLeader,
 		},
 		Groups:    layout.Groups,
 		Databases: layout.Databases,
@@ -234,6 +237,7 @@ func (s *Server) handleAPIAuthSignup(w http.ResponseWriter, r *http.Request) {
 			Email:           newUser.Email,
 			Role:            newUser.Role,
 			IsPlatformAdmin: false,
+			IsLeader:        layout.IsLeader,
 		},
 		Groups:    layout.Groups,
 		Databases: layout.Databases,

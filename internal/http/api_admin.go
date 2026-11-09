@@ -252,6 +252,28 @@ func (s *Server) handleAPIAdminRemoveMember(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"message": "Anggota dikeluarkan dari group."})
 }
 
+func (s *Server) handleAPIAdminSetGroupLeader(w http.ResponseWriter, r *http.Request) {
+	_, _, ok := s.requirePlatformAdmin(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		UserID string `json:"user_id"`
+	}
+	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+		_ = readJSONBody(r, &body)
+	} else {
+		body.UserID = r.FormValue("user_id")
+	}
+	err := s.admin.SetGroupLeader(r.Context(), r.PathValue("id"), strings.TrimSpace(body.UserID))
+	if err != nil {
+		msg, code := adminErrorMessage(err)
+		writeJSON(w, code, map[string]any{"error": msg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"message": "Leader group berhasil ditetapkan."})
+}
+
 func (s *Server) handleAPIAdminSetGrant(w http.ResponseWriter, r *http.Request) {
 	_, _, ok := s.requirePlatformAdmin(w, r)
 	if !ok {

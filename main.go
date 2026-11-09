@@ -57,6 +57,9 @@ func main() {
 
 	sessionStore := authn.NewPostgresSessionStore(db, cfg.Session)
 	groupRepo := groups.NewRepository(db)
+	if err := groupRepo.EnsureLeaders(ctx); err != nil {
+		log.Printf("warning: ensure leaders: %v", err)
+	}
 	grantStore := rbac.NewPostgresGrantStore(db)
 	authorizer := rbac.NewAuthorizer(grantStore)
 	// Target pools: the viewer, the target manager and the migration engine share one registry.
@@ -65,7 +68,7 @@ func main() {
 	targets := dbmanager.NewManager(dbmanager.NewTargetRepository(db), cipher, registry)
 	adminService := admin.NewService(sessionStore, groupRepo, grantStore, targets)
 	migrationEngine := migration.NewEngine(db, registry, cfg.Migration)
-	migrations := migration.NewService(migration.NewRepository(db), migrationEngine, authorizer)
+	migrations := migration.NewService(migration.NewRepository(db), migrationEngine, authorizer, grantStore)
 
 	admins, err := bootstrap.EnsureAdmin(ctx, sessionStore, cfg.BootstrapAdmins)
 	if err != nil {

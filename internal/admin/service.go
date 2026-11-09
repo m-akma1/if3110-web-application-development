@@ -136,6 +136,11 @@ func (s *Service) RemoveMember(ctx context.Context, groupID, userID string) erro
 	return s.groups.RemoveMember(ctx, groupID, userID)
 }
 
+// SetGroupLeader sets a member as the leader of a group.
+func (s *Service) SetGroupLeader(ctx context.Context, groupID, userID string) error {
+	return s.groups.SetLeader(ctx, groupID, userID)
+}
+
 // ---------- grants ----------
 
 // SetGrant sets a group's access level on a database. Raising it rotates every member's session.
@@ -234,7 +239,11 @@ func (s *Service) Overview(ctx context.Context) (*domain.AdminOverview, error) {
 	membersByGroup := map[string][]domain.MemberItem{}
 	for _, u := range users {
 		for _, g := range memberships[u.ID] {
-			membersByGroup[g.ID] = append(membersByGroup[g.ID], domain.MemberItem{ID: u.ID, Username: u.Username})
+			membersByGroup[g.ID] = append(membersByGroup[g.ID], domain.MemberItem{
+				ID:       u.ID,
+				Username: u.Username,
+				IsLeader: g.LeaderID != "" && g.LeaderID == u.ID,
+			})
 		}
 	}
 	grantsByGroup := map[string]map[string]string{}
@@ -246,8 +255,15 @@ func (s *Service) Overview(ctx context.Context) (*domain.AdminOverview, error) {
 	}
 	for _, g := range allGroups {
 		ov.Groups = append(ov.Groups, domain.GroupItem{
-			ID: g.ID, Name: g.Name, Description: g.Description, IsSystem: g.IsSystem, MemberCount: g.MemberCount,
-			Members: membersByGroup[g.ID], Grants: grantsByGroup[g.ID],
+			ID:          g.ID,
+			Name:        g.Name,
+			Description: g.Description,
+			IsSystem:    g.IsSystem,
+			LeaderID:    g.LeaderID,
+			LeaderName:  g.LeaderName,
+			MemberCount: g.MemberCount,
+			Members:     membersByGroup[g.ID],
+			Grants:      grantsByGroup[g.ID],
 		})
 	}
 

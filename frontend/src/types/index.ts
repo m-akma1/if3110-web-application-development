@@ -4,12 +4,14 @@ export interface User {
   email: string
   role: 'PLATFORM_ADMIN' | 'USER' | string
   is_platform_admin: boolean
+  is_leader?: boolean
 }
 
 export interface GroupSummary {
   id: string
   name: string
   is_system: boolean
+  is_leader?: boolean
 }
 
 export interface DatabaseAccessSummary {

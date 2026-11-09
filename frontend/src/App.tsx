@@ -6,6 +6,7 @@ import { DashboardLayout } from './components/DashboardLayout'
 import { DashboardPage } from './pages/DashboardPage'
 import { MigrationPage } from './pages/MigrationPage'
 import { MigrationDetailPage } from './pages/MigrationDetailPage'
+import { MigrationReviewsPage } from './pages/MigrationReviewsPage'
 import { AdminPage } from './pages/AdminPage'
 import { ForbiddenPage } from './pages/ForbiddenPage'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -21,6 +22,7 @@ export const App: React.FC = () => {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/migration" element={<MigrationPage />} />
+          <Route path="/migration/reviews" element={<MigrationReviewsPage />} />
           <Route path="/migration/:id" element={<MigrationDetailPage />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/forbidden" element={<ForbiddenPage />} />

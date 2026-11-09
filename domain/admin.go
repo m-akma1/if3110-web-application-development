@@ -16,6 +16,7 @@ type UserManagementItem struct {
 type MemberItem struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
+	IsLeader bool   `json:"is_leader"`
 }
 
 // GroupItem is one group in the admin console, with members and its grant per database.
@@ -24,6 +25,8 @@ type GroupItem struct {
 	Name        string            `json:"name"`
 	Description string            `json:"description"`
 	IsSystem    bool              `json:"is_system"`
+	LeaderID    string            `json:"leader_id,omitempty"`
+	LeaderName  string            `json:"leader_name,omitempty"`
 	MemberCount int               `json:"member_count"`
 	Members     []MemberItem      `json:"members"`
 	Grants      map[string]string `json:"grants"` // database id -> VIEW_ONLY / VIEW_EDIT (missing = NONE)

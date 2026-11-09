@@ -274,7 +274,7 @@ export const MigrationDetailPage: React.FC = () => {
 
         {canEdit && (
           <div className="flex flex-wrap items-center gap-2">
-            {migration.status === 'PENDING_REVIEW' && (
+            {migration.status === 'PENDING_REVIEW' && migration.can_approve && (
               <>
                 <button
                   type="button"

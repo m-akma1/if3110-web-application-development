@@ -27,6 +27,10 @@ func (s *Server) registerAPIRoutes() {
 	s.mux.HandleFunc("POST /api/migration/{id}/dry-run", s.handleAPIMigrationDryRun)
 	s.mux.HandleFunc("POST /api/migration/{id}/execute", s.handleAPIMigrationExecute)
 	s.mux.HandleFunc("POST /api/migration/{id}/duplicate", s.handleAPIMigrationDuplicate)
+	s.mux.HandleFunc("GET /api/migration/pending-reviews", s.handleAPIMigrationPendingReviews)
+	s.mux.HandleFunc("POST /api/migration/{id}/submit-review", s.handleAPIMigrationSubmitReview)
+	s.mux.HandleFunc("POST /api/migration/{id}/approve", s.handleAPIMigrationApprove)
+	s.mux.HandleFunc("POST /api/migration/{id}/reject", s.handleAPIMigrationReject)
 
 	// Admin
 	s.mux.HandleFunc("GET /api/admin/overview", s.handleAPIAdminOverview)
@@ -40,6 +44,7 @@ func (s *Server) registerAPIRoutes() {
 	s.mux.HandleFunc("DELETE /api/admin/groups/{id}", s.handleAPIAdminDeleteGroup)
 	s.mux.HandleFunc("POST /api/admin/groups/{id}/members", s.handleAPIAdminAddMember)
 	s.mux.HandleFunc("DELETE /api/admin/groups/{id}/members/{userID}", s.handleAPIAdminRemoveMember)
+	s.mux.HandleFunc("POST /api/admin/groups/{id}/leader", s.handleAPIAdminSetGroupLeader)
 
 	s.mux.HandleFunc("POST /api/admin/grants", s.handleAPIAdminSetGrant)
 
