@@ -19,6 +19,10 @@ func TestAuthorizationMatrix_Integration(t *testing.T) {
 	ctx := context.Background()
 
 	target := accesstest.InsertTarget(t, env.db, "demo")
+	pool := env.connectTarget(t, target)
+	if _, err := pool.ExecContext(ctx, "CREATE TABLE customers (id int);"); err != nil {
+		t.Fatal(err)
+	}
 	viewers, err := env.groups.Create(ctx, "Viewers", "")
 	if err != nil {
 		t.Fatal(err)

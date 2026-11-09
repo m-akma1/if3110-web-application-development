@@ -85,10 +85,14 @@ func (s *Server) validateRequestSession(w http.ResponseWriter, r *http.Request) 
 	return res.User, true
 }
 
-// requireSession identifies the user or sends them to /login (HX-Redirect for HTMX requests).
+// requireSession identifies the user or sends them to /login (HX-Redirect for HTMX requests, 401 for /api/ requests).
 func (s *Server) requireSession(w http.ResponseWriter, r *http.Request) (*authn.User, *domain.AuthLayoutUser, bool) {
 	user, ok := s.validateRequestSession(w, r)
 	if !ok {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			writeJSONError(w, http.StatusUnauthorized, "Sesi Anda telah berakhir atau belum masuk. Silakan login kembali.")
+			return nil, nil, false
+		}
 		if isHTMX(r) {
 			w.Header().Set("HX-Redirect", "/login")
 			w.WriteHeader(http.StatusUnauthorized)
