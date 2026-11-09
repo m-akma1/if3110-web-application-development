@@ -36,13 +36,27 @@ func (s *Server) handleAPIMigrationOverview(w http.ResponseWriter, r *http.Reque
 	}
 
 	dbName := databaseName(layout, dbID)
+	historyViews := toMigrationViews(ov.History)
+	if r.URL.Query().Get("hide_rollback") == "true" {
+		filtered := make([]domain.MigrationView, 0, len(historyViews))
+		for _, h := range historyViews {
+			if strings.EqualFold(h.ExecutionType, "ROLLBACK") ||
+				strings.EqualFold(h.Status, "ROLLED_BACK") ||
+				strings.HasPrefix(strings.ToLower(h.Name), "rollback:") {
+				continue
+			}
+			filtered = append(filtered, h)
+		}
+		historyViews = filtered
+	}
+
 	page := domain.MigrationPageView{
 		DatabaseID:   dbID,
 		DatabaseName: dbName,
 		AccessLevel:  string(ov.Level),
 		CanEdit:      ov.CanEdit,
 		Drafts:       toMigrationViews(ov.Drafts),
-		History:      toMigrationViews(ov.History),
+		History:      historyViews,
 	}
 	if draftID := r.URL.Query().Get("draft"); draftID != "" {
 		for i := range page.Drafts {
@@ -76,9 +90,13 @@ func (s *Server) handleAPIMigrationDetail(w http.ResponseWriter, r *http.Request
 }
 
 type apiMigrationDraftRequest struct {
-	DatabaseID string `json:"db_id"`
-	Name       string `json:"name"`
-	SQLScript  string `json:"sql_script"`
+	DatabaseID         string `json:"db_id"`
+	Name               string `json:"name"`
+	SQLScript          string `json:"sql_script"`
+	SQLUp              string `json:"sql_up"`
+	SQLDown            string `json:"sql_down"`
+	IsIrreversible     bool   `json:"is_irreversible"`
+	IrreversibleReason string `json:"irreversible_reason"`
 }
 
 func (s *Server) handleAPIMigrationCreateDraft(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +111,10 @@ func (s *Server) handleAPIMigrationCreateDraft(w http.ResponseWriter, r *http.Re
 		req.DatabaseID = r.FormValue("db_id")
 		req.Name = r.FormValue("name")
 		req.SQLScript = r.FormValue("sql_script")
+		req.SQLUp = r.FormValue("sql_up")
+		req.SQLDown = r.FormValue("sql_down")
+		req.IsIrreversible = r.FormValue("is_irreversible") == "true"
+		req.IrreversibleReason = r.FormValue("irreversible_reason")
 	}
 
 	dbID := req.DatabaseID
@@ -100,7 +122,20 @@ func (s *Server) handleAPIMigrationCreateDraft(w http.ResponseWriter, r *http.Re
 		dbID = resolveDBID(r, layout)
 	}
 
-	m, err := s.migrations.CreateDraft(r.Context(), user.ID, dbID, req.Name, req.SQLScript)
+	sqlScript := req.SQLScript
+	if req.SQLUp != "" {
+		sqlScript = req.SQLUp
+	}
+	m, err := s.migrations.CreateDraftFull(r.Context(), migration.NewDraft{
+		DatabaseID:         dbID,
+		Name:               req.Name,
+		SQL:                sqlScript,
+		SQLUp:              req.SQLUp,
+		SQLDown:            req.SQLDown,
+		IsIrreversible:     req.IsIrreversible,
+		IrreversibleReason: req.IrreversibleReason,
+		CreatedBy:          user.ID,
+	})
 	if err != nil {
 		status, msg := migrationErrorResponse(err)
 		writeJSON(w, status, map[string]any{"error": msg})
@@ -120,9 +155,24 @@ func (s *Server) handleAPIMigrationSaveDraft(w http.ResponseWriter, r *http.Requ
 	} else {
 		req.Name = r.FormValue("name")
 		req.SQLScript = r.FormValue("sql_script")
+		req.SQLUp = r.FormValue("sql_up")
+		req.SQLDown = r.FormValue("sql_down")
+		req.IsIrreversible = r.FormValue("is_irreversible") == "true"
+		req.IrreversibleReason = r.FormValue("irreversible_reason")
 	}
 
-	m, err := s.migrations.SaveDraft(r.Context(), user.ID, r.PathValue("id"), req.Name, req.SQLScript)
+	sqlScript := req.SQLScript
+	if req.SQLUp != "" {
+		sqlScript = req.SQLUp
+	}
+	m, err := s.migrations.SaveDraftFull(r.Context(), user.ID, r.PathValue("id"), migration.UpdateDraftInput{
+		Name:               req.Name,
+		SQL:                sqlScript,
+		SQLUp:              req.SQLUp,
+		SQLDown:            req.SQLDown,
+		IsIrreversible:     req.IsIrreversible,
+		IrreversibleReason: req.IrreversibleReason,
+	})
 	if err != nil {
 		status, msg := migrationErrorResponse(err)
 		writeJSON(w, status, map[string]any{"error": msg})
@@ -191,13 +241,28 @@ func (s *Server) handleAPIMigrationExecute(w http.ResponseWriter, r *http.Reques
 	} else {
 		req.Name = r.FormValue("name")
 		req.SQLScript = r.FormValue("sql_script")
+		req.SQLUp = r.FormValue("sql_up")
+		req.SQLDown = r.FormValue("sql_down")
+		req.IsIrreversible = r.FormValue("is_irreversible") == "true"
+		req.IrreversibleReason = r.FormValue("irreversible_reason")
 	}
 
 	// Only update draft if it is currently in an editable draft state (DRAFT or REJECTED).
 	// Once approved, the approved script must be executed without modification.
-	if req.SQLScript != "" {
+	if req.SQLScript != "" || req.SQLUp != "" {
 		if cur, _, err := s.migrations.Get(r.Context(), user.ID, r.PathValue("id")); err == nil && cur.IsDraft() {
-			_, _ = s.migrations.SaveDraft(r.Context(), user.ID, r.PathValue("id"), req.Name, req.SQLScript)
+			sqlScript := req.SQLScript
+			if req.SQLUp != "" {
+				sqlScript = req.SQLUp
+			}
+			_, _ = s.migrations.SaveDraftFull(r.Context(), user.ID, r.PathValue("id"), migration.UpdateDraftInput{
+				Name:               req.Name,
+				SQL:                sqlScript,
+				SQLUp:              req.SQLUp,
+				SQLDown:            req.SQLDown,
+				IsIrreversible:     req.IsIrreversible,
+				IrreversibleReason: req.IrreversibleReason,
+			})
 		}
 	}
 
@@ -210,6 +275,42 @@ func (s *Server) handleAPIMigrationExecute(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{
 		"migration": toMigrationView(m),
 		"message":   "Migration berhasil dieksekusi.",
+	})
+}
+
+func (s *Server) handleAPIMigrationRollback(w http.ResponseWriter, r *http.Request) {
+	user, _, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	m, res, err := s.migrations.Rollback(r.Context(), user.ID, r.PathValue("id"))
+	if err != nil {
+		status, msg := migrationErrorResponse(err)
+		writeJSON(w, status, map[string]any{"error": msg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"migration": toMigrationView(m),
+		"message":   "Rollback berhasil dieksekusi.",
+		"result":    toDryRunView(res),
+	})
+}
+
+func (s *Server) handleAPIMigrationForward(w http.ResponseWriter, r *http.Request) {
+	user, _, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	m, res, err := s.migrations.Forward(r.Context(), user.ID, r.PathValue("id"))
+	if err != nil {
+		status, msg := migrationErrorResponse(err)
+		writeJSON(w, status, map[string]any{"error": msg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"migration": toMigrationView(m),
+		"message":   "Forward berhasil dieksekusi.",
+		"result":    toDryRunView(res),
 	})
 }
 
@@ -363,25 +464,35 @@ func toMigrationView(m *migration.Migration) domain.MigrationView {
 			RejectionReason: a.RejectionReason,
 		})
 	}
+	sqlUp := m.SQLUp
+	if sqlUp == "" && m.SQL != "" {
+		sqlUp = m.SQL
+	}
 	return domain.MigrationView{
-		ID:              m.ID,
-		DatabaseID:      m.DatabaseID,
-		DatabaseName:    m.DatabaseName,
-		Version:         m.Version,
-		Name:            m.Name,
-		SQL:             m.SQL,
-		Status:          string(m.Status),
-		ReviewRequired:  m.ReviewRequired,
-		CanApprove:      m.CanApprove,
-		RejectionReason: m.RejectionReason,
-		Approvals:       approvals,
-		CreatedByName:   orDash(m.CreatedByName),
-		CreatedAt:       m.CreatedAt,
-		UpdatedAt:       m.UpdatedAt,
-		ExecutedByName:  orDash(m.ExecutedByName),
-		ExecutedAt:      m.ExecutedAt,
-		DurationMs:      m.DurationMs,
-		Error:           m.Error,
+		ID:                 m.ID,
+		DatabaseID:         m.DatabaseID,
+		DatabaseName:       m.DatabaseName,
+		Version:            m.Version,
+		Name:               m.Name,
+		SQL:                m.SQL,
+		SQLUp:              sqlUp,
+		SQLDown:            m.SQLDown,
+		IsIrreversible:     m.IsIrreversible,
+		IrreversibleReason: m.IrreversibleReason,
+		ExecutionType:      m.ExecutionType,
+		RollbackTargetID:   m.RollbackTargetID,
+		Status:             string(m.Status),
+		ReviewRequired:     m.ReviewRequired,
+		CanApprove:         m.CanApprove,
+		RejectionReason:    m.RejectionReason,
+		Approvals:          approvals,
+		CreatedByName:      orDash(m.CreatedByName),
+		CreatedAt:          m.CreatedAt,
+		UpdatedAt:          m.UpdatedAt,
+		ExecutedByName:     orDash(m.ExecutedByName),
+		ExecutedAt:         m.ExecutedAt,
+		DurationMs:         m.DurationMs,
+		Error:              m.Error,
 	}
 }
 

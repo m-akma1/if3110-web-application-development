@@ -73,6 +73,12 @@ type Migration struct {
 	Version      int // 0 unless Status is SUCCESS
 	Name         string
 	SQL          string
+	SQLUp        string
+	SQLDown      string
+	IsIrreversible bool
+	IrreversibleReason string
+	ExecutionType string
+	RollbackTargetID string
 	Status       Status
 
 	ReviewRequired  bool

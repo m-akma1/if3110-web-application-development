@@ -27,7 +27,13 @@ type MigrationView struct {
 	Version         int                 `json:"version"` // 0 unless Status is SUCCESS
 	Name            string              `json:"name"`
 	SQL             string              `json:"sql"`
-	Status          string              `json:"status"` // DRAFT, PENDING_REVIEW, APPROVED, REJECTED, SUCCESS, FAILED
+	SQLUp           string              `json:"sql_up"`
+	SQLDown         string              `json:"sql_down"`
+	IsIrreversible  bool                `json:"is_irreversible"`
+	IrreversibleReason string           `json:"irreversible_reason"`
+	ExecutionType   string              `json:"execution_type"`
+	RollbackTargetID string             `json:"rollback_target_id,omitempty"`
+	Status          string              `json:"status"` // DRAFT, PENDING_REVIEW, APPROVED, REJECTED, SUCCESS, FAILED, ROLLED_BACK
 	ReviewRequired  bool                `json:"review_required,omitempty"`
 	CanApprove      bool                `json:"can_approve,omitempty"`
 	RejectionReason string              `json:"rejection_reason,omitempty"`

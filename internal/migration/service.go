@@ -81,12 +81,28 @@ func (s *Service) CreateDraft(ctx context.Context, userID, dbID, name, script st
 	return s.repo.CreateDraft(ctx, NewDraft{DatabaseID: dbID, Name: name, SQL: script, CreatedBy: userID})
 }
 
+// CreateDraftFull saves a new draft with dual scripts (up/down) and irreversible options.
+func (s *Service) CreateDraftFull(ctx context.Context, in NewDraft) (*Migration, error) {
+	if _, err := s.access.Authorize(ctx, in.CreatedBy, in.DatabaseID, rbac.ActionCreateMigration); err != nil {
+		return nil, err
+	}
+	return s.repo.CreateDraft(ctx, in)
+}
+
 // SaveDraft changes a draft's name and script. Executed migrations return ErrNotDraft.
 func (s *Service) SaveDraft(ctx context.Context, userID, id, name, script string) (*Migration, error) {
 	if _, _, err := s.load(ctx, userID, id, rbac.ActionCreateMigration); err != nil {
 		return nil, err
 	}
 	return s.repo.UpdateDraft(ctx, id, name, script)
+}
+
+// SaveDraftFull changes a draft's name, dual scripts (up/down), and irreversible options.
+func (s *Service) SaveDraftFull(ctx context.Context, userID, id string, in UpdateDraftInput) (*Migration, error) {
+	if _, _, err := s.load(ctx, userID, id, rbac.ActionCreateMigration); err != nil {
+		return nil, err
+	}
+	return s.repo.UpdateDraftFull(ctx, id, in)
 }
 
 // DeleteDraft removes a draft and returns it as it was.
@@ -139,6 +155,24 @@ func (s *Service) Execute(ctx context.Context, userID, id string) (*Migration, *
 		}
 	}
 	return s.engine.Execute(ctx, id, userID)
+}
+
+// Rollback runs the SQL Down script of an executed migration and records the rollback.
+func (s *Service) Rollback(ctx context.Context, userID, id string) (*Migration, *RunResult, error) {
+	_, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.engine.ExecuteRollback(ctx, id, userID)
+}
+
+// Forward re-applies a rolled-back migration by running its SQL Up script.
+func (s *Service) Forward(ctx context.Context, userID, id string) (*Migration, *RunResult, error) {
+	_, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.engine.ExecuteForward(ctx, id, userID)
 }
 
 // SubmitReview submits a draft or rejected migration for review by group leaders.

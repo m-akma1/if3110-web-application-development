@@ -6,7 +6,10 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+
+	"dbplatform/internal/ids"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -161,6 +164,213 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 		}
 		return nil, res, fmt.Errorf("gagal menyimpan riwayat migration: %w", err)
 	}
+	m, err = getMigration(runCtx, lockConn, migrationID)
+	return m, res, err
+}
+
+// recordRollback stores the rollback execution row in platform DB and sets the target migration status to ROLLED_BACK.
+func recordRollback(ctx context.Context, q querier, orig *Migration, executorID string, executedAt time.Time, duration time.Duration, runErr string) (*Migration, error) {
+	var executedBy any
+	if ids.IsValid(executorID) {
+		executedBy = executorID
+	}
+	rollbackID := ids.New()
+	rollbackName := "Rollback: " + orig.Name
+	if len(rollbackName) > MaxNameLength {
+		rollbackName = rollbackName[:MaxNameLength]
+	}
+
+	status := StatusSuccess
+	if runErr != "" {
+		status = StatusFailed
+	}
+
+	_, err := q.ExecContext(ctx, `
+		INSERT INTO migrations (
+			id, database_id, name, sql_script, sql_up, sql_down,
+			is_irreversible, irreversible_reason, execution_type, rollback_target_id,
+			status, created_by, executed_by, executed_at, duration_ms, error_message, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6,
+			false, '', 'ROLLBACK', $7,
+			$8, $9, $9, $10, $11, $12, NOW()
+		)`,
+		rollbackID, orig.DatabaseID, rollbackName, orig.SQLDown, orig.SQLUp, orig.SQLDown,
+		orig.ID, string(status), executedBy, executedAt, duration.Milliseconds(), runErr)
+	if err != nil {
+		return nil, err
+	}
+
+	if runErr == "" {
+		_, err = q.ExecContext(ctx, `
+			UPDATE migrations
+			SET status = 'ROLLED_BACK', updated_at = NOW()
+			WHERE id = $1 AND status = 'SUCCESS'`, orig.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return getMigration(ctx, q, rollbackID)
+}
+
+// ExecuteRollback runs the SQL Down script of an executed migration and records the outcome.
+func (e *Engine) ExecuteRollback(ctx context.Context, migrationID, executorID string) (*Migration, *RunResult, error) {
+	m, err := getMigration(ctx, e.platform, migrationID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if m.Status != StatusSuccess {
+		return nil, nil, errors.New("hanya migration dengan status SUCCESS yang dapat di-rollback")
+	}
+	if m.ExecutionType == "ROLLBACK" {
+		return nil, nil, errors.New("tidak dapat melakukan rollback pada migrasi tipe rollback")
+	}
+	if m.IsIrreversible {
+		reason := m.IrreversibleReason
+		if reason == "" {
+			reason = "tidak ada script rollback"
+		}
+		return nil, nil, fmt.Errorf("migration ini ditandai sebagai irreversible: %s", reason)
+	}
+	downScript := strings.TrimSpace(m.SQLDown)
+	if downScript == "" {
+		return nil, nil, errors.New("script rollback (SQL Down) tidak boleh kosong")
+	}
+
+	pool, ok := e.pools.GetPool(m.DatabaseID)
+	if !ok {
+		return nil, nil, ErrTargetUnavailable
+	}
+
+	lockConn, err := e.platform.Conn(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer lockConn.Close()
+	if err := e.lock(ctx, lockConn, m.DatabaseID); err != nil {
+		return nil, nil, err
+	}
+	defer e.unlock(lockConn, m.DatabaseID)
+
+	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.runTimeout())
+	defer cancel()
+
+	m, err = getMigration(runCtx, lockConn, migrationID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if m.Status != StatusSuccess {
+		return nil, nil, errors.New("hanya migration dengan status SUCCESS yang dapat di-rollback")
+	}
+
+	stmts, err := CheckScript(downScript)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	executedAt := e.now()
+	res, err := e.run(runCtx, pool, downScript, stmts)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var errMsg string
+	if res.Err != nil {
+		errMsg = res.Err.String()
+	}
+
+	rollbackRow, err := recordRollback(runCtx, lockConn, m, executorID, executedAt, res.Duration, errMsg)
+	if err != nil {
+		if res.OK {
+			return nil, res, fmt.Errorf("rollback sudah di-COMMIT pada database target, tetapi riwayat gagal disimpan: %w", err)
+		}
+		return nil, res, fmt.Errorf("gagal menyimpan riwayat rollback: %w", err)
+	}
+
+	origUpdated, err := getMigration(runCtx, lockConn, migrationID)
+	if err != nil {
+		return rollbackRow, res, nil
+	}
+	return origUpdated, res, nil
+}
+
+// ExecuteForward re-runs the SQL Up script of a ROLLED_BACK migration and restores its status to SUCCESS.
+func (e *Engine) ExecuteForward(ctx context.Context, migrationID, executorID string) (*Migration, *RunResult, error) {
+	m, err := getMigration(ctx, e.platform, migrationID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if m.Status != StatusRolledBack {
+		return nil, nil, errors.New("hanya migration dengan status ROLLED_BACK yang dapat di-forward")
+	}
+	upScript := strings.TrimSpace(m.SQLUp)
+	if upScript == "" {
+		upScript = strings.TrimSpace(m.SQL)
+	}
+	if upScript == "" {
+		return nil, nil, errors.New("script forward (SQL Up) tidak boleh kosong")
+	}
+
+	pool, ok := e.pools.GetPool(m.DatabaseID)
+	if !ok {
+		return nil, nil, ErrTargetUnavailable
+	}
+
+	lockConn, err := e.platform.Conn(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer lockConn.Close()
+	if err := e.lock(ctx, lockConn, m.DatabaseID); err != nil {
+		return nil, nil, err
+	}
+	defer e.unlock(lockConn, m.DatabaseID)
+
+	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.runTimeout())
+	defer cancel()
+
+	m, err = getMigration(runCtx, lockConn, migrationID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if m.Status != StatusRolledBack {
+		return nil, nil, errors.New("hanya migration dengan status ROLLED_BACK yang dapat di-forward")
+	}
+
+	stmts, err := CheckScript(upScript)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	executedAt := e.now()
+	res, err := e.run(runCtx, pool, upScript, stmts)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !res.OK {
+		return nil, res, fmt.Errorf("forward gagal dijalankan pada target: %s", res.Err.String())
+	}
+
+	var executedBy any
+	if ids.IsValid(executorID) {
+		executedBy = executorID
+	}
+
+	_, err = lockConn.ExecContext(runCtx, `
+		UPDATE migrations SET
+			status = 'SUCCESS',
+			executed_by = $2,
+			executed_at = $3,
+			duration_ms = $4,
+			error_message = '',
+			updated_at = NOW()
+		WHERE id = $1 AND status = 'ROLLED_BACK'`,
+		m.ID, executedBy, executedAt, res.Duration.Milliseconds())
+	if err != nil {
+		return nil, res, fmt.Errorf("forward berhasil di-COMMIT tetapi riwayat gagal diperbarui: %w", err)
+	}
+
 	m, err = getMigration(runCtx, lockConn, migrationID)
 	return m, res, err
 }

@@ -28,15 +28,33 @@ func NewRepository(db *sql.DB) *Repository {
 
 // NewDraft is the input for CreateDraft.
 type NewDraft struct {
-	DatabaseID string
-	Name       string
-	SQL        string
-	CreatedBy  string // user id
+	DatabaseID         string
+	Name               string
+	SQL                string
+	SQLUp              string
+	SQLDown            string
+	IsIrreversible     bool
+	IrreversibleReason string
+	CreatedBy          string // user id
+}
+
+// UpdateDraftInput is the input for UpdateDraftFull.
+type UpdateDraftInput struct {
+	Name               string
+	SQL                string
+	SQLUp              string
+	SQLDown            string
+	IsIrreversible     bool
+	IrreversibleReason string
 }
 
 // CreateDraft inserts a DRAFT migration. Name and script are validated with NormalizeDraft.
 func (r *Repository) CreateDraft(ctx context.Context, in NewDraft) (*Migration, error) {
-	name, script, err := NormalizeDraft(in.Name, in.SQL)
+	scriptToValidate := in.SQL
+	if in.SQLUp != "" {
+		scriptToValidate = in.SQLUp
+	}
+	name, script, err := NormalizeDraft(in.Name, scriptToValidate)
 	if err != nil {
 		return nil, err
 	}
@@ -47,11 +65,15 @@ func (r *Repository) CreateDraft(ctx context.Context, in NewDraft) (*Migration, 
 	if ids.IsValid(in.CreatedBy) {
 		createdBy = in.CreatedBy
 	}
+	sqlUp := in.SQLUp
+	if sqlUp == "" {
+		sqlUp = script
+	}
 	id := ids.New()
 	if _, err := r.db.ExecContext(ctx, `
-		INSERT INTO migrations (id, database_id, name, sql_script, status, created_by)
-		VALUES ($1, $2, $3, $4, 'DRAFT', $5)`,
-		id, in.DatabaseID, name, script, createdBy); err != nil {
+		INSERT INTO migrations (id, database_id, name, sql_script, sql_up, sql_down, is_irreversible, irreversible_reason, execution_type, status, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'FORWARD', 'DRAFT', $9)`,
+		id, in.DatabaseID, name, script, sqlUp, in.SQLDown, in.IsIrreversible, in.IrreversibleReason, createdBy); err != nil {
 		return nil, err
 	}
 	return r.Get(ctx, id)
@@ -59,16 +81,33 @@ func (r *Repository) CreateDraft(ctx context.Context, in NewDraft) (*Migration, 
 
 // UpdateDraft changes the name and script of a DRAFT or REJECTED migration. Executed migrations return ErrNotDraft.
 func (r *Repository) UpdateDraft(ctx context.Context, id, name, script string) (*Migration, error) {
-	name, script, err := NormalizeDraft(name, script)
+	return r.UpdateDraftFull(ctx, id, UpdateDraftInput{Name: name, SQL: script})
+}
+
+// UpdateDraftFull changes the name, scripts (up/down), and irreversible flags of a DRAFT or REJECTED migration.
+func (r *Repository) UpdateDraftFull(ctx context.Context, id string, in UpdateDraftInput) (*Migration, error) {
+	scriptToValidate := in.SQL
+	if in.SQLUp != "" {
+		scriptToValidate = in.SQLUp
+	}
+	name, script, err := NormalizeDraft(in.Name, scriptToValidate)
 	if err != nil {
 		return nil, err
 	}
 	if !ids.IsValid(id) {
 		return nil, ErrNotFound
 	}
+	sqlUp := in.SQLUp
+	if sqlUp == "" {
+		sqlUp = script
+	}
 	res, err := r.db.ExecContext(ctx, `
-		UPDATE migrations SET name = $2, sql_script = $3, status = 'DRAFT', rejection_reason = '', updated_at = NOW()
-		WHERE id = $1 AND status IN ('DRAFT', 'REJECTED')`, id, name, script)
+		UPDATE migrations SET
+			name = $2, sql_script = $3, sql_up = $4, sql_down = $5,
+			is_irreversible = $6, irreversible_reason = $7,
+			status = 'DRAFT', rejection_reason = '', updated_at = NOW()
+		WHERE id = $1 AND status IN ('DRAFT', 'REJECTED')`,
+		id, name, script, sqlUp, in.SQLDown, in.IsIrreversible, in.IrreversibleReason)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +178,10 @@ const selectMigrations = `
 	SELECT m.id, m.database_id, COALESCE(t.name, ''), COALESCE(m.version, 0), m.name, m.sql_script, m.status,
 	       COALESCE(m.created_by::text, ''), COALESCE(cu.username, ''), m.created_at, m.updated_at,
 	       COALESCE(m.executed_by::text, ''), COALESCE(eu.username, ''), m.executed_at,
-	       COALESCE(m.duration_ms, 0), m.error_message, COALESCE(m.rejection_reason, '')
+	       COALESCE(m.duration_ms, 0), m.error_message, COALESCE(m.rejection_reason, ''),
+	       COALESCE(m.sql_up, ''), COALESCE(m.sql_down, ''), COALESCE(m.is_irreversible, false),
+	       COALESCE(m.irreversible_reason, ''), COALESCE(m.execution_type, 'FORWARD'),
+	       COALESCE(m.rollback_target_id::text, '')
 	FROM migrations m
 	LEFT JOIN target_databases t ON t.id = m.database_id
 	LEFT JOIN users cu ON cu.id = m.created_by
@@ -153,14 +195,23 @@ func scanMigration(row rowScanner) (*Migration, error) {
 	var m Migration
 	var status string
 	var executedAt sql.NullTime
+	var rollbackTargetID sql.NullString
 	if err := row.Scan(&m.ID, &m.DatabaseID, &m.DatabaseName, &m.Version, &m.Name, &m.SQL, &status,
 		&m.CreatedBy, &m.CreatedByName, &m.CreatedAt, &m.UpdatedAt,
-		&m.ExecutedBy, &m.ExecutedByName, &executedAt, &m.DurationMs, &m.Error, &m.RejectionReason); err != nil {
+		&m.ExecutedBy, &m.ExecutedByName, &executedAt, &m.DurationMs, &m.Error, &m.RejectionReason,
+		&m.SQLUp, &m.SQLDown, &m.IsIrreversible, &m.IrreversibleReason, &m.ExecutionType,
+		&rollbackTargetID); err != nil {
 		return nil, err
 	}
 	m.Status = Status(status)
 	if executedAt.Valid {
 		m.ExecutedAt = executedAt.Time
+	}
+	if rollbackTargetID.Valid {
+		m.RollbackTargetID = rollbackTargetID.String
+	}
+	if m.SQLUp == "" && m.SQL != "" {
+		m.SQLUp = m.SQL
 	}
 	return &m, nil
 }
@@ -202,6 +253,7 @@ func recordExecution(ctx context.Context, q querier, rec executionRecord) error 
 		UPDATE migrations m SET
 			status        = $2::varchar,
 			sql_script    = $7,
+			sql_up        = CASE WHEN m.sql_up = '' THEN $7 ELSE m.sql_up END,
 			version       = CASE WHEN $2::varchar = 'SUCCESS' THEN (
 			                    SELECT COALESCE(MAX(o.version), 0) + 1 FROM migrations o
 			                    WHERE o.database_id = m.database_id) END,

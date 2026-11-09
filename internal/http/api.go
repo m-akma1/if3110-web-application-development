@@ -26,6 +26,8 @@ func (s *Server) registerAPIRoutes() {
 	s.mux.HandleFunc("DELETE /api/migration/{id}", s.handleAPIMigrationDeleteDraft)
 	s.mux.HandleFunc("POST /api/migration/{id}/dry-run", s.handleAPIMigrationDryRun)
 	s.mux.HandleFunc("POST /api/migration/{id}/execute", s.handleAPIMigrationExecute)
+	s.mux.HandleFunc("POST /api/migration/{id}/rollback", s.handleAPIMigrationRollback)
+	s.mux.HandleFunc("POST /api/migration/{id}/forward", s.handleAPIMigrationForward)
 	s.mux.HandleFunc("POST /api/migration/{id}/duplicate", s.handleAPIMigrationDuplicate)
 	s.mux.HandleFunc("GET /api/migration/pending-reviews", s.handleAPIMigrationPendingReviews)
 	s.mux.HandleFunc("POST /api/migration/{id}/submit-review", s.handleAPIMigrationSubmitReview)
