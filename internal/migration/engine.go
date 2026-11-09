@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -214,6 +215,18 @@ func recordRollback(ctx context.Context, q querier, orig *Migration, executorID 
 	return getMigration(ctx, q, rollbackID)
 }
 
+var reCreateTable = regexp.MustCompile(`(?i)\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_\.\"]+)`)
+
+func extractCreatedTable(script string) string {
+	matches := reCreateTable.FindStringSubmatch(script)
+	if len(matches) > 1 {
+		tbl := strings.TrimSpace(matches[1])
+		tbl = strings.Trim(tbl, "\"")
+		return tbl
+	}
+	return ""
+}
+
 // ExecuteRollback runs the SQL Down script of an executed migration and records the outcome.
 func (e *Engine) ExecuteRollback(ctx context.Context, migrationID, executorID string) (*Migration, *RunResult, error) {
 	m, err := getMigration(ctx, e.platform, migrationID)
@@ -221,10 +234,10 @@ func (e *Engine) ExecuteRollback(ctx context.Context, migrationID, executorID st
 		return nil, nil, err
 	}
 	if m.Status != StatusSuccess {
-		return nil, nil, errors.New("hanya migration dengan status SUCCESS yang dapat di-rollback")
+		return nil, nil, ErrOnlySuccessCanRollback
 	}
 	if m.ExecutionType == "ROLLBACK" {
-		return nil, nil, errors.New("tidak dapat melakukan rollback pada migrasi tipe rollback")
+		return nil, nil, ErrCannotRollbackType
 	}
 	if m.IsIrreversible {
 		reason := m.IrreversibleReason
@@ -235,7 +248,15 @@ func (e *Engine) ExecuteRollback(ctx context.Context, migrationID, executorID st
 	}
 	downScript := strings.TrimSpace(m.SQLDown)
 	if downScript == "" {
-		return nil, nil, errors.New("script rollback (SQL Down) tidak boleh kosong")
+		table := extractCreatedTable(m.SQLUp)
+		if table == "" {
+			table = extractCreatedTable(m.SQL)
+		}
+		if table != "" {
+			downScript = "DROP TABLE IF EXISTS " + table + ";"
+		} else {
+			return nil, nil, ErrNoRollbackScript
+		}
 	}
 
 	pool, ok := e.pools.GetPool(m.DatabaseID)
@@ -261,7 +282,7 @@ func (e *Engine) ExecuteRollback(ctx context.Context, migrationID, executorID st
 		return nil, nil, err
 	}
 	if m.Status != StatusSuccess {
-		return nil, nil, errors.New("hanya migration dengan status SUCCESS yang dapat di-rollback")
+		return nil, nil, ErrOnlySuccessCanRollback
 	}
 
 	stmts, err := CheckScript(downScript)
@@ -302,7 +323,7 @@ func (e *Engine) ExecuteForward(ctx context.Context, migrationID, executorID str
 		return nil, nil, err
 	}
 	if m.Status != StatusRolledBack {
-		return nil, nil, errors.New("hanya migration dengan status ROLLED_BACK yang dapat di-forward")
+		return nil, nil, ErrOnlyRolledBackCanForward
 	}
 	upScript := strings.TrimSpace(m.SQLUp)
 	if upScript == "" {
@@ -335,7 +356,7 @@ func (e *Engine) ExecuteForward(ctx context.Context, migrationID, executorID str
 		return nil, nil, err
 	}
 	if m.Status != StatusRolledBack {
-		return nil, nil, errors.New("hanya migration dengan status ROLLED_BACK yang dapat di-forward")
+		return nil, nil, ErrOnlyRolledBackCanForward
 	}
 
 	stmts, err := CheckScript(upScript)

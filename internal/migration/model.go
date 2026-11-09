@@ -48,6 +48,10 @@ var (
 	ErrNotPendingReview  = errors.New("migration tidak sedang dalam peninjauan (pending review)")
 	ErrNotLeader         = errors.New("anda bukan Group Leader dari group yang memiliki hak persetujuan")
 	ErrAlreadyReviewed   = errors.New("group anda sudah memberikan review untuk migration ini")
+	ErrNoRollbackScript  = errors.New("migrasi ini tidak memiliki script rollback (SQL Down)")
+	ErrCannotRollbackType = errors.New("tidak dapat melakukan rollback pada migrasi tipe rollback")
+	ErrOnlySuccessCanRollback = errors.New("hanya migration dengan status SUCCESS yang dapat di-rollback")
+	ErrOnlyRolledBackCanForward = errors.New("hanya migration dengan status ROLLED_BACK yang dapat di-forward")
 )
 
 // Approval is one group's review and approval record for a migration.

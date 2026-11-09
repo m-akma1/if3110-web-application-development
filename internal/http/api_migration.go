@@ -285,6 +285,7 @@ func (s *Server) handleAPIMigrationRollback(w http.ResponseWriter, r *http.Reque
 	}
 	m, res, err := s.migrations.Rollback(r.Context(), user.ID, r.PathValue("id"))
 	if err != nil {
+		s.logMigrationError(user, "rollback", err)
 		status, msg := migrationErrorResponse(err)
 		writeJSON(w, status, map[string]any{"error": msg})
 		return
@@ -303,6 +304,7 @@ func (s *Server) handleAPIMigrationForward(w http.ResponseWriter, r *http.Reques
 	}
 	m, res, err := s.migrations.Forward(r.Context(), user.ID, r.PathValue("id"))
 	if err != nil {
+		s.logMigrationError(user, "forward", err)
 		status, msg := migrationErrorResponse(err)
 		writeJSON(w, status, map[string]any{"error": msg})
 		return
@@ -434,9 +436,18 @@ func migrationErrorResponse(err error) (int, string) {
 		errors.Is(err, migration.ErrEmptyScript),
 		errors.Is(err, migration.ErrScriptTooLarge),
 		errors.Is(err, migration.ErrNotDraft),
-		errors.Is(err, migration.ErrTargetBusy):
+		errors.Is(err, migration.ErrTargetBusy),
+		errors.Is(err, migration.ErrNoRollbackScript),
+		errors.Is(err, migration.ErrCannotRollbackType),
+		errors.Is(err, migration.ErrOnlySuccessCanRollback),
+		errors.Is(err, migration.ErrOnlyRolledBackCanForward):
 		return http.StatusUnprocessableEntity, err.Error()
 	default:
+		// If error is descriptive validation or target error, return 422 with message
+		msg := err.Error()
+		if strings.Contains(msg, "irreversible") || strings.Contains(msg, "rollback") || strings.Contains(msg, "forward") {
+			return http.StatusUnprocessableEntity, msg
+		}
 		return http.StatusInternalServerError, "Terjadi kesalahan pada server. Silakan coba lagi."
 	}
 }

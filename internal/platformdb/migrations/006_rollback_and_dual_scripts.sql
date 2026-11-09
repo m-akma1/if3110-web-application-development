@@ -8,9 +8,12 @@ ALTER TABLE migrations ADD COLUMN IF NOT EXISTS irreversible_reason TEXT NOT NUL
 ALTER TABLE migrations ADD COLUMN IF NOT EXISTS execution_type VARCHAR(16) NOT NULL DEFAULT 'FORWARD' CHECK (execution_type IN ('FORWARD', 'ROLLBACK', 'UP'));
 ALTER TABLE migrations ADD COLUMN IF NOT EXISTS rollback_target_id UUID REFERENCES migrations(id) ON DELETE SET NULL;
 
--- Backfill existing rows: sql_up = sql_script
+-- Backfill existing rows: sql_up = sql_script, and infer sql_down for CREATE TABLE
 ALTER TABLE migrations DISABLE TRIGGER migrations_protect_executed;
 UPDATE migrations SET sql_up = sql_script WHERE sql_up = '' AND sql_script <> '';
+UPDATE migrations
+SET sql_down = 'DROP TABLE IF EXISTS ' || substring(sql_up from '(?i)CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_\.]+)') || ';'
+WHERE (sql_down = '' OR sql_down IS NULL) AND sql_up ~* 'CREATE\s+TABLE';
 ALTER TABLE migrations ENABLE TRIGGER migrations_protect_executed;
 
 -- Relax version constraint:

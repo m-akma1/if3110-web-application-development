@@ -129,3 +129,47 @@ func TestIrreversibleMigrationCannotRollback(t *testing.T) {
 		t.Errorf("expected error to mention irreversible, got: %v", err)
 	}
 }
+
+func TestRollbackLegacyMigrationWithoutSQLDown(t *testing.T) {
+	f := newFixture(t, DefaultLimits())
+	ctx := context.Background()
+
+	tableName := "legacy_" + f.dbID[:6]
+	upScript := "CREATE TABLE " + tableName + " (id int);"
+
+	// Simulate a legacy migration executed before dual-scripts existed (SQLDown is empty)
+	draft, err := f.repo.CreateDraft(ctx, NewDraft{
+		DatabaseID: f.dbID,
+		Name:       "legacy_table",
+		SQL:        upScript,
+		SQLUp:      upScript,
+		SQLDown:    "",
+		CreatedBy:  f.userID,
+	})
+	if err != nil {
+		t.Fatalf("CreateDraft failed: %v", err)
+	}
+
+	executed, res, err := f.engine.Execute(ctx, draft.ID, f.userID)
+	if err != nil || !res.OK {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if !f.targetHasTable(t, tableName) {
+		t.Fatalf("table %s should exist on target", tableName)
+	}
+
+	// Rollback should infer DROP TABLE and succeed
+	rolledBack, rbRes, err := f.engine.ExecuteRollback(ctx, executed.ID, f.userID)
+	if err != nil {
+		t.Fatalf("ExecuteRollback failed on legacy migration: %v", err)
+	}
+	if !rbRes.OK {
+		t.Fatalf("Rollback result not ok: %v", rbRes.Err)
+	}
+	if rolledBack.Status != StatusRolledBack {
+		t.Fatalf("expected status ROLLED_BACK, got %s", rolledBack.Status)
+	}
+	if f.targetHasTable(t, tableName) {
+		t.Fatalf("table %s should have been dropped by inferred rollback", tableName)
+	}
+}
