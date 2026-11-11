@@ -59,6 +59,18 @@ func (s *Service) Overview(ctx context.Context, userID, dbID string) (*Overview,
 	if ov.History, err = s.repo.ListByDatabase(ctx, dbID, StatusSuccess, StatusFailed, StatusRolledBack, StatusPartial); err != nil {
 		return nil, err
 	}
+	latestActive, _ := s.repo.GetLatestActive(ctx, dbID)
+	earliestFwd, _ := s.repo.GetEarliestUnforwardedRolledBack(ctx, dbID)
+	for _, h := range ov.History {
+		if latestActive != nil && h.ID == latestActive.ID && !h.IsIrreversible {
+			if _, err := ResolveDownScript(h); err == nil {
+				h.CanRollback = true
+			}
+		}
+		if earliestFwd != nil && h.ID == earliestFwd.ID {
+			h.CanForward = true
+		}
+	}
 	if ov.CanEdit {
 		if ov.Drafts, err = s.repo.ListByDatabase(ctx, dbID, StatusDraft, StatusPendingReview, StatusApproved, StatusRejected); err != nil {
 			return nil, err
@@ -157,20 +169,106 @@ func (s *Service) Execute(ctx context.Context, userID, id string) (*Migration, *
 	return s.engine.Execute(ctx, id, userID)
 }
 
-// Rollback runs the SQL Down script of an executed migration and records the rollback.
+// Rollback initiates a rollback of an executed migration.
+// If groups have access to the database, it creates a PENDING_REVIEW rollback request for Group Leader approval.
+// If no groups have access, it executes the rollback directly.
 func (s *Service) Rollback(ctx context.Context, userID, id string) (*Migration, *RunResult, error) {
-	_, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
+	m, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
 	if err != nil {
 		return nil, nil, err
+	}
+	downScript, err := validateRollbackTarget(ctx, s.repo.db, m)
+	if err != nil {
+		return nil, nil, err
+	}
+	if pending, err := hasPendingActionFor(ctx, s.repo.db, m.ID, "ROLLBACK"); err != nil {
+		return nil, nil, err
+	} else if pending {
+		return nil, nil, ErrPendingRollbackExists
+	}
+
+	var groupIDs []string
+	if s.grants != nil {
+		groupIDs, err = s.grants.GroupsWithAccess(ctx, m.DatabaseID)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if len(groupIDs) > 0 {
+		rbDraft, err := s.repo.CreateDraft(ctx, NewDraft{
+			DatabaseID:       m.DatabaseID,
+			Name:             rollbackName(m.Name),
+			SQL:              downScript,
+			SQLUp:            m.SQLUp,
+			SQLDown:          downScript,
+			ExecutionType:    "ROLLBACK",
+			RollbackTargetID: m.ID,
+			CreatedBy:        userID,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := s.repo.CreateApprovals(ctx, rbDraft.ID, groupIDs); err != nil {
+			return nil, nil, err
+		}
+		rbDraft, err = s.repo.Get(ctx, rbDraft.ID)
+		if err == nil {
+			rbDraft.Approvals, _ = s.repo.ListApprovals(ctx, rbDraft.ID)
+		}
+		return rbDraft, nil, err
 	}
 	return s.engine.ExecuteRollback(ctx, id, userID)
 }
 
-// Forward re-applies a rolled-back migration by running its SQL Up script.
+// Forward initiates re-application of a rolled-back migration.
+// If groups have access to the database, it creates a PENDING_REVIEW forward request for Group Leader approval.
+// If no groups have access, it executes the forward directly.
 func (s *Service) Forward(ctx context.Context, userID, id string) (*Migration, *RunResult, error) {
-	_, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
+	m, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
 	if err != nil {
 		return nil, nil, err
+	}
+	upScript, err := validateForwardSource(ctx, s.repo.db, m)
+	if err != nil {
+		return nil, nil, err
+	}
+	if pending, err := hasPendingActionFor(ctx, s.repo.db, m.ID, "FORWARD"); err != nil {
+		return nil, nil, err
+	} else if pending {
+		return nil, nil, ErrPendingForwardExists
+	}
+
+	var groupIDs []string
+	if s.grants != nil {
+		groupIDs, err = s.grants.GroupsWithAccess(ctx, m.DatabaseID)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if len(groupIDs) > 0 {
+		fwdDraft, err := s.repo.CreateDraft(ctx, NewDraft{
+			DatabaseID:         m.DatabaseID,
+			Name:               forwardName(m.Name),
+			SQL:                upScript,
+			SQLUp:              upScript,
+			SQLDown:            m.SQLDown,
+			IsIrreversible:     m.IsIrreversible,
+			IrreversibleReason: m.IrreversibleReason,
+			ExecutionType:      "FORWARD",
+			SourceMigrationID:  m.ID,
+			CreatedBy:          userID,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := s.repo.CreateApprovals(ctx, fwdDraft.ID, groupIDs); err != nil {
+			return nil, nil, err
+		}
+		fwdDraft, err = s.repo.Get(ctx, fwdDraft.ID)
+		if err == nil {
+			fwdDraft.Approvals, _ = s.repo.ListApprovals(ctx, fwdDraft.ID)
+		}
+		return fwdDraft, nil, err
 	}
 	return s.engine.ExecuteForward(ctx, id, userID)
 }
@@ -261,6 +359,18 @@ func (s *Service) load(ctx context.Context, userID, id string, action rbac.Actio
 	if m.Status == StatusPendingReview {
 		if _, err := s.repo.FindPendingGroupForLeader(ctx, m.ID, userID); err == nil {
 			m.CanApprove = true
+		}
+	}
+	if m.Status == StatusSuccess && m.ExecutionType != "ROLLBACK" && !m.IsIrreversible {
+		if latest, err := s.repo.GetLatestActive(ctx, m.DatabaseID); err == nil && latest.ID == m.ID {
+			if _, err := ResolveDownScript(m); err == nil {
+				m.CanRollback = true
+			}
+		}
+	}
+	if m.Status == StatusRolledBack && m.ExecutionType != "ROLLBACK" {
+		if earliest, err := s.repo.GetEarliestUnforwardedRolledBack(ctx, m.DatabaseID); err == nil && earliest.ID == m.ID {
+			m.CanForward = true
 		}
 	}
 

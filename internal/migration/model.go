@@ -50,8 +50,14 @@ var (
 	ErrAlreadyReviewed   = errors.New("group anda sudah memberikan review untuk migration ini")
 	ErrNoRollbackScript  = errors.New("migrasi ini tidak memiliki script rollback (SQL Down)")
 	ErrCannotRollbackType = errors.New("tidak dapat melakukan rollback pada migrasi tipe rollback")
-	ErrOnlySuccessCanRollback = errors.New("hanya migration dengan status SUCCESS yang dapat di-rollback")
+	ErrOnlySuccessCanRollback   = errors.New("hanya migration dengan status SUCCESS yang dapat di-rollback")
 	ErrOnlyRolledBackCanForward = errors.New("hanya migration dengan status ROLLED_BACK yang dapat di-forward")
+	ErrRollbackNotLatest        = errors.New("rollback hanya dapat dilakukan pada migration aktif terakhir")
+	ErrForwardNotLinear         = errors.New("forward harus mengikuti urutan linear")
+	ErrAlreadyForwarded         = errors.New("migrasi ini sudah di-forward sebelumnya")
+	ErrPendingRollbackExists    = errors.New("sudah terdapat pengajuan rollback yang sedang menunggu review/eksekusi")
+	ErrPendingForwardExists     = errors.New("sudah terdapat pengajuan forward yang sedang menunggu review/eksekusi")
+	ErrImmutableRollbackScript  = errors.New("naskah SQL pada permintaan rollback atau forward bersifat immutable dan tidak dapat diubah")
 )
 
 // Approval is one group's review and approval record for a migration.
@@ -81,9 +87,12 @@ type Migration struct {
 	SQLDown      string
 	IsIrreversible bool
 	IrreversibleReason string
-	ExecutionType string
-	RollbackTargetID string
-	Status       Status
+	ExecutionType      string
+	RollbackTargetID   string
+	SourceMigrationID  string
+	CanRollback        bool
+	CanForward         bool
+	Status             Status
 
 	ReviewRequired  bool
 	CanApprove      bool

@@ -31,9 +31,12 @@ type MigrationView struct {
 	SQLDown         string              `json:"sql_down"`
 	IsIrreversible  bool                `json:"is_irreversible"`
 	IrreversibleReason string           `json:"irreversible_reason"`
-	ExecutionType   string              `json:"execution_type"`
-	RollbackTargetID string             `json:"rollback_target_id,omitempty"`
-	Status          string              `json:"status"` // DRAFT, PENDING_REVIEW, APPROVED, REJECTED, SUCCESS, FAILED, ROLLED_BACK
+	ExecutionType      string              `json:"execution_type"`
+	RollbackTargetID   string              `json:"rollback_target_id,omitempty"`
+	SourceMigrationID  string              `json:"source_migration_id,omitempty"`
+	CanRollback        bool                `json:"can_rollback"`
+	CanForward         bool                `json:"can_forward"`
+	Status             string              `json:"status"` // DRAFT, PENDING_REVIEW, APPROVED, REJECTED, SUCCESS, FAILED, ROLLED_BACK
 	ReviewRequired  bool                `json:"review_required,omitempty"`
 	CanApprove      bool                `json:"can_approve,omitempty"`
 	RejectionReason string              `json:"rejection_reason,omitempty"`

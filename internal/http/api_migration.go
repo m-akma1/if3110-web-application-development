@@ -38,11 +38,18 @@ func (s *Server) handleAPIMigrationOverview(w http.ResponseWriter, r *http.Reque
 	dbName := databaseName(layout, dbID)
 	historyViews := toMigrationViews(ov.History)
 	if r.URL.Query().Get("hide_rollback") == "true" {
+		hiddenIDs := make(map[string]bool)
+		for _, h := range historyViews {
+			if strings.EqualFold(h.ExecutionType, "ROLLBACK") && strings.EqualFold(h.Status, "SUCCESS") {
+				hiddenIDs[h.ID] = true
+				if h.RollbackTargetID != "" {
+					hiddenIDs[h.RollbackTargetID] = true
+				}
+			}
+		}
 		filtered := make([]domain.MigrationView, 0, len(historyViews))
 		for _, h := range historyViews {
-			if strings.EqualFold(h.ExecutionType, "ROLLBACK") ||
-				strings.EqualFold(h.Status, "ROLLED_BACK") ||
-				strings.HasPrefix(strings.ToLower(h.Name), "rollback:") {
+			if hiddenIDs[h.ID] {
 				continue
 			}
 			filtered = append(filtered, h)
@@ -290,10 +297,19 @@ func (s *Server) handleAPIMigrationRollback(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, status, map[string]any{"error": msg})
 		return
 	}
+	if res == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"migration":         toMigrationView(m),
+			"requires_approval": true,
+			"message":           "Permintaan rollback diajukan untuk persetujuan Group Leader.",
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"migration": toMigrationView(m),
-		"message":   "Rollback berhasil dieksekusi.",
-		"result":    toDryRunView(res),
+		"migration":         toMigrationView(m),
+		"requires_approval": false,
+		"message":           "Rollback berhasil dieksekusi.",
+		"result":            toDryRunView(res),
 	})
 }
 
@@ -309,10 +325,19 @@ func (s *Server) handleAPIMigrationForward(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, status, map[string]any{"error": msg})
 		return
 	}
+	if res == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"migration":         toMigrationView(m),
+			"requires_approval": true,
+			"message":           "Permintaan forward diajukan untuk persetujuan Group Leader.",
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"migration": toMigrationView(m),
-		"message":   "Forward berhasil dieksekusi.",
-		"result":    toDryRunView(res),
+		"migration":         toMigrationView(m),
+		"requires_approval": false,
+		"message":           "Forward berhasil dieksekusi.",
+		"result":            toDryRunView(res),
 	})
 }
 
@@ -440,7 +465,13 @@ func migrationErrorResponse(err error) (int, string) {
 		errors.Is(err, migration.ErrNoRollbackScript),
 		errors.Is(err, migration.ErrCannotRollbackType),
 		errors.Is(err, migration.ErrOnlySuccessCanRollback),
-		errors.Is(err, migration.ErrOnlyRolledBackCanForward):
+		errors.Is(err, migration.ErrOnlyRolledBackCanForward),
+		errors.Is(err, migration.ErrRollbackNotLatest),
+		errors.Is(err, migration.ErrForwardNotLinear),
+		errors.Is(err, migration.ErrAlreadyForwarded),
+		errors.Is(err, migration.ErrPendingRollbackExists),
+		errors.Is(err, migration.ErrPendingForwardExists),
+		errors.Is(err, migration.ErrImmutableRollbackScript):
 		return http.StatusUnprocessableEntity, err.Error()
 	default:
 		// If error is descriptive validation or target error, return 422 with message
@@ -492,6 +523,9 @@ func toMigrationView(m *migration.Migration) domain.MigrationView {
 		IrreversibleReason: m.IrreversibleReason,
 		ExecutionType:      m.ExecutionType,
 		RollbackTargetID:   m.RollbackTargetID,
+		SourceMigrationID:  m.SourceMigrationID,
+		CanRollback:        m.CanRollback,
+		CanForward:         m.CanForward,
 		Status:             string(m.Status),
 		ReviewRequired:     m.ReviewRequired,
 		CanApprove:         m.CanApprove,

@@ -87,15 +87,20 @@ export const MigrationDetailPage: React.FC = () => {
       alert(`Migrasi tidak dapat di-rollback karena ditandai sebagai irreversible.\nAlasan: ${migration.irreversible_reason || '-'}`)
       return
     }
-    const ok = window.confirm(`Apakah Anda yakin ingin melakukan ROLLBACK untuk migrasi "${migration.name}"?`)
+    const ok = window.confirm(`Apakah Anda yakin ingin mengajukan/menjalankan ROLLBACK untuk migrasi "${migration.name}"?`)
     if (!ok) return
 
     setActionLoading(true)
     setFeedback(null)
     try {
-      await api.rollbackMigration(migration.id)
-      setFeedback({ success: true, message: `Rollback untuk "${migration.name}" berhasil dijalankan.` })
-      fetchDetail()
+      const res = await api.rollbackMigration(migration.id)
+      if (res.requires_approval && res.migration?.id) {
+        setFeedback({ success: true, message: res.message || `Permintaan rollback untuk "${migration.name}" diajukan untuk review Group Leader.` })
+        navigate(`/migration/${res.migration.id}`)
+      } else {
+        setFeedback({ success: true, message: `Rollback untuk "${migration.name}" berhasil dijalankan.` })
+        fetchDetail()
+      }
     } catch (err: any) {
       setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal menjalankan rollback' })
     } finally {
@@ -105,15 +110,20 @@ export const MigrationDetailPage: React.FC = () => {
 
   const handleForward = async () => {
     if (!migration) return
-    const ok = window.confirm(`Apakah Anda yakin ingin melakukan FORWARD (mengaplikasikan kembali) migrasi "${migration.name}"?`)
+    const ok = window.confirm(`Apakah Anda yakin ingin mengajukan/menjalankan FORWARD (mengaplikasikan kembali) migrasi "${migration.name}"?`)
     if (!ok) return
 
     setActionLoading(true)
     setFeedback(null)
     try {
-      await api.forwardMigration(migration.id)
-      setFeedback({ success: true, message: `Forward untuk "${migration.name}" berhasil dijalankan.` })
-      fetchDetail()
+      const res = await api.forwardMigration(migration.id)
+      if (res.requires_approval && res.migration?.id) {
+        setFeedback({ success: true, message: res.message || `Permintaan forward untuk "${migration.name}" diajukan untuk review Group Leader.` })
+        navigate(`/migration/${res.migration.id}`)
+      } else {
+        setFeedback({ success: true, message: `Forward untuk "${migration.name}" berhasil dijalankan.` })
+        fetchDetail()
+      }
     } catch (err: any) {
       setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal menjalankan forward' })
     } finally {
@@ -328,15 +338,20 @@ export const MigrationDetailPage: React.FC = () => {
                 {migration.status === 'SUCCESS' && !migration.is_irreversible && migration.execution_type !== 'ROLLBACK' && (
                   <button
                     type="button"
-                    disabled={actionLoading}
+                    disabled={actionLoading || migration.can_rollback === false}
                     onClick={handleRollback}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold text-sem-danger hover:bg-sem-danger/15 bg-sem-danger/10 border border-sem-danger/30 transition cursor-pointer disabled:opacity-50"
+                    title={
+                      migration.can_rollback === false
+                        ? 'Rollback hanya dapat dilakukan pada migration aktif terakhir (urutan LIFO)'
+                        : 'Ajukan atau jalankan rollback (SQL Down)'
+                    }
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold text-sem-danger hover:bg-sem-danger/15 bg-sem-danger/10 border border-sem-danger/30 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     Rollback
                   </button>
                 )}
 
-                {isRolledBack && (
+                {migration.status === 'ROLLED_BACK' && migration.execution_type !== 'ROLLBACK' && migration.can_forward && (
                   <button
                     type="button"
                     disabled={actionLoading}

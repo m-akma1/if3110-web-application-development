@@ -108,6 +108,9 @@ export interface MigrationView {
   execution_type?: 'UP' | 'ROLLBACK' | 'FORWARD' | string
   execution_id?: string
   rollback_target_id?: string
+  source_migration_id?: string
+  can_rollback?: boolean
+  can_forward?: boolean
   execution_mode?: 'STANDARD' | 'BATCH' | string
   batch_attribute?: string
   batch_size?: number

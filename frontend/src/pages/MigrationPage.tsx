@@ -81,7 +81,7 @@ export const MigrationPage: React.FC = () => {
     setExecutionMode((d.execution_mode as 'STANDARD' | 'BATCH') || 'STANDARD')
     setBatchAttribute(d.batch_attribute || 'id')
     setBatchSize(d.batch_size || 1000)
-    setSqlTab('up')
+    setSqlTab(d.execution_type === 'ROLLBACK' ? 'down' : 'up')
   }
 
   const fetchOverview = async (dbId: string, currentDraftId?: string, showSpinner = true) => {
@@ -128,9 +128,8 @@ export const MigrationPage: React.FC = () => {
     const interval = setInterval(() => {
       fetchOverview(activeDBID, draftParam, false)
     }, 2500)
-    const isLocked = Boolean(selectedDraft && (selectedDraft.status === 'APPROVED' || selectedDraft.status === 'PENDING_REVIEW'))
 
-  return () => clearInterval(interval)
+    return () => clearInterval(interval)
   }, [history, activeDBID, draftParam])
 
   const handleSelectDraft = (d: MigrationView | null) => {
@@ -307,15 +306,20 @@ export const MigrationPage: React.FC = () => {
       alert(`Migrasi "${m.name}" tidak dapat di-rollback karena ditandai sebagai irreversible.\nAlasan: ${m.irreversible_reason || '-'}`)
       return
     }
-    const ok = window.confirm(`Apakah Anda yakin ingin melakukan ROLLBACK untuk migrasi "${m.name}"?`)
+    const ok = window.confirm(`Apakah Anda yakin ingin mengajukan/menjalankan ROLLBACK untuk migrasi "${m.name}"?`)
     if (!ok) return
 
     setActionLoading(true)
     setFeedback(null)
     try {
-      await api.rollbackMigration(m.id)
-      setFeedback({ success: true, message: `Rollback untuk migrasi "${m.name}" berhasil dijalankan.` })
-      await fetchOverview(activeDBID, draftParam)
+      const res = await api.rollbackMigration(m.id)
+      if (res.requires_approval) {
+        setFeedback({ success: true, message: res.message || `Permintaan rollback untuk "${m.name}" telah diajukan untuk persetujuan Group Leader.` })
+        await fetchOverview(activeDBID, res.migration?.id || draftParam)
+      } else {
+        setFeedback({ success: true, message: `Rollback untuk migrasi "${m.name}" berhasil dijalankan.` })
+        await fetchOverview(activeDBID, draftParam)
+      }
     } catch (err: any) {
       setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal menjalankan rollback' })
     } finally {
@@ -324,15 +328,20 @@ export const MigrationPage: React.FC = () => {
   }
 
   const handleForward = async (m: MigrationView) => {
-    const ok = window.confirm(`Apakah Anda yakin ingin melakukan FORWARD (mengaplikasikan kembali) migrasi "${m.name}"?`)
+    const ok = window.confirm(`Apakah Anda yakin ingin mengajukan/menjalankan FORWARD (mengaplikasikan kembali) migrasi "${m.name}"?`)
     if (!ok) return
 
     setActionLoading(true)
     setFeedback(null)
     try {
-      await api.forwardMigration(m.id)
-      setFeedback({ success: true, message: `Forward untuk migrasi "${m.name}" berhasil dijalankan.` })
-      await fetchOverview(activeDBID, draftParam, false)
+      const res = await api.forwardMigration(m.id)
+      if (res.requires_approval) {
+        setFeedback({ success: true, message: res.message || `Permintaan forward untuk "${m.name}" telah diajukan untuk persetujuan Group Leader.` })
+        await fetchOverview(activeDBID, res.migration?.id || draftParam)
+      } else {
+        setFeedback({ success: true, message: `Forward untuk migrasi "${m.name}" berhasil dijalankan.` })
+        await fetchOverview(activeDBID, draftParam, false)
+      }
     } catch (err: any) {
       setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal menjalankan forward' })
     } finally {
@@ -377,12 +386,20 @@ export const MigrationPage: React.FC = () => {
     }
   }
 
-  // Filter history
+  // Filter history based on execution ID pairing (rollback_target_id)
+  const hiddenRollbackIDs = new Set<string>()
+  history.forEach((h) => {
+    if (h.execution_type?.toUpperCase() === 'ROLLBACK' && h.status?.toUpperCase() === 'SUCCESS') {
+      hiddenRollbackIDs.add(h.id)
+      if (h.rollback_target_id) {
+        hiddenRollbackIDs.add(h.rollback_target_id)
+      }
+    }
+  })
+
   const filteredHistory = history.filter((h) => {
     if (!hideRollback) return true
-    if (h.execution_type?.toUpperCase() === 'ROLLBACK') return false
-    if (h.status?.toUpperCase() === 'ROLLED_BACK') return false
-    if (h.name.toLowerCase().startsWith('rollback:')) return false
+    if (hiddenRollbackIDs.has(h.id)) return false
     return true
   })
 
@@ -390,7 +407,13 @@ export const MigrationPage: React.FC = () => {
     return <NoDatabaseAccess groups={groups} />
   }
 
-  const isLocked = Boolean(selectedDraft && (selectedDraft.status === 'APPROVED' || selectedDraft.status === 'PENDING_REVIEW'))
+  const isLocked = Boolean(
+    selectedDraft &&
+      (selectedDraft.status === 'APPROVED' ||
+        selectedDraft.status === 'PENDING_REVIEW' ||
+        selectedDraft.execution_type === 'ROLLBACK' ||
+        Boolean(selectedDraft.source_migration_id))
+  )
 
   return (
     <div className="space-y-6">
@@ -428,9 +451,7 @@ export const MigrationPage: React.FC = () => {
             ) : (
               drafts.map((d) => {
                 const isSelected = selectedDraft?.id === d.id
-                const isLocked = Boolean(selectedDraft && (selectedDraft.status === 'APPROVED' || selectedDraft.status === 'PENDING_REVIEW'))
-
-  return (
+                return (
                   <button
                     key={d.id}
                     type="button"
@@ -893,10 +914,7 @@ export const MigrationPage: React.FC = () => {
                 </tr>
               ) : (
                 filteredHistory.map((h) => {
-                  const isRolledBack = h.status === 'ROLLED_BACK' || h.execution_type === 'ROLLBACK'
-                  const isLocked = Boolean(selectedDraft && (selectedDraft.status === 'APPROVED' || selectedDraft.status === 'PENDING_REVIEW'))
-
-  return (
+                  return (
                     <tr key={h.id} className="hover:bg-app-active/50 transition">
                       <td className="px-4 py-3 font-mono text-xs">{versionLabel(h.version)}</td>
                       <td className="px-4 py-3 text-xs font-semibold">
@@ -1024,21 +1042,25 @@ export const MigrationPage: React.FC = () => {
                             {h.status === 'SUCCESS' && !h.is_irreversible && h.execution_type !== 'ROLLBACK' && (
                               <button
                                 type="button"
-                                disabled={actionLoading}
+                                disabled={actionLoading || h.can_rollback === false}
                                 onClick={() => handleRollback(h)}
-                                className="px-2.5 py-1 rounded text-[11px] font-semibold text-sem-danger hover:bg-sem-danger/10 border border-sem-danger/30 transition cursor-pointer disabled:opacity-50"
-                                title="Rollback migrasi ini (menjalankan SQL Down)"
+                                className="px-2.5 py-1 rounded text-[11px] font-semibold text-sem-danger hover:bg-sem-danger/10 border border-sem-danger/30 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                                title={
+                                  h.can_rollback === false
+                                    ? 'Rollback hanya dapat dilakukan pada migration aktif terakhir (urutan LIFO)'
+                                    : 'Ajukan atau jalankan rollback (SQL Down)'
+                                }
                               >
                                 Rollback
                               </button>
                             )}
-                            {isRolledBack && (
+                            {h.status === 'ROLLED_BACK' && h.execution_type !== 'ROLLBACK' && h.can_forward && (
                               <button
                                 type="button"
                                 disabled={actionLoading}
                                 onClick={() => handleForward(h)}
                                 className="px-2.5 py-1 rounded text-[11px] font-semibold text-sem-success hover:bg-sem-success/10 border border-sem-success/30 transition cursor-pointer disabled:opacity-50"
-                                title="Forward migrasi ini (menjalankan kembali SQL Up)"
+                                title="Ajukan atau jalankan forward (mengaplikasikan kembali SQL Up)"
                               >
                                 Forward
                               </button>

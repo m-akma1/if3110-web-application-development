@@ -358,3 +358,146 @@ func TestMigrationApproval_LeaderSuccessionDuringReview_Integration(t *testing.T
 		t.Fatalf("Execute failed: %v, res: %+v", err, res)
 	}
 }
+
+func TestRollbackAndForwardRequireGroupApproval_Integration(t *testing.T) {
+	platformDB := testutil.NewPlatformDB(t)
+	targetDB := testutil.NewSchemaDB(t)
+	ctx := context.Background()
+
+	dbID := accesstest.InsertTarget(t, platformDB, "rb-approval-db-"+ids.New()[:6])
+	pools := dbmanager.NewConnectionRegistry()
+	pools.RegisterPool(dbID, targetDB)
+
+	sessionStore := authn.NewPostgresSessionStore(platformDB, authn.DefaultSessionConfig())
+	groupRepo := groups.NewRepository(platformDB)
+	grantStore := rbac.NewPostgresGrantStore(platformDB)
+	authorizer := rbac.NewAuthorizer(grantStore)
+	engine := migration.NewEngine(platformDB, pools, migration.Limits{})
+	repo := migration.NewRepository(platformDB)
+	svc := migration.NewService(repo, engine, authorizer, grantStore)
+
+	alice, _ := sessionStore.RegisterUser(ctx, authn.RegisterInput{Username: "alice_v", Password: "Password123"})
+	bob, _ := sessionStore.RegisterUser(ctx, authn.RegisterInput{Username: "bob_e", Password: "Password123"})
+	charlie, _ := sessionStore.RegisterUser(ctx, authn.RegisterInput{Username: "charlie_dev", Password: "Password123"})
+
+	viewGroup, _ := groupRepo.Create(ctx, "ViewTeam", "View-only stakeholder")
+	editGroup, _ := groupRepo.Create(ctx, "EditTeam", "Dev team")
+
+	// Alice leads ViewTeam (VIEW_ONLY), Bob leads EditTeam (VIEW_EDIT), Charlie is dev member of EditTeam
+	_ = groupRepo.AddMember(ctx, viewGroup.ID, alice.ID)
+	_ = groupRepo.AddMember(ctx, editGroup.ID, bob.ID)
+	_ = groupRepo.AddMember(ctx, editGroup.ID, charlie.ID)
+
+	_, _ = grantStore.SetGroupGrant(ctx, viewGroup.ID, dbID, rbac.AccessViewOnly)
+	_, _ = grantStore.SetGroupGrant(ctx, editGroup.ID, dbID, rbac.AccessViewEdit)
+
+	// 1. Initial migration (E2)
+	draft, err := svc.CreateDraftFull(ctx, migration.NewDraft{
+		DatabaseID: dbID,
+		Name:       "tbl_events",
+		SQL:        "CREATE TABLE events (id int);",
+		SQLUp:      "CREATE TABLE events (id int);",
+		SQLDown:    "DROP TABLE events;",
+		CreatedBy:  charlie.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SubmitReview(ctx, charlie.ID, draft.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Approve(ctx, alice.ID, draft.ID, "ok view"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Approve(ctx, bob.ID, draft.ID, "ok edit"); err != nil {
+		t.Fatal(err)
+	}
+	execM, res, err := svc.Execute(ctx, charlie.ID, draft.ID)
+	if err != nil || !res.OK || execM.Status != migration.StatusSuccess {
+		t.Fatalf("Execute initial migration failed: err=%v, res=%+v", err, res)
+	}
+
+	// 2. Charlie requests Rollback -> must enter PENDING_REVIEW (not execute immediately!)
+	rbDraft, rbRes, err := svc.Rollback(ctx, charlie.ID, execM.ID)
+	if err != nil {
+		t.Fatalf("Rollback request failed: %v", err)
+	}
+	if rbRes != nil {
+		t.Fatalf("expected rbRes to be nil because group approvals are required")
+	}
+	if rbDraft.Status != migration.StatusPendingReview || rbDraft.ExecutionType != "ROLLBACK" || rbDraft.RollbackTargetID != execM.ID {
+		t.Fatalf("unexpected rbDraft state: %+v", rbDraft)
+	}
+
+	// Duplicate rollback request while pending must be rejected
+	if _, _, err := svc.Rollback(ctx, charlie.ID, execM.ID); !errors.Is(err, migration.ErrPendingRollbackExists) {
+		t.Fatalf("duplicate rollback = %v, want ErrPendingRollbackExists", err)
+	}
+
+	// Editing immutable rollback script must fail
+	if _, err := svc.SaveDraftFull(ctx, charlie.ID, rbDraft.ID, migration.UpdateDraftInput{Name: "tamper", SQL: "DROP TABLE something_else;"}); !errors.Is(err, migration.ErrImmutableRollbackScript) {
+		t.Fatalf("editing rollback draft = %v, want ErrImmutableRollbackScript", err)
+	}
+
+	// Executing unapproved rollback must fail
+	if _, _, err := svc.Execute(ctx, charlie.ID, rbDraft.ID); !errors.Is(err, migration.ErrNotApproved) {
+		t.Fatalf("execute unapproved rollback = %v, want ErrNotApproved", err)
+	}
+
+	// Alice (VIEW_ONLY leader) approves rollback -> still PENDING_REVIEW
+	step1, err := svc.Approve(ctx, alice.ID, rbDraft.ID, "alice ok rollback")
+	if err != nil || step1.Status != migration.StatusPendingReview {
+		t.Fatalf("Alice approval = %+v, err=%v", step1, err)
+	}
+
+	// Bob (VIEW_EDIT leader) approves rollback -> becomes APPROVED
+	step2, err := svc.Approve(ctx, bob.ID, rbDraft.ID, "bob ok rollback")
+	if err != nil || step2.Status != migration.StatusApproved {
+		t.Fatalf("Bob approval = %+v, err=%v", step2, err)
+	}
+
+	// Charlie executes approved rollback -> drops table, E2 becomes ROLLED_BACK, E3 becomes SUCCESS
+	rbExec, rbRunRes, err := svc.Execute(ctx, charlie.ID, rbDraft.ID)
+	if err != nil || rbRunRes == nil || !rbRunRes.OK || rbExec.Status != migration.StatusSuccess {
+		t.Fatalf("Execute approved rollback failed: err=%v, res=%+v, m=%+v", err, rbRunRes, rbExec)
+	}
+
+	// Check E2 status
+	e2Updated, _, err := svc.Get(ctx, charlie.ID, execM.ID)
+	if err != nil || e2Updated.Status != migration.StatusRolledBack {
+		t.Fatalf("expected E2 status ROLLED_BACK, got %s (%v)", e2Updated.Status, err)
+	}
+
+	// 3. Charlie requests Forward -> must enter PENDING_REVIEW
+	fwdDraft, fwdRes, err := svc.Forward(ctx, charlie.ID, execM.ID)
+	if err != nil {
+		t.Fatalf("Forward request failed: %v", err)
+	}
+	if fwdRes != nil {
+		t.Fatalf("expected fwdRes nil while pending review")
+	}
+	if fwdDraft.Status != migration.StatusPendingReview || fwdDraft.ExecutionType != "FORWARD" || fwdDraft.SourceMigrationID != execM.ID {
+		t.Fatalf("unexpected fwdDraft: %+v", fwdDraft)
+	}
+
+	if _, err := svc.Approve(ctx, alice.ID, fwdDraft.ID, "alice ok forward"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Approve(ctx, bob.ID, fwdDraft.ID, "bob ok forward"); err != nil {
+		t.Fatal(err)
+	}
+
+	fwdExec, fwdRunRes, err := svc.Execute(ctx, charlie.ID, fwdDraft.ID)
+	if err != nil || !fwdRunRes.OK || fwdExec.Status != migration.StatusSuccess || fwdExec.SourceMigrationID != execM.ID {
+		t.Fatalf("Execute approved forward failed: err=%v, fwd=%+v", err, fwdExec)
+	}
+
+	// Verify append-only: E2 stays ROLLED_BACK, E3 stays ROLLBACK SUCCESS, E4 is FORWARD SUCCESS!
+	ov, err := svc.Overview(ctx, charlie.ID, dbID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ov.History) != 3 {
+		t.Fatalf("expected 3 append-only history rows (E2, E3, E4), got %d", len(ov.History))
+	}
+}

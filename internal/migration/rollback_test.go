@@ -2,6 +2,7 @@ package migration
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -171,5 +172,123 @@ func TestRollbackLegacyMigrationWithoutSQLDown(t *testing.T) {
 	}
 	if f.targetHasTable(t, tableName) {
 		t.Fatalf("table %s should have been dropped by inferred rollback", tableName)
+	}
+}
+
+func TestLIFORollbackAndLinearForwardOrder(t *testing.T) {
+	f := newFixture(t, DefaultLimits())
+	ctx := context.Background()
+
+	execMig := func(name, up, down string) *Migration {
+		d, err := f.repo.CreateDraft(ctx, NewDraft{
+			DatabaseID: f.dbID,
+			Name:       name,
+			SQL:        up,
+			SQLUp:      up,
+			SQLDown:    down,
+			CreatedBy:  f.userID,
+		})
+		if err != nil {
+			t.Fatalf("CreateDraft(%s): %v", name, err)
+		}
+		ex, res, err := f.engine.Execute(ctx, d.ID, f.userID)
+		if err != nil || !res.OK {
+			t.Fatalf("Execute(%s): err=%v, res=%+v", name, err, res)
+		}
+		return ex
+	}
+
+	mA := execMig("A", "CREATE TABLE lifo_a (id int);", "DROP TABLE lifo_a;")
+	mB := execMig("B", "CREATE TABLE lifo_b (id int);", "DROP TABLE lifo_b;")
+	mC := execMig("C", "CREATE TABLE lifo_c (id int);", "DROP TABLE lifo_c;")
+
+	// LIFO: Trying to rollback A or B while C is still active must fail
+	if _, _, err := f.engine.ExecuteRollback(ctx, mA.ID, f.userID); !errors.Is(err, ErrRollbackNotLatest) {
+		t.Fatalf("rollback A while C active = %v, want ErrRollbackNotLatest", err)
+	}
+	if _, _, err := f.engine.ExecuteRollback(ctx, mB.ID, f.userID); !errors.Is(err, ErrRollbackNotLatest) {
+		t.Fatalf("rollback B while C active = %v, want ErrRollbackNotLatest", err)
+	}
+
+	// Rollback C -> succeeds
+	rbC, res, err := f.engine.ExecuteRollback(ctx, mC.ID, f.userID)
+	if err != nil || !res.OK || rbC.Status != StatusRolledBack {
+		t.Fatalf("rollback C = %v, status=%s", err, rbC.Status)
+	}
+
+	// Now B is latest active -> rollback B succeeds
+	rbB, res, err := f.engine.ExecuteRollback(ctx, mB.ID, f.userID)
+	if err != nil || !res.OK || rbB.Status != StatusRolledBack {
+		t.Fatalf("rollback B = %v, status=%s", err, rbB.Status)
+	}
+
+	// Linear Forward: Trying to forward C before B must fail
+	if _, _, err := f.engine.ExecuteForward(ctx, mC.ID, f.userID); !errors.Is(err, ErrForwardNotLinear) {
+		t.Fatalf("forward C before B = %v, want ErrForwardNotLinear", err)
+	}
+
+	// Forward B first -> succeeds (append-only new row E4)
+	fwdB, res, err := f.engine.ExecuteForward(ctx, mB.ID, f.userID)
+	if err != nil || !res.OK || fwdB.Status != StatusSuccess || fwdB.SourceMigrationID != mB.ID {
+		t.Fatalf("forward B failed: err=%v, fwd=%+v", err, fwdB)
+	}
+	if !f.targetHasTable(t, "lifo_b") {
+		t.Fatalf("lifo_b must exist after forward B")
+	}
+
+	// Re-forwarding mB directly must fail (already forwarded)
+	if _, _, err := f.engine.ExecuteForward(ctx, mB.ID, f.userID); !errors.Is(err, ErrAlreadyForwarded) {
+		t.Fatalf("double forward B = %v, want ErrAlreadyForwarded", err)
+	}
+
+	// Now Forward C -> succeeds
+	fwdC, res, err := f.engine.ExecuteForward(ctx, mC.ID, f.userID)
+	if err != nil || !res.OK || fwdC.Status != StatusSuccess || fwdC.SourceMigrationID != mC.ID {
+		t.Fatalf("forward C failed: err=%v, fwd=%+v", err, fwdC)
+	}
+	if !f.targetHasTable(t, "lifo_c") {
+		t.Fatalf("lifo_c must exist after forward C")
+	}
+}
+
+func TestFailedRollbackDoesNotPolluteHistory(t *testing.T) {
+	f := newFixture(t, DefaultLimits())
+	ctx := context.Background()
+
+	d, err := f.repo.CreateDraft(ctx, NewDraft{
+		DatabaseID: f.dbID,
+		Name:       "bad_rollback",
+		SQL:        "CREATE TABLE real_tbl (id int);",
+		SQLUp:      "CREATE TABLE real_tbl (id int);",
+		SQLDown:    "DROP TABLE nonexistent_tbl_999;",
+		CreatedBy:  f.userID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex, res, err := f.engine.Execute(ctx, d.ID, f.userID)
+	if err != nil || !res.OK {
+		t.Fatal(err)
+	}
+
+	// Attempt rollback -> SQL down fails on target
+	_, rbRes, err := f.engine.ExecuteRollback(ctx, ex.ID, f.userID)
+	if err == nil || rbRes == nil || rbRes.OK {
+		t.Fatalf("expected rollback failure, got err=%v, res=%+v", err, rbRes)
+	}
+
+	// Original migration must stay SUCCESS
+	cur, err := f.repo.Get(ctx, ex.ID)
+	if err != nil || cur.Status != StatusSuccess {
+		t.Fatalf("expected original migration to remain SUCCESS after failed rollback, got %s (%v)", cur.Status, err)
+	}
+
+	// History must NOT contain any FAILED rollback entry
+	history, err := f.repo.ListByDatabase(ctx, f.dbID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("expected exactly 1 row in history (no failed rollback recorded), got %d", len(history))
 	}
 }
