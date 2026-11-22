@@ -21,33 +21,33 @@ type MigrationApproval struct {
 
 // MigrationView is one draft or executed migration as the pages show it.
 type MigrationView struct {
-	ID              string              `json:"id"`
-	DatabaseID      string              `json:"database_id"`
-	DatabaseName    string              `json:"database_name"`
-	Version         int                 `json:"version"` // 0 unless Status is SUCCESS
-	Name            string              `json:"name"`
-	SQL             string              `json:"sql"`
-	SQLUp           string              `json:"sql_up"`
-	SQLDown         string              `json:"sql_down"`
-	IsIrreversible  bool                `json:"is_irreversible"`
-	IrreversibleReason string           `json:"irreversible_reason"`
+	ID                 string              `json:"id"`
+	DatabaseID         string              `json:"database_id"`
+	DatabaseName       string              `json:"database_name"`
+	Version            int                 `json:"version"` // 0 unless Status is SUCCESS
+	Name               string              `json:"name"`
+	SQL                string              `json:"sql"`
+	SQLUp              string              `json:"sql_up"`
+	SQLDown            string              `json:"sql_down"`
+	IsIrreversible     bool                `json:"is_irreversible"`
+	IrreversibleReason string              `json:"irreversible_reason"`
 	ExecutionType      string              `json:"execution_type"`
 	RollbackTargetID   string              `json:"rollback_target_id,omitempty"`
 	SourceMigrationID  string              `json:"source_migration_id,omitempty"`
 	CanRollback        bool                `json:"can_rollback"`
 	CanForward         bool                `json:"can_forward"`
 	Status             string              `json:"status"` // DRAFT, PENDING_REVIEW, APPROVED, REJECTED, SUCCESS, FAILED, ROLLED_BACK
-	ReviewRequired  bool                `json:"review_required,omitempty"`
-	CanApprove      bool                `json:"can_approve,omitempty"`
-	RejectionReason string              `json:"rejection_reason,omitempty"`
-	Approvals       []MigrationApproval `json:"approvals,omitempty"`
-	CreatedByName   string              `json:"created_by_name"`
-	CreatedAt       time.Time           `json:"created_at"`
-	UpdatedAt       time.Time           `json:"updated_at"`
-	ExecutedByName  string              `json:"executed_by_name"`
-	ExecutedAt      time.Time           `json:"executed_at"` // zero for drafts
-	DurationMs      int64               `json:"duration_ms"`
-	Error           string              `json:"error"`
+	ReviewRequired     bool                `json:"review_required,omitempty"`
+	CanApprove         bool                `json:"can_approve,omitempty"`
+	RejectionReason    string              `json:"rejection_reason,omitempty"`
+	Approvals          []MigrationApproval `json:"approvals,omitempty"`
+	CreatedByName      string              `json:"created_by_name"`
+	CreatedAt          time.Time           `json:"created_at"`
+	UpdatedAt          time.Time           `json:"updated_at"`
+	ExecutedByName     string              `json:"executed_by_name"`
+	ExecutedAt         time.Time           `json:"executed_at"` // zero for drafts
+	DurationMs         int64               `json:"duration_ms"`
+	Error              string              `json:"error"`
 }
 
 // VersionLabel is "v3" for executed migrations and "-" otherwise.
@@ -101,7 +101,7 @@ type PlanNodeView struct {
 	Title         string   `json:"title"` // e.g. "Index Scan using orders_pkey on orders o"
 	NodeType      string   `json:"node_type"`
 	JoinType      string   `json:"join_type"`
-	EstRows       float64  `json:"est_rows"` // planner estimate, per loop
+	EstRows       float64  `json:"est_rows"`    // planner estimate, per loop
 	ActualRows    float64  `json:"actual_rows"` // per loop
 	Loops         float64  `json:"loops"`
 	StartupCost   float64  `json:"startup_cost"`

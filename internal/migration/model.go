@@ -36,20 +36,20 @@ const (
 )
 
 var (
-	ErrNotFound          = errors.New("migration tidak ditemukan")
-	ErrNotDraft          = errors.New("migration sudah dieksekusi dan tidak dapat diubah")
-	ErrInvalidName       = fmt.Errorf("nama migration wajib diisi (maksimal %d karakter)", MaxNameLength)
-	ErrEmptyScript       = errors.New("script SQL tidak boleh kosong")
-	ErrScriptTooLarge    = fmt.Errorf("script SQL melebihi batas %d KiB", MaxScriptLength/1024)
-	ErrScriptRejected    = errors.New("script ditolak")
-	ErrTargetUnavailable = errors.New("koneksi ke database target tidak tersedia")
-	ErrTargetBusy        = errors.New("migration lain sedang berjalan pada database ini, coba lagi nanti")
-	ErrNotApproved       = errors.New("migration belum disetujui oleh seluruh Group Leader terkait")
-	ErrNotPendingReview  = errors.New("migration tidak sedang dalam peninjauan (pending review)")
-	ErrNotLeader         = errors.New("anda bukan Group Leader dari group yang memiliki hak persetujuan")
-	ErrAlreadyReviewed   = errors.New("group anda sudah memberikan review untuk migration ini")
-	ErrNoRollbackScript  = errors.New("migrasi ini tidak memiliki script rollback (SQL Down)")
-	ErrCannotRollbackType = errors.New("tidak dapat melakukan rollback pada migrasi tipe rollback")
+	ErrNotFound                 = errors.New("migration tidak ditemukan")
+	ErrNotDraft                 = errors.New("migration sudah dieksekusi dan tidak dapat diubah")
+	ErrInvalidName              = fmt.Errorf("nama migration wajib diisi (maksimal %d karakter)", MaxNameLength)
+	ErrEmptyScript              = errors.New("script SQL tidak boleh kosong")
+	ErrScriptTooLarge           = fmt.Errorf("script SQL melebihi batas %d KiB", MaxScriptLength/1024)
+	ErrScriptRejected           = errors.New("script ditolak")
+	ErrTargetUnavailable        = errors.New("koneksi ke database target tidak tersedia")
+	ErrTargetBusy               = errors.New("migration lain sedang berjalan pada database ini, coba lagi nanti")
+	ErrNotApproved              = errors.New("migration belum disetujui oleh seluruh Group Leader terkait")
+	ErrNotPendingReview         = errors.New("migration tidak sedang dalam peninjauan (pending review)")
+	ErrNotLeader                = errors.New("anda bukan Group Leader dari group yang memiliki hak persetujuan")
+	ErrAlreadyReviewed          = errors.New("group anda sudah memberikan review untuk migration ini")
+	ErrNoRollbackScript         = errors.New("migrasi ini tidak memiliki script rollback (SQL Down)")
+	ErrCannotRollbackType       = errors.New("tidak dapat melakukan rollback pada migrasi tipe rollback")
 	ErrOnlySuccessCanRollback   = errors.New("hanya migration dengan status SUCCESS yang dapat di-rollback")
 	ErrOnlyRolledBackCanForward = errors.New("hanya migration dengan status ROLLED_BACK yang dapat di-forward")
 	ErrRollbackNotLatest        = errors.New("rollback hanya dapat dilakukan pada migration aktif terakhir")
@@ -77,15 +77,15 @@ type Approval struct {
 
 // Migration is one draft or executed run on a target database.
 type Migration struct {
-	ID           string
-	DatabaseID   string
-	DatabaseName string
-	Version      int // 0 unless Status is SUCCESS
-	Name         string
-	SQL          string
-	SQLUp        string
-	SQLDown      string
-	IsIrreversible bool
+	ID                 string
+	DatabaseID         string
+	DatabaseName       string
+	Version            int // 0 unless Status is SUCCESS
+	Name               string
+	SQL                string
+	SQLUp              string
+	SQLDown            string
+	IsIrreversible     bool
 	IrreversibleReason string
 	ExecutionType      string
 	RollbackTargetID   string
