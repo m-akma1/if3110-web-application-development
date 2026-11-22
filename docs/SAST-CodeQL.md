@@ -9,10 +9,10 @@ Workflow CodeQL didefinisikan pada [`.github/workflows/codeql.yml`](../.github/w
 
 ### Cakupan Kode & Query Suite
 
-| Bahasa CodeQL | Mode Build | Cakupan Kode (Berdasarkan SARIF) | Jumlah Rule (`security-extended`) | Jumlah Temuan Awal |
-|---|---|---|---|---|
-| `go` | `autobuild` (Go `1.26.0`) | 82 file backend Go (`main.go`, `domain/`, `internal/`) | 35 rules | 4 temuan (3 diperbaiki, 1 *accepted risk*) |
-| `javascript-typescript` | `none` | 42 file frontend React/TypeScript (`frontend/src/`) | 103 rules | 0 temuan |
+| Bahasa CodeQL | Mode Build | Cakupan Kode (Berdasarkan SARIF) | Jumlah Rule (`security-extended`) | Scan Awal (`0bc25da`) | Hasil Re-Scan (`e8a2ac0`) |
+|---|---|---|---|---|---|
+| `go` | `autobuild` (Go `1.26.0`) | 82 file backend Go (`main.go`, `domain/`, `internal/`) | 35 rules | 4 temuan | **1 temuan** (*Accepted Risk*) |
+| `javascript-typescript` | `none` | 42 file frontend React/TypeScript (`frontend/src/`) | 103 rules | 0 temuan | **0 temuan** |
 
 Setiap eksekusi menghasilkan:
 1. Upload otomatis hasil analisis ke tab **Security → Code scanning** di GitHub (`upload: always`).
@@ -27,8 +27,8 @@ Setiap eksekusi menghasilkan:
 
 | Rule / CWE | Severity | Lokasi Kode | Potensi Dampak | Keputusan & Alasan | Status |
 |---|---|---|---|---|---|
-| `go/log-injection` (CWE-117) | Medium | `internal/http/api_viewer.go:216` (`logViewerError`, 2 alur taint) | Parameter `dbID` dari query request (`?db_id=`) dan pesan error dicatat ke `s.logger.Printf` tanpa sanitasi newline, berisiko *log forging* apabila karakter `\r`/`\n` disisipkan. | **Perlu Diperbaiki (Temuan Valid)**: Seluruh argumen (`op`, `user.ID`, `dbID`, `err.Error()`) dibersihkan dengan `stripLogNewlines` sebelum dicetak ke log. | **Diperbaiki** (akan terverifikasi ulang pada scan berikutnya). |
-| `go/log-injection` (CWE-117) | Medium | `internal/http/authz.go:144` (`authorizeDB`) | Parameter `dbID` dari input HTTP (`resolveDBID`) masuk ke `s.logger.Printf` saat terjadi kegagalan pemeriksaan otorisasi. | **Perlu Diperbaiki (Temuan Valid)**: Membersihkan `u.ID`, `dbID`, `action`, dan `err.Error()` menggunakan `stripLogNewlines`. | **Diperbaiki** (akan terverifikasi ulang pada scan berikutnya). |
+| `go/log-injection` (CWE-117) | Medium | `internal/http/api_viewer.go:216` (`logViewerError`, 2 alur taint) | Parameter `dbID` dari query request (`?db_id=`) dan pesan error dicatat ke `s.logger.Printf` tanpa sanitasi newline, berisiko *log forging* apabila karakter `\r`/`\n` disisipkan. | **Perlu Diperbaiki (Temuan Valid)**: Seluruh argumen (`op`, `user.ID`, `dbID`, `err.Error()`) dibersihkan dengan `stripLogNewlines` sebelum dicetak ke log. | **Diperbaiki & Terverifikasi Hilang** (Commit `e8a2ac0`, re-scan `go.sarif`: 0 alert `go/log-injection`). |
+| `go/log-injection` (CWE-117) | Medium | `internal/http/authz.go:144` (`authorizeDB`) | Parameter `dbID` dari input HTTP (`resolveDBID`) masuk ke `s.logger.Printf` saat terjadi kegagalan pemeriksaan otorisasi. | **Perlu Diperbaiki (Temuan Valid)**: Membersihkan `u.ID`, `dbID`, `action`, dan `err.Error()` menggunakan `stripLogNewlines`. | **Diperbaiki & Terverifikasi Hilang** (Commit `e8a2ac0`, re-scan `go.sarif`: 0 alert `go/log-injection`). |
 | `go/sql-injection` (CWE-89) | High | `internal/dbmanager/query_guard.go:185` (`RunReadOnlyQuery`) | Query SQL dari pengguna diteruskan ke `tx.QueryContext(ctx, query, args...)`. | **Tidak Diperbaiki: Risiko Diterima (*Accepted Risk / Mitigated by Design*)**: Fitur **SQL Query Explorer** memang bertugas mengeksekusi query read-only dari pengguna. Mitigasi berlapis telah diterapkan: `CheckReadOnlyQuery` (hanya mengizinkan `SELECT`/`WITH`/`SHOW`, menolak DDL/DML & fungsi berbahaya), transaksi `SET TRANSACTION READ ONLY` yang selalu di-rollback, `statement_timeout`, batas baris `QUERY_ROW_LIMIT`, dan RBAC per database. | **Accepted Risk**. |
 
 ### B. Perbaikan Preventif Tambahan (Pra-Scan)
