@@ -36,12 +36,13 @@ func SanitizedLoggerMiddleware(logger *log.Logger) func(http.Handler) http.Handl
 			// lanjutkan ke middleware/handler berikutnya
 			next.ServeHTTP(rec, r)
 
-			// bersihkan URl dari kemungkinan kebocoran password atau session ID di Query String
-			safePath := SanitizeURL(r.URL)
+			// bersihkan URL dan method dari newline/control chars (cegah log injection) serta parameter sensitif
+			safeMethod := stripLogNewlines(r.Method)
+			safePath := stripLogNewlines(SanitizeURL(r.URL))
 
 			// catat informasi aman tidak ada cookie, set cookie, body
 			logger.Printf("[HTTP] method=%s path=%s status=%d duration=%s",
-				r.Method,
+				safeMethod,
 				safePath,
 				rec.statusCode,
 				time.Since(start).Round(time.Microsecond),
@@ -69,5 +70,8 @@ func SanitizeURL(u *url.URL) string {
 	// kembalikan path yang sudah di sensor
 	sanitizeQuery := strings.ReplaceAll(q.Encode(), "%5BREDACTED%5D", "[REDACTED]")
 	return u.Path + "?" + sanitizeQuery
+}
 
+func stripLogNewlines(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
 }

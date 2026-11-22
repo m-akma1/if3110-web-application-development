@@ -116,7 +116,12 @@ func main() {
 	})
 
 	log.Printf("Backend API berjalan pada %s", cfg.ListenAddr)
-	if err := http.ListenAndServe(cfg.ListenAddr, srv); err != nil {
+	httpSrv := &http.Server{
+		Addr:              cfg.ListenAddr,
+		Handler:           srv,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	if err := httpSrv.ListenAndServe(); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }

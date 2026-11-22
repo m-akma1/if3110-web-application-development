@@ -365,19 +365,27 @@ func (r *Repository) HasPendingActionFor(ctx context.Context, migrationID, execT
 }
 
 func hasPendingActionFor(ctx context.Context, q querier, migrationID, execType string) (bool, error) {
-	var col string
+	const (
+		rollbackQuery = `
+			SELECT EXISTS (
+				SELECT 1 FROM migrations
+				WHERE rollback_target_id = $1
+				  AND execution_type = $2
+				  AND status IN ('DRAFT', 'PENDING_REVIEW', 'APPROVED')
+			)`
+		forwardQuery = `
+			SELECT EXISTS (
+				SELECT 1 FROM migrations
+				WHERE source_migration_id = $1
+				  AND execution_type = $2
+				  AND status IN ('DRAFT', 'PENDING_REVIEW', 'APPROVED')
+			)`
+	)
+	query := forwardQuery
 	if execType == "ROLLBACK" {
-		col = "rollback_target_id"
-	} else {
-		col = "source_migration_id"
+		query = rollbackQuery
 	}
 	var exists bool
-	err := q.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM migrations
-			WHERE `+col+` = $1
-			  AND execution_type = $2
-			  AND status IN ('DRAFT', 'PENDING_REVIEW', 'APPROVED')
-		)`, migrationID, execType).Scan(&exists)
+	err := q.QueryRowContext(ctx, query, migrationID, execType).Scan(&exists)
 	return exists, err
 }

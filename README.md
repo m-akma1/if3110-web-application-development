@@ -408,6 +408,12 @@ A migration is a named SQL script for one target database. It is either a **DRAF
 - Integration tests use a disposable PostgreSQL from the `postgres-test` Compose profile (port 5433 on localhost, data on tmpfs): `make test-integration`.
 - GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on pushes to `main` and `dev` and on pull requests. It checks that the generated templ code is committed (error) and that the compiled CSS is up to date (warning), then runs `gofmt`, `go vet`, `go build`, and every test with the race detector against a PostgreSQL service. A second job builds the Docker image.
 
+### Security: SAST dengan CodeQL
+
+- Static Application Security Testing (SAST) diaktifkan menggunakan **GitHub CodeQL** pada [.github/workflows/codeql.yml](.github/workflows/codeql.yml) untuk menganalisis bahasa `go` (`autobuild`) dan `javascript-typescript` (`build-mode: none`) dengan query suite `security-extended`.
+- Hasil analisis diunggah ke **GitHub Code Scanning**, ditampilkan sebagai ringkasan pada **GitHub Actions Step Summary**, serta disimpan sebagai **SARIF artifact** (`codeql-sarif-go`, `codeql-sarif-javascript-typescript`).
+- Dokumentasi lengkap cakupan analisis, audit temuan, mitigasi/perbaikan, dan batasan SAST tersedia pada [docs/SAST-CodeQL.md](docs/SAST-CodeQL.md).
+
 ## Credits
 
 **IF3110 Web Application Development**  

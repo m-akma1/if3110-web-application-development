@@ -1,0 +1,134 @@
+name: "CodeQL SAST"
+
+on:
+  push:
+    branches: ["main", "dev", "feat/**"]
+  pull_request:
+    branches: ["main", "dev"]
+  schedule:
+    - cron: "30 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: autobuild
+          - language: javascript-typescript
+            build-mode: none
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+
+      - name: Autobuild
+        if: matrix.build-mode == 'autobuild'
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          output: sarif-results
+          upload: always
+          category: "/language:${{ matrix.language }}"
+
+      - name: Summarize SARIF Findings
+        if: always()
+        env:
+          LANG_TARGET: ${{ matrix.language }}
+        run: |
+          python3 - <<'PY'
+          import glob, json, os
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          lang = os.environ.get("LANG_TARGET", "unknown")
+          sarif_files = sorted(glob.glob("sarif-results/*.sarif"))
+
+          lines = [f"## CodeQL SAST Summary (`{lang}`)", ""]
+          if not sarif_files:
+              lines.append("Tidak ditemukan file SARIF pada `sarif-results/`.")
+          else:
+              total = 0
+              rows = []
+              for path in sarif_files:
+                  with open(path, encoding="utf-8") as f:
+                      data = json.load(f)
+                  for run in data.get("runs", []):
+                      rules = {
+                          r.get("id"): r
+                          for r in run.get("tool", {}).get("driver", {}).get("rules", [])
+                      }
+                      for res in run.get("results", []):
+                          total += 1
+                          rule_id = res.get("ruleId", "-")
+                          rule_meta = rules.get(rule_id, {})
+                          sev = (
+                              rule_meta.get("properties", {}).get("security-severity")
+                              or res.get("level")
+                              or "warning"
+                          )
+                          msg = res.get("message", {}).get("text", "").replace("\n", " ").replace("|", "\\|")
+                          locs = res.get("locations", [])
+                          loc_str = "-"
+                          if locs:
+                              phys = locs[0].get("physicalLocation", {})
+                              uri = phys.get("artifactLocation", {}).get("uri", "-")
+                              line = phys.get("region", {}).get("startLine", "")
+                              loc_str = f"`{uri}:{line}`" if line else f"`{uri}`"
+                          rows.append(f"| `{rule_id}` | {sev} | {loc_str} | {msg[:180]} |")
+
+              lines.append(f"- **Total temuan:** {total}")
+              lines.append("")
+              if rows:
+                  lines.extend([
+                      "| Rule | Severity | Lokasi | Pesan |",
+                      "|---|---|---|---|",
+                      *rows,
+                  ])
+              else:
+                  lines.append("Tidak ada temuan kerentanan (`0 alerts`) untuk query suite `security-extended`.")
+
+          output = "\n".join(lines) + "\n"
+          print(output)
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as out:
+                  out.write(output)
+          PY
+
+      - name: Upload SARIF Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif-${{ matrix.language }}
+          path: sarif-results/
+          retention-days: 30
