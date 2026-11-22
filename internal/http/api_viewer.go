@@ -213,7 +213,12 @@ func viewerErrorMessage(err error) string {
 }
 
 func (s *Server) logViewerError(user *authn.User, dbID, op string, err error) {
-	s.logger.Printf("[VIEWER] %s gagal user=%s db=%s: %v", op, user.ID, dbID, err)
+	s.logger.Printf("[VIEWER] %s gagal user=%s db=%s: %s",
+		stripLogNewlines(op),
+		stripLogNewlines(user.ID),
+		stripLogNewlines(dbID),
+		stripLogNewlines(err.Error()),
+	)
 }
 
 func databaseName(layout *domain.AuthLayoutUser, dbID string) string {

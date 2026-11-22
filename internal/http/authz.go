@@ -141,7 +141,12 @@ func (s *Server) authorizeDB(ctx context.Context, u *authn.User, dbID string, ac
 	}
 	level, err := s.access.Authorize(ctx, u.ID, dbID, action)
 	if err != nil && !errors.Is(err, rbac.ErrForbidden) {
-		s.logger.Printf("[AUTHZ] gagal memeriksa akses user=%s db=%s action=%s: %v", u.ID, dbID, action, err)
+		s.logger.Printf("[AUTHZ] gagal memeriksa akses user=%s db=%s action=%s: %s",
+			stripLogNewlines(u.ID),
+			stripLogNewlines(dbID),
+			stripLogNewlines(string(action)),
+			stripLogNewlines(err.Error()),
+		)
 	}
 	return level, err
 }

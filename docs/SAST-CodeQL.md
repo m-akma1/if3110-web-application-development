@@ -9,10 +9,10 @@ Workflow CodeQL didefinisikan pada [`.github/workflows/codeql.yml`](../.github/w
 
 ### Cakupan Kode & Query Suite
 
-| Bahasa CodeQL | Mode Build | Cakupan Kode | Query Suite |
-|---|---|---|---|
-| `go` | `autobuild` (dengan Go sesuai `go.mod`) | Seluruh backend & worker Go (`main.go`, `domain/`, `internal/`) | `security-extended` |
-| `javascript-typescript` | `none` | Seluruh frontend SPA React/TypeScript (`frontend/src/`) | `security-extended` |
+| Bahasa CodeQL | Mode Build | Cakupan Kode (Berdasarkan SARIF) | Jumlah Rule (`security-extended`) | Jumlah Temuan Awal |
+|---|---|---|---|---|
+| `go` | `autobuild` (Go `1.26.0`) | 82 file backend Go (`main.go`, `domain/`, `internal/`) | 35 rules | 4 temuan (3 diperbaiki, 1 *accepted risk*) |
+| `javascript-typescript` | `none` | 42 file frontend React/TypeScript (`frontend/src/`) | 103 rules | 0 temuan |
 
 Setiap eksekusi menghasilkan:
 1. Upload otomatis hasil analisis ke tab **Security → Code scanning** di GitHub (`upload: always`).
@@ -21,36 +21,34 @@ Setiap eksekusi menghasilkan:
 
 ---
 
-## 2. Dokumentasi Temuan & Evaluasi Keamanan
+## 2. Dokumentasi Temuan Hasil Scan CodeQL (`go.sarif` & `javascript.sarif`)
 
-### A. Perbaikan Preventif Hasil Audit Kode (Sebelum / Saat Integrasi SAST)
+### A. Temuan Aktual dari Hasil Scan CodeQL
 
-Sebelum dan saat mengaktifkan CodeQL, dilakukan pemeriksaan terhadap pola *source-to-sink* yang umum terdeteksi oleh query `security-extended`:
-
-| Rule / CWE | Severity | Lokasi Kode | Potensi Dampak | Keputusan & Alasan | Status / Referensi |
+| Rule / CWE | Severity | Lokasi Kode | Potensi Dampak | Keputusan & Alasan | Status |
 |---|---|---|---|---|---|
-| `go/log-injection` (CWE-117) | Medium | `internal/http/middleware_logger.go` (`SanitizedLoggerMiddleware`) | Penyerang dapat menyisipkan karakter `\r` atau `\n` ke URL path / HTTP method untuk memalsukan entri log aplikasi (*log forging*). | **Diperbaiki (Temuan Valid)**: Menambahkan helper `stripLogNewlines` untuk menghapus `\r` dan `\n` pada `r.Method` serta `SanitizeURL(r.URL)` sebelum dicetak ke `logger.Printf`. | Diterapkan pada commit `feat/security` (bersama penambahan workflow CodeQL). |
-| `go/sql-injection` (CWE-89) | High | `internal/migration/repository.go` (`hasPendingActionFor`) | Penggabungan string kolom ke dalam literal query SQL (`WHERE ` + `col` + ` = $1`) berisiko disalahgunakan jika suatu saat parameter tidak lagi terbatas pada dua nilai internal. | **Diperbaiki (Hardening Preventif)**: Mengganti penggabungan string dengan dua konstanta query SQL terpisah (`rollbackQuery` dan `forwardQuery`) yang 100% statis dengan parameter bind `$1, $2`. | Diterapkan pada commit `feat/security`. |
-| `CWE-400` / Slowloris HTTP DoS | Medium | `main.go` (`http.ListenAndServe`) | Server Go tanpa `ReadHeaderTimeout` berpotensi menahan koneksi HTTP terbuka terlalu lama saat menerima header lambat. | **Diperbaiki (Hardening Preventif)**: Menggunakan `http.Server` dengan `ReadHeaderTimeout: 10 * time.Second`. | Diterapkan pada commit `feat/security`. |
+| `go/log-injection` (CWE-117) | Medium | `internal/http/api_viewer.go:216` (`logViewerError`, 2 alur taint) | Parameter `dbID` dari query request (`?db_id=`) dan pesan error dicatat ke `s.logger.Printf` tanpa sanitasi newline, berisiko *log forging* apabila karakter `\r`/`\n` disisipkan. | **Perlu Diperbaiki (Temuan Valid)**: Seluruh argumen (`op`, `user.ID`, `dbID`, `err.Error()`) dibersihkan dengan `stripLogNewlines` sebelum dicetak ke log. | **Diperbaiki** (akan terverifikasi ulang pada scan berikutnya). |
+| `go/log-injection` (CWE-117) | Medium | `internal/http/authz.go:144` (`authorizeDB`) | Parameter `dbID` dari input HTTP (`resolveDBID`) masuk ke `s.logger.Printf` saat terjadi kegagalan pemeriksaan otorisasi. | **Perlu Diperbaiki (Temuan Valid)**: Membersihkan `u.ID`, `dbID`, `action`, dan `err.Error()` menggunakan `stripLogNewlines`. | **Diperbaiki** (akan terverifikasi ulang pada scan berikutnya). |
+| `go/sql-injection` (CWE-89) | High | `internal/dbmanager/query_guard.go:185` (`RunReadOnlyQuery`) | Query SQL dari pengguna diteruskan ke `tx.QueryContext(ctx, query, args...)`. | **Tidak Diperbaiki: Risiko Diterima (*Accepted Risk / Mitigated by Design*)**: Fitur **SQL Query Explorer** memang bertugas mengeksekusi query read-only dari pengguna. Mitigasi berlapis telah diterapkan: `CheckReadOnlyQuery` (hanya mengizinkan `SELECT`/`WITH`/`SHOW`, menolak DDL/DML & fungsi berbahaya), transaksi `SET TRANSACTION READ ONLY` yang selalu di-rollback, `statement_timeout`, batas baris `QUERY_ROW_LIMIT`, dan RBAC per database. | **Accepted Risk**. |
 
-### B. Pola Tervalidasi Aman (Potensi *False Positive* / *Mitigated by Design*)
+### B. Perbaikan Preventif Tambahan (Pra-Scan)
 
-Beberapa konstruksi dinamis di bawah ini memang disengaja untuk kebutuhan fitur platform dan telah dilindungi lapisan validasi ketat:
+Selain temuan pada `go.sarif`, hardening preventif berikut telah diterapkan dan terkonfirmasi bersih pada hasil scan CodeQL (`0` alert pada lokasi terkait):
 
 | Rule / CWE | Severity | Lokasi Kode | Potensi Dampak | Keputusan & Alasan |
 |---|---|---|---|---|
-| `go/sql-injection` (CWE-89) | High | `internal/dbmanager/registry.go` (`InspectTableDataAndSchema`) | Query `SELECT COUNT(*) FROM ...` dan `SELECT * FROM ...` menggunakan nama schema/tabel dinamis. | **False Positive / Mitigated**: Nama schema & tabel tidak pernah dipakai mentah dari input user; wajib diverifikasi keberadaannya via `describeTable` (`pg_catalog`), di-escape menggunakan `quoteIdent`, dan dijalankan di dalam transaksi `READ ONLY`. |
-| `go/sql-injection` (CWE-89) | High | `internal/authn/repository.go` (`getUser`) | `getUser` menerima string klausa `where` untuk `SELECT`. | **False Positive**: Fungsi `getUser` bersifat private dan hanya dipanggil oleh `GetUserByUsername`, `GetUserByEmail`, dan `GetUserByID` dengan klausa statis (`username = $1`, `email = $1`, `id = $1`). |
-| `CWE-89` (Eksekusi SQL Migrasi) | High | `internal/migration/engine.go`, `internal/dbmanager/query_guard.go` | Eksekusi script SQL dari pengguna ke target PostgreSQL. | **Accepted Risk (Core Feature)**: Menjalankan SQL pengguna adalah fungsi inti platform. Mitigasi dilakukan dengan RBAC ketat (`VIEW_EDIT` + approval Group Leader untuk migrasi; guard `READ ONLY` + parser AST/token untuk query viewer) serta isolasi kredensial per database target. |
+| `go/log-injection` (CWE-117) | Medium | `internal/http/middleware_logger.go` (`SanitizedLoggerMiddleware`) | Penyisipan `\r`/`\n` pada HTTP Method dan URL Path saat logging request. | **Diperbaiki**: Diterapkan `stripLogNewlines` serta unit test pada `internal/http/middleware_logger_test.go`. |
+| `go/sql-injection` (CWE-89) | High | `internal/migration/repository.go` (`hasPendingActionFor`) | Penggabungan nama kolom ke string SQL literal. | **Diperbaiki**: Dipecah menjadi dua konstanta query literal statis (`rollbackQuery` dan `forwardQuery`). |
+| `CWE-400` / Slowloris HTTP DoS | Medium | `main.go` (`http.Server`) | Koneksi HTTP tanpa batas waktu pembacaan header. | **Diperbaiki**: Menetapkan `ReadHeaderTimeout: 10 * time.Second`. |
+
+### C. Hasil Analisis Frontend (`javascript.sarif`)
+
+- Cakupan: 42 file TypeScript/React (`frontend/src/`), 103 rule CodeQL `security-extended`.
+- Hasil: **0 temuan (`0 alerts`)**.
+- Catatan: Tidak ditemukan penggunaan sink berbahaya seperti `dangerouslySetInnerHTML`, `innerHTML`, `eval()`, maupun penyimpanan token rahasia di `localStorage` (autentikasi menggunakan cookie `__Host-sid` `HttpOnly` + `Secure` dan CSRF double-submit).
 
 ---
 
-## 3. Catatan Bukti Hasil Scan & Keterbatasan SAST
+## 3. Keterbatasan SAST
 
-1. **Bukti Hasil Scan GitHub Actions & Code Scanning:**
-   Setelah melakukan `git push` ke GitHub:
-   - Buka tab **Actions → CodeQL SAST** pada repositori GitHub untuk melihat ringkasan jumlah temuan pada setiap bahasa (`go` dan `javascript-typescript`) serta mengunduh file SARIF pada bagian **Artifacts**.
-   - Buka tab **Security → Code scanning** (pada repositori publik atau repositori dengan GitHub Code Security aktif) untuk memverifikasi status setiap alert.
-   - Apabila muncul temuan baru setelah integrasi fitur dari anggota tim lain (seperti *Queue/Worker*, *Batching*, atau *Observability*), lakukan perbaikan atau dokumentasikan keputusannya pada tabel di atas beserta referensi commit perbaikannya.
-2. **Keterbatasan SAST:**
-   Hasil scan bersih (`0 alerts`) **tidak berarti aplikasi pasti aman sepenuhnya**. CodeQL memfokuskan analisis pada aliran data (*taint tracking*) dan pola kerentanan statis yang terdaftar pada suite `security-extended`, sehingga tidak menggantikan pengujian otorisasi *business logic*, review konfigurasi infrastruktur (`Caddyfile`, `.env`, TLS), maupun *automated security/integration test*.
+Hasil scan bersih (`0 alerts` pada `javascript-typescript`, maupun setelah perbaikan `go/log-injection`) **tidak berarti aplikasi pasti aman sepenuhnya**. CodeQL menganalisis pola aliran data (*taint tracking*) statis sesuai cakupan rule `security-extended`, sehingga tetap perlu dilengkapi dengan *automated integration test* otorisasi, review konfigurasi TLS/Caddy, serta verifikasi *business logic* (seperti aturan LIFO rollback dan *Group Leader approval*).
