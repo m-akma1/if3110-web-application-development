@@ -120,8 +120,11 @@ func (e *Engine) DryRun(ctx context.Context, databaseID, script string) (*RunRes
 // Errors mean nothing ran: ErrNotFound, ErrNotDraft, *RejectedError, ErrTargetUnavailable,
 // ErrTargetBusy, or a storage error.
 //
+// The migration row and its execution row (migration_executions) are written in one
+// transaction, so the history never has one without the other.
+//
 // Known limitation: if the process dies after the target COMMIT but before the history write,
-// the history misses that run.
+// the history misses that run; the worker then marks the job UNCERTAIN.
 func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*Migration, *RunResult, error) {
 	m, err := getMigration(ctx, e.platform, migrationID)
 	if err != nil {
@@ -189,13 +192,15 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	if res.Err != nil {
 		rec.Error = res.Err.String()
 	}
-	status := "SUCCESS"
-	if !res.OK {
-		status = "FAILED"
-	}
-	if err := recordExecution(runCtx, lockConn, rec); err != nil {
+	ex := newExecution(runCtx, ExecExecute, m.ID, m.DatabaseID, executorID).withResult(m.SQL, executedAt, res)
+	if err := withTx(runCtx, lockConn, func(tx *sql.Tx) error {
+		if err := recordExecution(runCtx, tx, rec); err != nil {
+			return err
+		}
+		return insertExecution(runCtx, tx, ex)
+	}); err != nil {
 		// The attempt still happened on the target; log it even though history was not saved.
-		e.logAttempt(runCtx, "UP", m.ID, m.ID, m.DatabaseID, 0, status, res.Duration, m.SQL, res)
+		e.logAttempt(runCtx, "UP", m.ID, "", m.DatabaseID, 0, string(ex.Status), res.Duration, m.SQL, res)
 		if res.OK {
 			return nil, res, fmt.Errorf("migration sudah di-COMMIT pada database target, tetapi riwayat gagal disimpan: %w", err)
 		}
@@ -207,8 +212,8 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	if m != nil {
 		version = m.Version // assigned by recordExecution on success
 	}
-	// One row is one execution for now, so the execution ID is the migration ID.
-	e.logAttempt(runCtx, "UP", migrationID, migrationID, databaseID, version, status, res.Duration, rec.SQL, res)
+	e.logAttempt(runCtx, "UP", migrationID, ex.ID, databaseID, version, string(ex.Status), res.Duration, rec.SQL, res)
+	auditExecution(runCtx, e.logger, ex)
 	return m, res, err
 }
 

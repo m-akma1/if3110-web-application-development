@@ -58,6 +58,7 @@ var (
 	ErrPendingRollbackExists    = errors.New("sudah terdapat pengajuan rollback yang sedang menunggu review/eksekusi")
 	ErrPendingForwardExists     = errors.New("sudah terdapat pengajuan forward yang sedang menunggu review/eksekusi")
 	ErrImmutableRollbackScript  = errors.New("naskah SQL pada permintaan rollback atau forward bersifat immutable dan tidak dapat diubah")
+	ErrHasHistory               = errors.New("migration ini sudah punya riwayat eksekusi dan tidak dapat dihapus")
 )
 
 // Approval is one group's review and approval record for a migration.
@@ -92,7 +93,14 @@ type Migration struct {
 	SourceMigrationID  string
 	CanRollback        bool
 	CanForward         bool
-	Status             Status
+	// Status is derived for executed rows: SUCCESS is reported as ROLLED_BACK when a rollback
+	// execution undid this migration's execution (see the migration_chain view).
+	Status Status
+
+	// The chain from migration_chain; empty when that step did not happen.
+	AppliedExecutionID  string // the successful EXECUTE/FORWARD execution of this row
+	RollbackExecutionID string // the successful ROLLBACK that undid it
+	ForwardExecutionID  string // the successful FORWARD that undid that rollback
 
 	ReviewRequired  bool
 	CanApprove      bool

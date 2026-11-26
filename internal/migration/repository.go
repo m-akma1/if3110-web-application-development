@@ -148,12 +148,24 @@ func (r *Repository) DeleteDraft(ctx context.Context, id string) error {
 	if !ids.IsValid(id) {
 		return ErrNotFound
 	}
-	res, err := r.db.ExecContext(ctx, `DELETE FROM migrations WHERE id = $1 AND status IN ('DRAFT', 'REJECTED', 'APPROVED')`, id)
+	// A draft that already had an attempt (e.g. the target was down) keeps it: history is
+	// never deleted, so neither is the draft it belongs to.
+	res, err := r.db.ExecContext(ctx, `
+		DELETE FROM migrations m
+		WHERE m.id = $1 AND m.status IN ('DRAFT', 'REJECTED', 'APPROVED')
+		  AND NOT EXISTS (SELECT 1 FROM migration_executions e WHERE e.migration_id = m.id)`, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return r.notDraftOrMissing(ctx, id)
+		cur, err := r.Get(ctx, id)
+		if err != nil {
+			return err // ErrNotFound or a storage error
+		}
+		if cur.Status != StatusDraft && cur.Status != StatusRejected && cur.Status != StatusApproved {
+			return ErrNotDraft
+		}
+		return ErrHasHistory
 	}
 	return nil
 }
@@ -182,7 +194,7 @@ func (r *Repository) ListByDatabase(ctx context.Context, databaseID string, stat
 		filter = append(filter, string(s))
 	}
 	rows, err := r.db.QueryContext(ctx, selectMigrations+`
-		WHERE m.database_id = $1 AND (cardinality($2::text[]) = 0 OR m.status = ANY($2::text[]))
+		WHERE m.database_id = $1 AND (cardinality($2::text[]) = 0 OR `+effectiveStatus+` = ANY($2::text[]))
 		ORDER BY COALESCE(m.executed_at, m.updated_at) DESC, m.created_at DESC`,
 		databaseID, filter)
 	if err != nil {
@@ -200,15 +212,23 @@ func (r *Repository) ListByDatabase(ctx context.Context, databaseID string, stat
 	return list, rows.Err()
 }
 
+// effectiveStatus is the status shown for a migration row. ROLLED_BACK is not stored: a SUCCESS
+// row is rolled back when a rollback execution undid its execution (migration_chain).
+const effectiveStatus = `(CASE WHEN m.status = 'SUCCESS' AND c.rollback_execution_id IS NOT NULL
+	THEN 'ROLLED_BACK' ELSE m.status END)`
+
 const selectMigrations = `
-	SELECT m.id, m.database_id, COALESCE(t.name, ''), COALESCE(m.version, 0), m.name, m.sql_script, m.status,
+	SELECT m.id, m.database_id, COALESCE(t.name, ''), COALESCE(m.version, 0), m.name, m.sql_script, ` + effectiveStatus + `,
 	       COALESCE(m.created_by::text, ''), COALESCE(cu.username, ''), m.created_at, m.updated_at,
 	       COALESCE(m.executed_by::text, ''), COALESCE(eu.username, ''), m.executed_at,
 	       COALESCE(m.duration_ms, 0), m.error_message, COALESCE(m.rejection_reason, ''),
 	       COALESCE(m.sql_up, ''), COALESCE(m.sql_down, ''), COALESCE(m.is_irreversible, false),
 	       COALESCE(m.irreversible_reason, ''), COALESCE(m.execution_type, 'FORWARD'),
-	       COALESCE(m.rollback_target_id::text, ''), COALESCE(m.source_migration_id::text, '')
+	       COALESCE(m.rollback_target_id::text, ''), COALESCE(m.source_migration_id::text, ''),
+	       COALESCE(c.applied_execution_id::text, ''), COALESCE(c.rollback_execution_id::text, ''),
+	       COALESCE(c.forward_execution_id::text, '')
 	FROM migrations m
+	JOIN migration_chain c ON c.migration_id = m.id
 	LEFT JOIN target_databases t ON t.id = m.database_id
 	LEFT JOIN users cu ON cu.id = m.created_by
 	LEFT JOIN users eu ON eu.id = m.executed_by`
@@ -227,7 +247,8 @@ func scanMigration(row rowScanner) (*Migration, error) {
 		&m.CreatedBy, &m.CreatedByName, &m.CreatedAt, &m.UpdatedAt,
 		&m.ExecutedBy, &m.ExecutedByName, &executedAt, &m.DurationMs, &m.Error, &m.RejectionReason,
 		&m.SQLUp, &m.SQLDown, &m.IsIrreversible, &m.IrreversibleReason, &m.ExecutionType,
-		&rollbackTargetID, &sourceMigrationID); err != nil {
+		&rollbackTargetID, &sourceMigrationID,
+		&m.AppliedExecutionID, &m.RollbackExecutionID, &m.ForwardExecutionID); err != nil {
 		return nil, err
 	}
 	m.Status = Status(status)
@@ -303,7 +324,8 @@ func recordExecution(ctx context.Context, q querier, rec executionRecord) error 
 	return nil
 }
 
-// GetLatestActive returns the latest active (SUCCESS, non-ROLLBACK) migration on databaseID.
+// GetLatestActive returns the latest active migration on databaseID: the highest version whose
+// execution has not been undone by a rollback.
 func (r *Repository) GetLatestActive(ctx context.Context, databaseID string) (*Migration, error) {
 	return getLatestActive(ctx, r.db, databaseID)
 }
@@ -311,6 +333,7 @@ func (r *Repository) GetLatestActive(ctx context.Context, databaseID string) (*M
 func getLatestActive(ctx context.Context, q querier, databaseID string) (*Migration, error) {
 	m, err := scanMigration(q.QueryRowContext(ctx, selectMigrations+`
 		WHERE m.database_id = $1 AND m.status = 'SUCCESS' AND m.execution_type <> 'ROLLBACK'
+		  AND c.rollback_execution_id IS NULL
 		ORDER BY m.version DESC, m.executed_at DESC
 		LIMIT 1`, databaseID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -319,7 +342,8 @@ func getLatestActive(ctx context.Context, q querier, databaseID string) (*Migrat
 	return m, err
 }
 
-// GetEarliestUnforwardedRolledBack returns the earliest ROLLED_BACK migration that has not yet been re-forwarded.
+// GetEarliestUnforwardedRolledBack returns the earliest rolled-back migration whose rollback has
+// not been undone by a forward yet.
 func (r *Repository) GetEarliestUnforwardedRolledBack(ctx context.Context, databaseID string) (*Migration, error) {
 	return getEarliestUnforwardedRolledBack(ctx, r.db, databaseID)
 }
@@ -327,13 +351,9 @@ func (r *Repository) GetEarliestUnforwardedRolledBack(ctx context.Context, datab
 func getEarliestUnforwardedRolledBack(ctx context.Context, q querier, databaseID string) (*Migration, error) {
 	m, err := scanMigration(q.QueryRowContext(ctx, selectMigrations+`
 		WHERE m.database_id = $1
-		  AND m.status = 'ROLLED_BACK'
 		  AND m.execution_type <> 'ROLLBACK'
-		  AND NOT EXISTS (
-			  SELECT 1 FROM migrations f
-			  WHERE f.source_migration_id = m.id
-			    AND f.status IN ('SUCCESS', 'ROLLED_BACK')
-		  )
+		  AND c.rollback_execution_id IS NOT NULL
+		  AND c.forward_execution_id IS NULL
 		ORDER BY m.version ASC, m.created_at ASC
 		LIMIT 1`, databaseID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -342,7 +362,7 @@ func getEarliestUnforwardedRolledBack(ctx context.Context, q querier, databaseID
 	return m, err
 }
 
-// HasAlreadyBeenForwarded reports whether a ROLLED_BACK migration has already been superseded by a forward execution.
+// HasAlreadyBeenForwarded reports whether the rollback of a migration was already undone by a forward.
 func (r *Repository) HasAlreadyBeenForwarded(ctx context.Context, migrationID string) (bool, error) {
 	return hasAlreadyBeenForwarded(ctx, r.db, migrationID)
 }
@@ -350,12 +370,11 @@ func (r *Repository) HasAlreadyBeenForwarded(ctx context.Context, migrationID st
 func hasAlreadyBeenForwarded(ctx context.Context, q querier, migrationID string) (bool, error) {
 	var exists bool
 	err := q.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM migrations
-			WHERE source_migration_id = $1
-			  AND execution_type = 'FORWARD'
-			  AND status IN ('SUCCESS', 'ROLLED_BACK')
-		)`, migrationID).Scan(&exists)
+		SELECT forward_execution_id IS NOT NULL FROM migration_chain WHERE migration_id = $1`,
+		migrationID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
 	return exists, err
 }
 
