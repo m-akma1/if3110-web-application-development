@@ -226,6 +226,26 @@ export interface AdminOverview {
 }
 
 // One queued run of a migration (GET /api/jobs/{id}).
+// One attempt to run a migration (GET /api/migration/{id}/executions). Append-only.
+export interface MigrationExecutionView {
+  id: string
+  migration_id: string
+  job_id?: string
+  attempt: number
+  execution_type: 'EXECUTE' | 'ROLLBACK' | 'FORWARD'
+  status: 'SUCCESS' | 'FAILED' | 'UNCERTAIN'
+  sql_sent: boolean
+  sql_executed: string
+  reverts_execution_id?: string
+  executor_name: string
+  error?: string
+  sqlstate?: string
+  correlation_id?: string
+  started_at: string
+  finished_at: string
+  duration_ms: number
+}
+
 export interface MigrationJobView {
   id: string
   migration_id: string

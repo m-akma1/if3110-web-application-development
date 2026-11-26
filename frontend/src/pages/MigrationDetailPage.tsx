@@ -6,6 +6,7 @@ import { BatchProgressMonitor } from '../components/BatchProgressMonitor'
 import { fmtTime, versionLabel } from '../utils/migrationFormat'
 import { features } from '../config/features'
 import { jobFeedback, waitForJob } from '../utils/jobs'
+import { ExecutionHistory } from '../components/migration/ExecutionHistory'
 
 export const MigrationDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>()
@@ -18,6 +19,9 @@ export const MigrationDetailPage: React.FC = () => {
   const [feedback, setFeedback] = useState<{ success: boolean; message: string } | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
   const [sqlTab, setSqlTab] = useState<'up' | 'down'>('up')
+  // Bumped on every detail load, so the execution list reloads too: a failed rollback adds an
+  // execution without changing this migration's status.
+  const [loads, setLoads] = useState(0)
 
   const fetchDetail = (showSpinner = true) => {
     if (!id) return
@@ -27,6 +31,7 @@ export const MigrationDetailPage: React.FC = () => {
       .then((res) => {
         setMigration(res.migration)
         setCanEdit(res.can_edit)
+        setLoads((n) => n + 1)
       })
       .catch((err) => {
         setError(err.message || 'Gagal memuat detail migration')
@@ -430,6 +435,8 @@ export const MigrationDetailPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      <ExecutionHistory migrationId={migration.id} refreshKey={String(loads)} />
 
       {/* Irreversible notice */}
       {migration.is_irreversible && (
