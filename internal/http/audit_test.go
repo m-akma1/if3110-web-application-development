@@ -72,7 +72,7 @@ func TestAuditEventsForRequests_Integration(t *testing.T) {
 	}
 	grant, enqueue, denied := events[0], events[1], events[2]
 	if grant["event"] != "audit.grant" || grant["outcome"] != "success" || grant["actor"] != userID(t, env.srv, "admin") ||
-		grant["level"] != "VIEW_EDIT" || grant["database_id"] != target {
+		grant["access_level"] != "VIEW_EDIT" || grant["level"] != "INFO" || grant["database_id"] != target {
 		t.Errorf("grant event = %v", grant)
 	}
 	if enqueue["event"] != "audit.enqueue" || enqueue["outcome"] != "success" || enqueue["actor"] != bob ||
@@ -83,7 +83,13 @@ func TestAuditEventsForRequests_Integration(t *testing.T) {
 	if denied["event"] != "audit.enqueue" || denied["outcome"] != "denied" || denied["actor"] != userID(t, env.srv, "carol") {
 		t.Errorf("denied event = %v", denied)
 	}
-	// Audit events never carry the SQL script.
+	// Audit events never carry the SQL script, and no attribute may reuse a key slog writes
+	// itself: a duplicate JSON key is read back as only one of the two values.
+	for _, line := range bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n")) {
+		if bytes.Count(line, []byte(`"level":`)) > 1 || bytes.Count(line, []byte(`"time":`)) > 1 {
+			t.Errorf("duplicate key in log line: %s", line)
+		}
+	}
 	for _, e := range events {
 		if b, _ := json.Marshal(e); strings.Contains(string(b), "CREATE TABLE") {
 			t.Errorf("audit event leaks SQL: %s", b)

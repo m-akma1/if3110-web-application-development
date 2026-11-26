@@ -298,7 +298,7 @@ func (s *Server) handleAPIAdminSetGrant(w http.ResponseWriter, r *http.Request) 
 	s.audit(r.Context(), audit.Grant, err,
 		slog.String("group_id", strings.TrimSpace(body.GroupID)),
 		slog.String("database_id", strings.TrimSpace(body.DatabaseID)),
-		slog.String("level", level))
+		slog.String("access_level", level)) // not "level": that key is the log level
 	if err != nil {
 		msg, code := adminErrorMessage(err)
 		writeJSON(w, code, map[string]any{"error": msg})
