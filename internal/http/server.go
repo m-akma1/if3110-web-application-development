@@ -3,14 +3,16 @@ package http
 import (
 	"encoding/json"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 
 	"dbplatform/internal/admin"
 	"dbplatform/internal/authn"
 	"dbplatform/internal/dbmanager"
 	"dbplatform/internal/groups"
+	"dbplatform/internal/logging"
 	"dbplatform/internal/migration"
 	"dbplatform/internal/rbac"
 )
@@ -19,7 +21,7 @@ import (
 type Server struct {
 	mux        *http.ServeMux
 	handler    http.Handler
-	logger     *log.Logger
+	logger     *slog.Logger
 	sessions   *authn.SessionStore
 	groups     *groups.Repository
 	access     *rbac.Authorizer
@@ -30,6 +32,7 @@ type Server struct {
 
 // Deps are the services the HTTP layer needs. All are backed by the platform PostgreSQL in production.
 type Deps struct {
+	Logger   *slog.Logger
 	Sessions *authn.SessionStore // identity and session lifecycle
 	Groups   *groups.Repository  // groups, membership, invite codes
 	Access   *rbac.Authorizer    // every database authorization decision
@@ -46,9 +49,14 @@ func NewServer(logOutput io.Writer, deps Deps) *Server {
 		logOutput = os.Stdout
 	}
 
+	logger := deps.Logger
+	if logger == nil {
+		logger = logging.New(logOutput, slog.LevelInfo)
+	}
+
 	s := &Server{
 		mux:        http.NewServeMux(),
-		logger:     log.New(logOutput, "", log.LstdFlags),
+		logger:     logger,
 		sessions:   deps.Sessions,
 		groups:     deps.Groups,
 		access:     deps.Access,
@@ -64,6 +72,7 @@ func NewServer(logOutput io.Writer, deps Deps) *Server {
 	var h http.Handler = s.mux
 	h = CSRFGuardMiddleware(h)
 	h = SanitizedLoggerMiddleware(s.logger)(h)
+	h = RequestContextMiddleware(h)
 	s.handler = h
 	return s
 }
@@ -78,23 +87,45 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) registerRoutes() {
-	// Static assets (Tailwind CSS, htmx, Alpine.js)
+	// Static assets
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
-	s.mux.HandleFunc("GET /", s.handleRoot)
-	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 
-	s.registerAuthRoutes()
-	s.registerViewerRoutes()
-	s.registerMigrationRoutes()
-	s.registerAdminRoutes()
+	// Vite SPA Assets
+	for _, assetsDir := range []string{"./dist/assets", "./frontend/dist/assets"} {
+		if _, err := os.Stat(assetsDir); err == nil {
+			s.mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir(assetsDir))))
+			break
+		}
+	}
+
+	s.mux.HandleFunc("GET /api/health", s.handleHealth)
+	s.registerAPIRoutes()
+
+	// SPA fallback: all page requests serve index.html
+	s.mux.HandleFunc("GET /", s.handleSPA)
 }
 
-func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
+func findDistDir() string {
+	for _, dir := range []string{"./dist", "./frontend/dist"} {
+		if _, err := os.Stat(dir + "/index.html"); err == nil {
+			return dir
+		}
+	}
+	return ""
+}
+
+func isBrowserNavigate(r *http.Request) bool {
+	ua := r.Header.Get("User-Agent")
+	return strings.Contains(ua, "Mozilla")
+}
+
+func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
+	dist := findDistDir()
+	if dist != "" {
+		http.ServeFile(w, r, dist+"/index.html")
 		return
 	}
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
+	http.Error(w, "Frontend SPA belum di-build. Jalankan `cd frontend && npm run build`", http.StatusNotFound)
 }
 
 // handleHealth is a liveness check for load balancers and monitoring.

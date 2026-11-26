@@ -3,13 +3,14 @@ package http
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"dbplatform/domain"
 	"dbplatform/internal/authn"
+	"dbplatform/internal/logging"
 	"dbplatform/internal/rbac"
-	"dbplatform/views/pages"
 )
 
 // This file is the HTTP side of access control: identify the principal (authn), then ask
@@ -36,7 +37,16 @@ func (s *Server) layoutUser(ctx context.Context, u *authn.User) (*domain.AuthLay
 			return nil, err
 		}
 		for _, g := range gs {
-			layout.Groups = append(layout.Groups, domain.GroupSummary{ID: g.ID, Name: g.Name, IsSystem: g.IsSystem})
+			isLeader := g.LeaderID != "" && g.LeaderID == u.ID
+			if isLeader {
+				layout.IsLeader = true
+			}
+			layout.Groups = append(layout.Groups, domain.GroupSummary{
+				ID:       g.ID,
+				Name:     g.Name,
+				IsSystem: g.IsSystem,
+				IsLeader: isLeader,
+			})
 		}
 	}
 	if s.access != nil {
@@ -77,10 +87,14 @@ func (s *Server) validateRequestSession(w http.ResponseWriter, r *http.Request) 
 	return res.User, true
 }
 
-// requireSession identifies the user or sends them to /login (HX-Redirect for HTMX requests).
+// requireSession identifies the user or sends them to /login (HX-Redirect for HTMX requests, 401 for /api/ requests).
 func (s *Server) requireSession(w http.ResponseWriter, r *http.Request) (*authn.User, *domain.AuthLayoutUser, bool) {
 	user, ok := s.validateRequestSession(w, r)
 	if !ok {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			writeJSONError(w, http.StatusUnauthorized, "Sesi Anda telah berakhir atau belum masuk. Silakan login kembali.")
+			return nil, nil, false
+		}
 		if isHTMX(r) {
 			w.Header().Set("HX-Redirect", "/login")
 			w.WriteHeader(http.StatusUnauthorized)
@@ -89,9 +103,11 @@ func (s *Server) requireSession(w http.ResponseWriter, r *http.Request) (*authn.
 		}
 		return nil, nil, false
 	}
+	// Every later log record of this request (including the access log) carries the actor.
+	logging.SetActor(r.Context(), user.ID)
 	layout, err := s.layoutUser(r.Context(), user)
 	if err != nil {
-		s.logger.Printf("[AUTHZ] gagal memuat profil user %s: %v", user.ID, err)
+		s.logger.ErrorContext(r.Context(), "authz.profile_error", slog.String("error", err.Error()))
 		http.Error(w, "Gagal memuat profil pengguna", http.StatusInternalServerError)
 		return nil, nil, false
 	}
@@ -128,8 +144,19 @@ func (s *Server) authorizeDB(ctx context.Context, u *authn.User, dbID string, ac
 		return rbac.AccessNone, rbac.ErrForbidden
 	}
 	level, err := s.access.Authorize(ctx, u.ID, dbID, action)
-	if err != nil && !errors.Is(err, rbac.ErrForbidden) {
-		s.logger.Printf("[AUTHZ] gagal memeriksa akses user=%s db=%s action=%s: %v", u.ID, dbID, action, err)
+	switch {
+	case errors.Is(err, rbac.ErrForbidden):
+		s.logger.WarnContext(ctx, "authz.denied",
+			slog.String("database_id", dbID),
+			slog.String("action", string(action)),
+			slog.String("status", "DENIED"),
+		)
+	case err != nil:
+		s.logger.ErrorContext(ctx, "authz.error",
+			slog.String("database_id", dbID),
+			slog.String("action", string(action)),
+			slog.String("error", err.Error()),
+		)
 	}
 	return level, err
 }
@@ -151,6 +178,10 @@ func accessDeniedMessage(err error) string {
 
 // renderForbiddenPage renders a full page with 403 (or 500 when the check itself failed).
 func (s *Server) renderForbiddenPage(w http.ResponseWriter, r *http.Request, layout *domain.AuthLayoutUser, csrfToken, activeTab string, err error) {
+	if dist := findDistDir(); dist != "" && isBrowserNavigate(r) {
+		http.ServeFile(w, r, dist+"/index.html")
+		return
+	}
 	writeFragmentStatus(w, err)
-	_ = pages.Forbidden(layout, activeTab, accessDeniedMessage(err), csrfToken).Render(r.Context(), w)
+	writeJSONError(w, http.StatusForbidden, accessDeniedMessage(err))
 }

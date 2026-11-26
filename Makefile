@@ -1,36 +1,28 @@
 # Developer shortcuts. Run from the repository root.
-TEMPL          := go run github.com/a-h/templ/cmd/templ@v0.3.1070
-TAILWIND       := npx --no-install @tailwindcss/cli -i ./assets/css/input.css -o ./static/css/style.css
 TEST_DB_URL    ?= postgres://test:test@localhost:5433/dbplatform_test?sslmode=disable
 
-.PHONY: help gen templ css dev dev-templ dev-css dev-go vet test test-integration test-db-up test-db-down
+.PHONY: help build frontend-build frontend-dev dev vet test test-integration test-db-up test-db-down
 
 help:
-	@echo "make gen               generate templ code and Tailwind CSS"
-	@echo "make dev               watch templ + Tailwind and run the app (needs the .env variables exported)"
+	@echo "make build             build frontend SPA and verify Go binary"
+	@echo "make frontend-dev      run Vite dev server for frontend SPA"
+	@echo "make frontend-build    build frontend SPA with Vite"
+	@echo "make dev               run the Go app (needs the .env variables exported)"
 	@echo "make vet               go vet"
 	@echo "make test              unit tests (integration tests skip without TEST_DATABASE_URL)"
 	@echo "make test-integration  start the test PostgreSQL and run every test against it"
 	@echo "make test-db-down      stop the test PostgreSQL"
 
-gen: templ css
+build: frontend-build
+	go build .
 
-templ:
-	$(TEMPL) generate
+frontend-build:
+	cd frontend && npm run build
 
-css:
-	$(TAILWIND)
+frontend-dev:
+	cd frontend && npm run dev
 
 dev:
-	$(MAKE) -j3 dev-templ dev-css dev-go
-
-dev-templ:
-	$(TEMPL) generate --watch
-
-dev-css:
-	$(TAILWIND) --watch
-
-dev-go:
 	go run .
 
 vet:
@@ -40,10 +32,13 @@ test:
 	go test ./...
 
 test-db-up:
-	docker compose --profile test up -d --wait postgres-test
+	docker compose --profile test up -d postgres-test
 
 test-db-down:
-	docker compose --profile test rm -sf postgres-test
+	docker compose --profile test down -v
 
 test-integration: test-db-up
-	TEST_DATABASE_URL='$(TEST_DB_URL)' go test -count=1 ./...
+	@echo "Waiting for test PostgreSQL to be healthy..."
+	@until docker compose --profile test exec -T postgres-test pg_isready -U test -d dbplatform_test >/dev/null 2>&1; do sleep 0.2; done
+	@TEST_DATABASE_URL="$(TEST_DB_URL)" go test -v -race ./...
+	@$(MAKE) test-db-down

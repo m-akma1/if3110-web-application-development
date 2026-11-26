@@ -13,13 +13,21 @@ import (
 	"unicode/utf8"
 )
 
-// Status is the lifecycle state of a migration: DRAFT (editable) -> SUCCESS or FAILED (immutable).
+// Status is the lifecycle state of a migration.
 type Status string
 
 const (
-	StatusDraft   Status = "DRAFT"
-	StatusSuccess Status = "SUCCESS"
-	StatusFailed  Status = "FAILED"
+	StatusDraft         Status = "DRAFT"
+	StatusPendingReview Status = "PENDING_REVIEW"
+	StatusApproved      Status = "APPROVED"
+	StatusRejected      Status = "REJECTED"
+	StatusQueued        Status = "QUEUED"
+	StatusRunning       Status = "RUNNING"
+	StatusPartial       Status = "PARTIAL"
+	StatusSuccess       Status = "SUCCESS"
+	StatusFailed        Status = "FAILED"
+	StatusAborted       Status = "ABORTED"
+	StatusRolledBack    Status = "ROLLED_BACK"
 )
 
 const (
@@ -28,25 +36,68 @@ const (
 )
 
 var (
-	ErrNotFound          = errors.New("migration tidak ditemukan")
-	ErrNotDraft          = errors.New("migration sudah dieksekusi dan tidak dapat diubah")
-	ErrInvalidName       = fmt.Errorf("nama migration wajib diisi (maksimal %d karakter)", MaxNameLength)
-	ErrEmptyScript       = errors.New("script SQL tidak boleh kosong")
-	ErrScriptTooLarge    = fmt.Errorf("script SQL melebihi batas %d KiB", MaxScriptLength/1024)
-	ErrScriptRejected    = errors.New("script ditolak")
-	ErrTargetUnavailable = errors.New("koneksi ke database target tidak tersedia")
-	ErrTargetBusy        = errors.New("migration lain sedang berjalan pada database ini, coba lagi nanti")
+	ErrNotFound                 = errors.New("migration tidak ditemukan")
+	ErrNotDraft                 = errors.New("migration sudah dieksekusi dan tidak dapat diubah")
+	ErrInvalidName              = fmt.Errorf("nama migration wajib diisi (maksimal %d karakter)", MaxNameLength)
+	ErrEmptyScript              = errors.New("script SQL tidak boleh kosong")
+	ErrScriptTooLarge           = fmt.Errorf("script SQL melebihi batas %d KiB", MaxScriptLength/1024)
+	ErrScriptRejected           = errors.New("script ditolak")
+	ErrTargetUnavailable        = errors.New("koneksi ke database target tidak tersedia")
+	ErrTargetBusy               = errors.New("migration lain sedang berjalan pada database ini, coba lagi nanti")
+	ErrNotApproved              = errors.New("migration belum disetujui oleh seluruh Group Leader terkait")
+	ErrNotPendingReview         = errors.New("migration tidak sedang dalam peninjauan (pending review)")
+	ErrNotLeader                = errors.New("anda bukan Group Leader dari group yang memiliki hak persetujuan")
+	ErrAlreadyReviewed          = errors.New("group anda sudah memberikan review untuk migration ini")
+	ErrNoRollbackScript         = errors.New("migrasi ini tidak memiliki script rollback (SQL Down)")
+	ErrCannotRollbackType       = errors.New("tidak dapat melakukan rollback pada migrasi tipe rollback")
+	ErrOnlySuccessCanRollback   = errors.New("hanya migration dengan status SUCCESS yang dapat di-rollback")
+	ErrOnlyRolledBackCanForward = errors.New("hanya migration dengan status ROLLED_BACK yang dapat di-forward")
+	ErrRollbackNotLatest        = errors.New("rollback hanya dapat dilakukan pada migration aktif terakhir")
+	ErrForwardNotLinear         = errors.New("forward harus mengikuti urutan linear")
+	ErrAlreadyForwarded         = errors.New("migrasi ini sudah di-forward sebelumnya")
+	ErrPendingRollbackExists    = errors.New("sudah terdapat pengajuan rollback yang sedang menunggu review/eksekusi")
+	ErrPendingForwardExists     = errors.New("sudah terdapat pengajuan forward yang sedang menunggu review/eksekusi")
+	ErrImmutableRollbackScript  = errors.New("naskah SQL pada permintaan rollback atau forward bersifat immutable dan tidak dapat diubah")
 )
+
+// Approval is one group's review and approval record for a migration.
+type Approval struct {
+	ID              string
+	MigrationID     string
+	GroupID         string
+	GroupName       string
+	LeaderID        string
+	LeaderName      string
+	Status          string // PENDING, APPROVED, REJECTED
+	ReviewedAt      *time.Time
+	Note            string
+	RejectionReason string
+	CreatedAt       time.Time
+}
 
 // Migration is one draft or executed run on a target database.
 type Migration struct {
-	ID           string
-	DatabaseID   string
-	DatabaseName string
-	Version      int // 0 unless Status is SUCCESS
-	Name         string
-	SQL          string
-	Status       Status
+	ID                 string
+	DatabaseID         string
+	DatabaseName       string
+	Version            int // 0 unless Status is SUCCESS
+	Name               string
+	SQL                string
+	SQLUp              string
+	SQLDown            string
+	IsIrreversible     bool
+	IrreversibleReason string
+	ExecutionType      string
+	RollbackTargetID   string
+	SourceMigrationID  string
+	CanRollback        bool
+	CanForward         bool
+	Status             Status
+
+	ReviewRequired  bool
+	CanApprove      bool
+	RejectionReason string
+	Approvals       []Approval
 
 	CreatedBy     string // user id; empty if the user was deleted
 	CreatedByName string
@@ -60,8 +111,10 @@ type Migration struct {
 	Error          string // formatted error for FAILED runs
 }
 
-// IsDraft reports whether the migration can still be edited and executed.
-func (m *Migration) IsDraft() bool { return m != nil && m.Status == StatusDraft }
+// IsDraft reports whether the migration can still be edited.
+func (m *Migration) IsDraft() bool {
+	return m != nil && (m.Status == StatusDraft || m.Status == StatusRejected)
+}
 
 // NormalizeDraft trims and validates a draft's name and script.
 func NormalizeDraft(name, script string) (string, string, error) {

@@ -165,3 +165,96 @@ func TestRepository_Management_Integration(t *testing.T) {
 	}
 	_ = other
 }
+
+func TestRepository_LeaderLifecycle_Integration(t *testing.T) {
+	db := testutil.NewPlatformDB(t)
+	ctx := context.Background()
+	store := authn.NewPostgresSessionStore(db, authn.DefaultSessionConfig())
+	repo := groups.NewRepository(db)
+
+	u1, err := store.RegisterUser(ctx, authn.RegisterInput{Username: "user1", Password: "Password12345"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u2, err := store.RegisterUser(ctx, authn.RegisterInput{Username: "user2", Password: "Password12345"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u3, err := store.RegisterUser(ctx, authn.RegisterInput{Username: "user3", Password: "Password12345"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := repo.Create(ctx, "DevOps", "DevOps Team")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Group initially has no leader
+	leader, err := repo.GetLeader(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leader != "" {
+		t.Fatalf("empty group should have no leader, got %q", leader)
+	}
+
+	// 2. Add first member -> automatically becomes leader
+	if err := repo.AddMember(ctx, g.ID, u1.ID); err != nil {
+		t.Fatal(err)
+	}
+	leader, err = repo.GetLeader(ctx, g.ID)
+	if err != nil || leader != u1.ID {
+		t.Fatalf("first member should automatically become leader, got %q, want %q", leader, u1.ID)
+	}
+
+	// 3. Add second member -> leader remains u1
+	if err := repo.AddMember(ctx, g.ID, u2.ID); err != nil {
+		t.Fatal(err)
+	}
+	leader, err = repo.GetLeader(ctx, g.ID)
+	if err != nil || leader != u1.ID {
+		t.Fatalf("leader should still be u1, got %q", leader)
+	}
+
+	// 4. Add third member
+	if err := repo.AddMember(ctx, g.ID, u3.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 5. Explicitly change leader to u3
+	if err := repo.SetLeader(ctx, g.ID, u3.ID); err != nil {
+		t.Fatal(err)
+	}
+	leader, _ = repo.GetLeader(ctx, g.ID)
+	if leader != u3.ID {
+		t.Fatalf("leader should be u3, got %q", leader)
+	}
+
+	// 6. Remove leader u3 -> should fallback to earliest joined member (u1)
+	if err := repo.RemoveMember(ctx, g.ID, u3.ID); err != nil {
+		t.Fatal(err)
+	}
+	leader, _ = repo.GetLeader(ctx, g.ID)
+	if leader != u1.ID {
+		t.Fatalf("after removing u3, leader should succeed to u1, got %q", leader)
+	}
+
+	// 7. Remove u1 -> should succeed to u2
+	if err := repo.RemoveMember(ctx, g.ID, u1.ID); err != nil {
+		t.Fatal(err)
+	}
+	leader, _ = repo.GetLeader(ctx, g.ID)
+	if leader != u2.ID {
+		t.Fatalf("after removing u1, leader should succeed to u2, got %q", leader)
+	}
+
+	// 8. Remove u2 -> group is empty, leader is now empty/NULL
+	if err := repo.RemoveMember(ctx, g.ID, u2.ID); err != nil {
+		t.Fatal(err)
+	}
+	leader, _ = repo.GetLeader(ctx, g.ID)
+	if leader != "" {
+		t.Fatalf("empty group should have no leader, got %q", leader)
+	}
+}

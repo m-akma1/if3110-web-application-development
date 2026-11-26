@@ -3,6 +3,7 @@ package http_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -104,7 +105,7 @@ type client struct {
 
 func newClient(t *testing.T, srv *apphttp.Server) *client {
 	c := &client{t: t, srv: srv, cookies: map[string]*http.Cookie{}}
-	c.do(httptest.NewRequest(http.MethodGet, "/login", nil))
+	c.do(httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
 	if c.cookies[apphttp.CSRFCookieName] == nil {
 		t.Fatalf("no CSRF cookie issued")
 	}
@@ -137,16 +138,22 @@ func (c *client) get(path string) *httptest.ResponseRecorder {
 func (c *client) post(path string, form url.Values) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("HX-Request", "true")
+	return c.do(req)
+}
+
+func (c *client) postJSON(path string, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	return c.do(req)
 }
 
 // login signs the client in and fails the test if it does not work.
 func (c *client) login(identifier, password string) {
 	c.t.Helper()
-	rec := c.post("/login", url.Values{"identifier": {identifier}, "password": {password}})
-	if rec.Header().Get("HX-Redirect") != "/dashboard" {
-		c.t.Fatalf("login %s failed: %s", identifier, rec.Body.String())
+	body := fmt.Sprintf(`{"identifier":"%s","password":"%s"}`, identifier, password)
+	rec := c.postJSON("/api/auth/login", body)
+	if rec.Code != http.StatusOK {
+		c.t.Fatalf("login %s failed: status %d body %s", identifier, rec.Code, rec.Body.String())
 	}
 }
 

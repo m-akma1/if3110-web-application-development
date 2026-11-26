@@ -96,6 +96,26 @@ func (s *PostgresGrantStore) ListGrants(ctx context.Context) ([]GroupGrant, erro
 	return list, rows.Err()
 }
 
+// GroupsWithAccess returns all group IDs that hold VIEW_ONLY or VIEW_EDIT grants on the target database.
+func (s *PostgresGrantStore) GroupsWithAccess(ctx context.Context, databaseID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT group_id FROM group_db_grants
+		WHERE database_id = $1 AND access_level IN ('VIEW_ONLY', 'VIEW_EDIT')`, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var groupIDs []string
+	for rows.Next() {
+		var gid string
+		if err := rows.Scan(&gid); err != nil {
+			return nil, err
+		}
+		groupIDs = append(groupIDs, gid)
+	}
+	return groupIDs, rows.Err()
+}
+
 // SetGroupGrant sets a group's level on a database and returns the previous level.
 // NONE removes the grant. Unknown group or database returns ErrUnknownGrantTarget.
 func (s *PostgresGrantStore) SetGroupGrant(ctx context.Context, groupID, databaseID string, level AccessLevel) (AccessLevel, error) {

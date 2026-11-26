@@ -53,14 +53,16 @@ The `Makefile` holds the developer shortcuts. Run them from the repository root.
 
 | Command | Description |
 |---|---|
-| `make gen` | Generate templ code (`*_templ.go`) and compile Tailwind CSS (`static/css/style.css`) |
-| `make dev` | Watch templ and Tailwind, and run the app with `go run .` |
+| `make frontend-dev` | Run the Vite dev server for the React SPA (hot reload) |
+| `make frontend-build` | Build the SPA into `frontend/dist` (served by the Go app) |
+| `make build` | Build the SPA, then build the Go binary |
+| `make dev` | Run the Go API server with `go run .` |
 | `make vet` | Run `go vet` |
 | `make test` | Run unit tests (integration tests are skipped without `TEST_DATABASE_URL`) |
 | `make test-integration` | Start the disposable test PostgreSQL and run every test against it |
 | `make test-db-down` | Stop the test PostgreSQL |
 
-Run `npm ci` once before using the Tailwind targets.
+Run `npm --prefix frontend install` once before using the frontend targets. The Go server serves the built SPA from `frontend/dist`, so run `make frontend-build` at least once before `make dev`.
 
 `make dev` reads its configuration from the environment, so export the `.env` variables first. The Compose databases do not publish host ports, so point `POSTGRES_HOST` and `TARGET_POSTGRES_HOST` at PostgreSQL servers reachable from your machine. The session and CSRF cookies are `Secure` and accepted by browsers on `http://localhost`.
 
@@ -114,6 +116,12 @@ The `target-postgres` init scripts ([docker/target-init/](docker/target-init/)) 
 | `MIGRATION_LOCK_TIMEOUT_MS` | `5000` | (Optional) Maximum time in milliseconds to wait for a database lock |
 | `MIGRATION_STATEMENT_TIMEOUT_MS` | `60000` | (Optional) Maximum execution time in milliseconds for a single migration statement |
 | `MIGRATION_QUEUE_TIMEOUT_MS` | `15000` | (Optional) Maximum time in milliseconds a migration can wait in the queue |
+
+#### Logging
+
+| Variable | Default Value | Description |
+|---|---|---|
+| `LOG_LEVEL` | `info` | (Optional) Minimum log level: `debug`, `info`, `warn` or `error` |
 
 #### Session Handling
 
@@ -191,32 +199,38 @@ When enabled, the app creates the demo users and groups that do not exist yet, r
 
 | Layer | Technology |
 |---|---|
-| Language and server | Go 1.26, standard library `net/http` router |
-| Templates | [templ](https://templ.guide) v0.3.1070 (server-rendered HTML) |
-| Interactivity | htmx 2.0.11, Alpine.js 3.13.5 (served from `static/js`) |
-| Styling | Tailwind CSS v4 (CLI build) |
+| Backend language and server | Go 1.26, standard library `net/http` router (method + path patterns) |
+| API | REST JSON under `/api/*`, cookie session + double-submit CSRF token |
+| Frontend | React 18 + TypeScript 5 Single Page Application, React Router 6 |
+| Frontend build | Vite 6 (output `frontend/dist`, served by the Go app with an `index.html` fallback) |
+| Styling | Tailwind CSS 3.4 (PostCSS + Autoprefixer) |
 | Databases | PostgreSQL 16, driver `jackc/pgx/v5` |
 | Password hashing | Argon2id (`golang.org/x/crypto`) |
+| Logging | `log/slog` structured JSON logs on stdout (one logger, request correlation ID, redaction) |
 | Reverse proxy and TLS | Caddy 2 |
-| Deployment | Docker multi-stage build, Docker Compose |
-| CI | GitHub Actions |
+| Deployment | Docker multi-stage build (Node -> Go -> Alpine), Docker Compose |
+| CI and security | GitHub Actions (build, vet, test), CodeQL SAST |
 
 ### Architectural Diagram
 
 ```mermaid
 flowchart LR
-    browser["Browser<br/>(htmx and Alpine.js)"]
+    subgraph browser["Browser"]
+        spa["React SPA<br/>(React Router, fetch API client)"]
+    end
 
     subgraph compose["Docker Compose network (app_net)"]
         caddy["Caddy<br/>TLS on :443 and :80"]
 
         subgraph app["Go app (:8080)"]
-            http["internal/http<br/>routes, CSRF guard, sanitized logger"]
+            static["SPA host<br/>frontend/dist + index.html fallback"]
+            http["internal/http<br/>REST /api/*, CSRF guard, sanitized logger"]
             authn["authn<br/>users, sessions"]
             rbac["rbac<br/>access decisions"]
             admin["admin<br/>console services"]
+            groups["groups<br/>groups, leaders, invite codes"]
             viewer["dbmanager<br/>pools, read-only viewer"]
-            migr["migration<br/>drafts, dry run, engine"]
+            migr["migration<br/>drafts, dry run, approvals,<br/>engine, rollback/forward"]
         end
 
         platform[("postgres<br/>platform DB")]
@@ -225,13 +239,17 @@ flowchart LR
 
     other[("Other registered<br/>PostgreSQL targets")]
 
-    browser -- HTTPS --> caddy -- HTTP --> http
-    http --> authn & rbac & admin & viewer & migr
-    authn & rbac & admin & migr --> platform
+    spa -- "HTTPS (HTML/JS assets)" --> caddy
+    spa -- "HTTPS JSON /api/*" --> caddy
+    caddy -- HTTP --> static
+    caddy -- HTTP --> http
+    http --> authn & rbac & admin & groups & viewer & migr
+    authn & rbac & admin & groups & migr --> platform
     viewer & migr --> target
     viewer & migr --> other
 ```
 
+- The browser loads the SPA once (`index.html` + `/assets/*`). Every page change after that is handled by React Router on the client, and data comes from the JSON API under `/api/*`.
 - The **platform database** stores users, sessions, groups, grants, invite codes, registered targets (with sealed passwords) and migration history. It is never exposed as a viewer target.
 - **Target databases** are only reached through the connection registry, which holds one small pool (up to 5 connections) per connected target. The Data Viewer, the target manager and the migration engine share it.
 - Every request that touches a target first identifies the user (`authn`), then asks `rbac.Authorizer` whether the action is allowed. Handlers never compare access levels themselves.
@@ -241,57 +259,81 @@ flowchart LR
 ```text
 .
 ├── main.go                      # Entry point: config, platform migrations, bootstrap, server
-├── domain/                      # View models shared by handlers and templates
+├── domain/                      # JSON view models (DTOs) returned by the API
 ├── internal/
 │   ├── config/                  # Reads and validates every environment variable
 │   ├── platformdb/              # Embedded platform schema migrations (migrations/NNN_*.sql)
 │   ├── authn/                   # Users, Argon2id passwords, session lifecycle
 │   ├── rbac/                    # Access levels, actions, effective-access rule, grant store
-│   ├── groups/                  # Groups, memberships, invite codes
+│   ├── groups/                  # Groups, memberships, group leaders, invite codes
 │   ├── admin/                   # Platform Admin console services
 │   ├── dbmanager/               # Target registry, credential encryption, read-only guard, viewer queries
-│   ├── migration/               # Statement splitter, script checks, engine, EXPLAIN plans, history
+│   ├── migration/               # Splitter, script checks, engine, rollback/forward, approvals, EXPLAIN, history
 │   ├── bootstrap/               # Bootstrap admins and demo data seeding
-│   ├── http/                    # Routes, handlers, middleware, cookies
+│   ├── http/                    # REST API handlers, SPA host, middleware, cookies
+│   ├── logging/                 # Structured JSON logger (slog), correlation ID and actor in context, SQL log helpers
 │   ├── ids/                     # UUID helpers
 │   ├── accesstest/, testutil/   # Test fixtures and test database helpers
-├── views/
-│   ├── layouts/                 # Auth and dashboard page shells
-│   ├── pages/                   # Login/signup, viewer, migration, admin pages
-│   └── components/              # Navbar, sidebar, data grid, query plan, empty/error states
-├── assets/css/input.css         # Tailwind source and theme tokens
-├── static/                      # Compiled CSS, htmx, Alpine.js, images
+├── frontend/                    # React + TypeScript SPA (Vite)
+│   ├── src/api/                 # fetch client (session cookie + CSRF header)
+│   ├── src/context/             # Auth context (current user, CSRF token)
+│   ├── src/pages/               # Login, signup, dashboard (viewer), migration, reviews, admin
+│   ├── src/components/          # Layout, sidebar, data grid, dry-run report, migration and admin parts
+│   ├── src/types/, src/utils/   # Shared TypeScript types and helpers
+│   └── public/static/           # Images copied into the build
+├── static/                      # Images served under /static
+├── docs/                        # Extra documentation (CodeQL SAST report)
 ├── docker/target-init/          # Init scripts for the demo target database
-├── Dockerfile                   # CSS build -> templ generate + Go build -> Alpine runtime
+├── Dockerfile                   # SPA build (Node) -> Go build -> Alpine runtime
 ├── docker-compose.yml           # caddy, app, postgres, target-postgres, postgres-test (profile "test")
 ├── Caddyfile                    # TLS, reverse proxy, log filtering
 ├── Makefile                     # Developer shortcuts
+├── .github/workflows/codeql.yml # CodeQL SAST
 └── .github/workflows/ci.yml     # CI pipeline
 ```
 
 ### Routes
 
+#### SPA pages (client-side routes)
+
+The Go server answers every non-API `GET` with `index.html`; React Router renders the page.
+
+| Path | Access | Page |
+|---|---|---|
+| `/login`, `/signup` | Public | Login and signup |
+| `/dashboard` | View Only | Database Viewer and read-only query explorer |
+| `/migration` | View Only | Migration history (and drafts/editor for View & Edit) |
+| `/migration/reviews` | Group Leader | Migrations waiting for the leader's review |
+| `/migration/:id` | View Only | Migration detail, approvals, actions |
+| `/admin` | Platform Admin | Admin console (users, groups, databases, invite codes) |
+| `/forbidden` | Logged in | Access denied page |
+
+#### JSON API
+
 | Method and path | Access | Description |
 |---|---|---|
-| `GET /` | Public | Redirects to `/login` |
-| `GET /login`, `POST /login` | Public | Login page and form |
-| `GET /signup`, `POST /signup` | Public | Signup page and form |
-| `POST /logout` | Logged in | Revokes the session |
-| `GET /dashboard` | View Only | Database Viewer for the selected database |
-| `GET /dashboard/table` | View Only | One page of a table with its schema |
-| `POST /dashboard/query` | View Only | Runs a read-only query |
-| `GET /migration` | View Only | Migration history (and drafts for View & Edit) |
-| `GET /migration/{id}` | View Only | Migration detail |
-| `POST /migration/drafts` | View & Edit | Creates a draft |
-| `POST /migration/{id}` | View & Edit | Saves a draft |
-| `POST /migration/{id}/delete` | View & Edit | Deletes a draft |
-| `POST /migration/{id}/dry-run` | View & Edit | Dry-runs a draft |
-| `POST /migration/{id}/execute` | View & Edit | Executes a draft |
-| `POST /migration/{id}/duplicate` | View & Edit | Copies a migration into a new draft |
-| `GET /admin` and `/admin/*` | Platform Admin | Admin console and its actions |
-| `GET /api/health` | Public | Liveness check (JSON) |
+| `GET /api/health` | Public | Liveness check |
+| `GET /api/auth/me` | Public | Current user and CSRF token (401 when logged out) |
+| `POST /api/auth/login`, `POST /api/auth/signup` | Public | Log in, sign up |
+| `POST /api/auth/logout` | Logged in | Revokes the session |
+| `GET /api/viewer` | View Only | Databases, schemas and tables for the selected database |
+| `GET /api/viewer/table` | View Only | One page of a table with its schema |
+| `POST /api/viewer/query` | View Only | Runs a read-only query |
+| `GET /api/migration` | View Only | History and drafts (`?hide_rollback=true` hides rollback pairs) |
+| `GET /api/migration/{id}` | View Only | Migration detail with approvals |
+| `POST /api/migration/drafts` | View & Edit | Creates a draft (SQL up/down, irreversible flag) |
+| `POST /api/migration/{id}`, `DELETE /api/migration/{id}` | View & Edit | Saves or deletes a draft |
+| `POST /api/migration/{id}/dry-run` | View & Edit | Dry-runs a draft |
+| `POST /api/migration/{id}/submit-review` | View & Edit | Sends a draft to group leaders for review |
+| `GET /api/migration/pending-reviews` | Group Leader | Lists migrations waiting for review |
+| `POST /api/migration/{id}/approve`, `POST /api/migration/{id}/reject` | Group Leader | Approves or rejects for the leader's group |
+| `POST /api/migration/{id}/execute` | View & Edit | Executes an approved migration |
+| `POST /api/migration/{id}/rollback` | View & Edit | Requests (or runs) a rollback of the latest active migration |
+| `POST /api/migration/{id}/forward` | View & Edit | Requests (or runs) a forward of a rolled-back migration |
+| `POST /api/migration/{id}/duplicate` | View & Edit | Copies a migration into a new draft |
+| `GET /api/admin/overview` and `/api/admin/*` | Platform Admin | Admin console data and actions |
 
-Database pages take the selected database as `?db_id=`
+Database pages and API calls take the selected database as `?db_id=`.
 
 ## Features and Behavior
 
@@ -333,9 +375,9 @@ Database pages take the selected database as `?db_id=`
 - Privilege changes:
   - Promotion to Platform Admin, joining a group, or a raised grant: the user's sessions rotate on their next request.
   - Demotion, deactivation, or a password reset: all of the user's sessions are revoked, so they must log in again.
-- Expired, revoked or unknown sessions are cleared and redirected to `/login` (htmx requests get an `HX-Redirect`).
-- **CSRF protection** uses a double-submit cookie: every `POST`, `PUT`, `PATCH` and `DELETE` must send an `X-CSRF-Token` header that matches the `__Host-csrf` cookie. The pages place the token in a meta tag and htmx sends it automatically.
-- **Logging**: the app logs method, path, status and duration only. Query parameters whose names look like passwords, sessions or tokens are redacted. Caddy removes `Cookie`, `Authorization` and `Set-Cookie` headers from its access logs.
+- Expired, revoked or unknown sessions are cleared. The API answers `401` and the SPA redirects to `/login`.
+- **CSRF protection** uses a double-submit cookie: every `POST`, `PUT`, `PATCH` and `DELETE` must send an `X-CSRF-Token` header that matches the `__Host-csrf` cookie. The API returns the token in the `csrf_token` field (login, signup, `/api/auth/me`) and the SPA's fetch client sends it on every state-changing request.
+- **Logging**: the access log records method, path, status and duration only. Query parameters whose names look like passwords, sessions or tokens are redacted. Caddy removes `Cookie`, `Authorization` and `Set-Cookie` headers from its access logs. See [Activity Logging](#activity-logging).
 
 #### Admin Platform
 
@@ -402,11 +444,76 @@ A migration is a named SQL script for one target database. It is either a **DRAF
 - Only PostgreSQL targets are supported.
 - If the app process dies after a migration commits on the target but before its history is saved, that run is missing from the history.
 
+### Activity Logging
+
+Every log record is one JSON object on stdout, written by one `log/slog` logger (`internal/logging`).
+
+- **Common fields**: `time`, `level`, `event` (a stable name such as `sql.result`), `component` (`http`, `dbmanager`, `migration`), `correlation_id`, `actor` (user ID), and `database_id` and `status` where they apply.
+- **Correlation ID**: every request gets an ID, returned in the `X-Request-ID` response header. A well-formed `X-Request-ID` from the client (`[A-Za-z0-9._-]`, at most 64 characters) is reused. Every record written while handling the request carries it.
+- **Every SQL execution is logged** as a `sql.start` and `sql.result` pair: Query Explorer queries (`sql_kind: read_only`), table browsing (`table_browse`), schema lookups (`catalog`) and migration scripts (`migration`). `sql.result` has `duration_ms`, `status`, `rows` when known, and on failure `error` and the PostgreSQL `sqlstate`.
+- **Transactions that change data** also log `tx.commit` or `tx.rollback`. A run of a migration, rollback or forward ends with one `migration.attempt` record (`execution_type`, `version`, `status`).
+- **Other events**: `http.request` (access log; `WARN` for 4xx, `ERROR` for 5xx), `authz.denied`, `authz.error`, `viewer.error`, `migration.error`, and startup events such as `server.started`.
+- **Redaction**: attributes whose name contains `password`, `secret`, `token`, `session`, `cookie`, `authorization`, `dsn` or `credential` are written as `[REDACTED]`. Bind parameter values are never logged, only their types. Query text is cut at 2000 characters.
+
+Reading the logs:
+
+```sh
+# every record of one request (X-Request-ID from the browser's DevTools)
+docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.correlation_id=="<id>")'
+# failed SQL
+docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.event=="sql.result" and .status=="FAILED")'
+```
+
+Example output (one block per request; long IDs shortened). A read-only query:
+
+```json
+{"time":"2026-11-26T06:55:10.438974839Z","level":"INFO","event":"sql.start","component":"dbmanager","database_id":"4ea8b6a0-…","sql_kind":"read_only","query":"SELECT 1","correlation_id":"readme-q1","actor":"0e966767-…"}
+{"time":"2026-11-26T06:55:10.439979881Z","level":"INFO","event":"sql.result","component":"dbmanager","database_id":"4ea8b6a0-…","sql_kind":"read_only","query":"SELECT 1","duration_ms":0,"status":"SUCCESS","rows":1,"correlation_id":"readme-q1","actor":"0e966767-…"}
+{"time":"2026-11-26T06:55:10.440056923Z","level":"INFO","event":"http.request","component":"http","method":"POST","path":"/api/viewer/query","status":200,"duration_ms":5,"correlation_id":"readme-q1","actor":"0e966767-…"}
+```
+
+A failing query:
+
+```json
+{"time":"2026-11-26T06:55:10.476767964Z","level":"ERROR","event":"sql.result","component":"dbmanager","database_id":"4ea8b6a0-…","sql_kind":"read_only","query":"SELECT * FROM tidak_ada","duration_ms":3,"status":"FAILED","error":"ERROR: relation \"tidak_ada\" does not exist (SQLSTATE 42P01)","sqlstate":"42P01","correlation_id":"readme-q2","actor":"0e966767-…"}
+{"time":"2026-11-26T06:55:10.476863589Z","level":"WARN","event":"http.request","component":"http","method":"POST","path":"/api/viewer/query","status":422,"duration_ms":6,"correlation_id":"readme-q2","actor":"0e966767-…"}
+```
+
+Access to a database the user has no grant on:
+
+```json
+{"time":"2026-11-26T06:55:10.533319339Z","level":"WARN","event":"authz.denied","component":"http","database_id":"00000000-0000-0000-0000-000000000000","action":"database:view_schema","status":"DENIED","correlation_id":"readme-deny","actor":"0e966767-…"}
+{"time":"2026-11-26T06:55:10.533437673Z","level":"WARN","event":"http.request","component":"http","method":"GET","path":"/api/viewer?db_id=00000000-0000-0000-0000-000000000000","status":403,"duration_ms":6,"correlation_id":"readme-deny","actor":"0e966767-…"}
+```
+
+A migration that commits (records from an integration test run, `time` left out):
+
+```json
+{"level":"INFO","event":"sql.start","component":"migration","database_id":"dfdf7952-…","sql_kind":"migration","query":"CREATE TABLE orders (id int PRIMARY KEY)","migration_id":"a4b31c6a-…","execution_type":"UP","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+{"level":"INFO","event":"sql.result","component":"migration","database_id":"dfdf7952-…","sql_kind":"migration","query":"CREATE TABLE orders (id int PRIMARY KEY)","migration_id":"a4b31c6a-…","execution_type":"UP","duration_ms":3,"status":"SUCCESS","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+{"level":"INFO","event":"tx.commit","component":"migration","database_id":"dfdf7952-…","migration_id":"a4b31c6a-…","execution_type":"UP","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+{"level":"INFO","event":"migration.attempt","component":"migration","execution_type":"UP","migration_id":"a4b31c6a-…","execution_id":"a4b31c6a-…","database_id":"dfdf7952-…","version":1,"status":"SUCCESS","duration_ms":17,"query":"CREATE TABLE orders (id int PRIMARY KEY)","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+```
+
+A migration that fails and is rolled back:
+
+```json
+{"level":"ERROR","event":"sql.result","component":"migration","database_id":"dfdf7952-…","sql_kind":"migration","query":"INSERT INTO missing VALUES (1)","migration_id":"4cc4cfc2-…","execution_type":"UP","duration_ms":0,"status":"FAILED","error":"ERROR: relation \"missing\" does not exist (SQLSTATE 42P01)","sqlstate":"42P01","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+{"level":"WARN","event":"tx.rollback","component":"migration","database_id":"dfdf7952-…","migration_id":"4cc4cfc2-…","execution_type":"UP","error":"ERROR: relation \"missing\" does not exist (SQLSTATE 42P01)","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+{"level":"ERROR","event":"migration.attempt","component":"migration","execution_type":"UP","migration_id":"4cc4cfc2-…","execution_id":"4cc4cfc2-…","database_id":"dfdf7952-…","version":0,"status":"FAILED","duration_ms":2,"query":"INSERT INTO missing VALUES (1)","error":"ERROR 42P01: relation \"missing\" does not exist (statement 1, baris 1, kolom 13)","sqlstate":"42P01","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+```
+
 ### Testing and CI
 
 - Unit tests run without a database: `make test`.
 - Integration tests use a disposable PostgreSQL from the `postgres-test` Compose profile (port 5433 on localhost, data on tmpfs): `make test-integration`.
-- GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on pushes to `main` and `dev` and on pull requests. It checks that the generated templ code is committed (error) and that the compiled CSS is up to date (warning), then runs `gofmt`, `go vet`, `go build`, and every test with the race detector against a PostgreSQL service. A second job builds the Docker image.
+- GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on pushes to `main` and `dev` and on pull requests. It installs and builds the frontend SPA, then runs `gofmt`, `go vet`, `go build`, and every test with the race detector against a PostgreSQL service. A second job builds the Docker image.
+
+### Security: SAST dengan CodeQL
+
+- Static Application Security Testing (SAST) diaktifkan menggunakan **GitHub CodeQL** pada [.github/workflows/codeql.yml](.github/workflows/codeql.yml) untuk menganalisis bahasa `go` (`autobuild`) dan `javascript-typescript` (`build-mode: none`) dengan query suite `security-extended`.
+- Hasil analisis diunggah ke **GitHub Code Scanning**, ditampilkan sebagai ringkasan pada **GitHub Actions Step Summary**, serta disimpan sebagai **SARIF artifact** (`codeql-sarif-go`, `codeql-sarif-javascript-typescript`).
+- Dokumentasi lengkap cakupan analisis, audit temuan, mitigasi/perbaikan, dan batasan SAST tersedia pada [docs/SAST-CodeQL.md](docs/SAST-CodeQL.md).
 
 ## Credits
 

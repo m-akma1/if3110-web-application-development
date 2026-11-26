@@ -3,10 +3,9 @@ package main
 import (
 	"context"
 	"database/sql"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"dbplatform/internal/admin"
@@ -16,6 +15,7 @@ import (
 	"dbplatform/internal/dbmanager"
 	"dbplatform/internal/groups"
 	apphttp "dbplatform/internal/http"
+	"dbplatform/internal/logging"
 	"dbplatform/internal/migration"
 	"dbplatform/internal/platformdb"
 	"dbplatform/internal/rbac"
@@ -24,14 +24,16 @@ import (
 )
 
 func main() {
+	logger := logging.New(os.Stdout, logging.ParseLevel(os.Getenv("LOG_LEVEL")))
+	slog.SetDefault(logger)
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("konfigurasi tidak valid:\n%v", err)
+		fatal("app.config_invalid", err)
 	}
 
 	db, err := sql.Open("pgx", cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("gagal membuka koneksi PostgreSQL Internal: %v", err)
+		fatal("platform_db.open_failed", err)
 	}
 	defer db.Close()
 
@@ -39,56 +41,62 @@ func main() {
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
-		log.Fatalf("gagal terhubung ke PostgreSQL Internal: %v", err)
+		fatal("platform_db.unreachable", err)
 	}
 
 	applied, err := platformdb.Migrate(ctx, db)
 	if err != nil {
-		log.Fatalf("gagal menjalankan migrasi skema platform: %v", err)
+		fatal("platform_db.migrate_failed", err)
 	}
 	if len(applied) > 0 {
-		log.Printf("Migrasi skema platform diterapkan: %s", strings.Join(applied, ", "))
+		slog.Info("platform_db.migrated", slog.Any("applied", applied))
 	}
 
 	cipher, err := dbmanager.NewCredentialCipher(cfg.TargetCredentialsKey)
 	if err != nil {
-		log.Fatalf("%v", err)
+		fatal("app.credential_key_invalid", err)
 	}
 
 	sessionStore := authn.NewPostgresSessionStore(db, cfg.Session)
 	groupRepo := groups.NewRepository(db)
+	if err := groupRepo.EnsureLeaders(ctx); err != nil {
+		slog.Warn("groups.ensure_leaders_failed", slog.String("error", err.Error()))
+	}
 	grantStore := rbac.NewPostgresGrantStore(db)
 	authorizer := rbac.NewAuthorizer(grantStore)
 	// Target pools: the viewer, the target manager and the migration engine share one registry.
 	registry := dbmanager.NewConnectionRegistryWithLimits(cfg.Query)
+	registry.SetLogger(logger.With("component", "dbmanager"))
 	defer registry.Close()
+
 	targets := dbmanager.NewManager(dbmanager.NewTargetRepository(db), cipher, registry)
 	adminService := admin.NewService(sessionStore, groupRepo, grantStore, targets)
 	migrationEngine := migration.NewEngine(db, registry, cfg.Migration)
-	migrations := migration.NewService(migration.NewRepository(db), migrationEngine, authorizer)
+	migrationEngine.SetLogger(logger.With("component", "migration"))
+	migrations := migration.NewService(migration.NewRepository(db), migrationEngine, authorizer, grantStore)
 
 	admins, err := bootstrap.EnsureAdmin(ctx, sessionStore, cfg.BootstrapAdmins)
 	if err != nil {
-		log.Fatalf("%v", err)
+		fatal("bootstrap.admin_failed", err)
 	}
 	if len(admins) > 0 {
-		log.Printf("Platform Admin awal dibuat: %s", strings.Join(admins, ", "))
+		slog.Info("bootstrap.admin_created", slog.Any("admins", admins))
 	}
 
 	if cfg.SeedDemoData {
 		seeded, err := bootstrap.SeedDemo(ctx, sessionStore, groupRepo, cfg.DemoUsers, cfg.DemoGroups)
 		if err != nil {
-			log.Fatalf("gagal mengisi data demo: %v", err)
+			fatal("bootstrap.seed_demo_failed", err)
 		}
 		if len(seeded) > 0 {
-			log.Printf("Data demo dibuat: %s", strings.Join(seeded, ", "))
+			slog.Info("bootstrap.demo_seeded", slog.Any("items", seeded))
 		}
 		registered, err := bootstrap.SeedDemoTarget(ctx, targets, grantStore, groupRepo, cfg.DemoTarget, cfg.DemoGroups)
 		if err != nil {
-			log.Fatalf("gagal mendaftarkan database demo: %v", err)
+			fatal("bootstrap.seed_demo_target_failed", err)
 		}
 		if registered {
-			log.Printf("Database demo didaftarkan: %s", bootstrap.DemoTargetName)
+			slog.Info("bootstrap.demo_target_registered", slog.String("name", bootstrap.DemoTargetName))
 		}
 	}
 
@@ -97,13 +105,14 @@ func main() {
 	connected, failed, err := targets.LoadAll(loadCtx)
 	cancelLoad()
 	if err != nil {
-		log.Printf("peringatan: gagal memuat database target: %v", err)
+		slog.Warn("targets.load_failed", slog.String("error", err.Error()))
 	} else {
-		log.Printf("Database target: %d terhubung, %d gagal", connected, failed)
+		slog.Info("targets.loaded", slog.Int("connected", connected), slog.Int("failed", failed))
 	}
 
 	// The platform DB (users, sessions, groups) is never registered as a viewer target.
 	srv := apphttp.NewServer(os.Stdout, apphttp.Deps{
+		Logger:     logger.With("component", "http"),
 		Sessions:   sessionStore,
 		Groups:     groupRepo,
 		Access:     authorizer,
@@ -112,8 +121,19 @@ func main() {
 		Migrations: migrations,
 	})
 
-	log.Printf("Backend API berjalan pada %s", cfg.ListenAddr)
-	if err := http.ListenAndServe(cfg.ListenAddr, srv); err != nil {
-		log.Fatalf("server error: %v", err)
+	slog.Info("server.started", slog.String("addr", cfg.ListenAddr))
+	httpSrv := &http.Server{
+		Addr:              cfg.ListenAddr,
+		Handler:           srv,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
+	if err := httpSrv.ListenAndServe(); err != nil {
+		fatal("server.stopped", err)
+	}
+}
+
+// fatal logs an error event and stops the process. Like log.Fatal, deferred calls do not run.
+func fatal(event string, err error) {
+	slog.Error(event, slog.String("error", err.Error()))
+	os.Exit(1)
 }

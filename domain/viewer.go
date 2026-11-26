@@ -1,63 +1,63 @@
 package domain
 
 type TableSummary struct {
-	Name       string
-	Schema     string
-	IsSelected bool
+	Name       string `json:"name"`
+	Schema     string `json:"schema"`
+	IsSelected bool   `json:"is_selected"`
 }
 
 type ColumnInfo struct {
-	Name         string
-	DataType     string
-	IsNullable   bool
-	IsPK         bool
-	DefaultValue string
+	Name         string `json:"name"`
+	DataType     string `json:"data_type"`
+	IsNullable   bool   `json:"is_nullable"`
+	IsPK         bool   `json:"is_pk"`
+	DefaultValue string `json:"default_value"`
 }
 
 type ConstraintInfo struct {
-	Name       string
-	Type       string // "PRIMARY KEY", "FOREIGN KEY", "UNIQUE", "CHECK"
-	Definition string
+	Name       string `json:"name"`
+	Type       string `json:"type"` // "PRIMARY KEY", "FOREIGN KEY", "UNIQUE", "CHECK"
+	Definition string `json:"definition"`
 }
 
 type IndexInfo struct {
-	Name       string
-	Columns    string // key columns or expressions, comma separated
-	IsUnique   bool
-	IndexType  string // access method from pg_am: "BTREE", "HASH", "GIN", ...
-	Definition string // full CREATE INDEX statement
+	Name       string `json:"name"`
+	Columns    string `json:"columns"` // key columns or expressions, comma separated
+	IsUnique   bool   `json:"is_unique"`
+	IndexType  string `json:"index_type"` // access method from pg_am: "BTREE", "HASH", "GIN", ...
+	Definition string `json:"definition"` // full CREATE INDEX statement
 }
 
 type TableDataResult struct {
-	DatabaseID    string // target the data came from; pagination links keep it
-	SchemaName    string
-	TableName     string
-	Columns       []string
-	Rows          [][]string
-	TotalRows     int64
-	CurrentPage   int
-	TotalPages    int
-	ColumnsMeta   []ColumnInfo
-	Constraints   []ConstraintInfo
-	Indexes       []IndexInfo
-	ExecutedQuery string
-	QueryError    string
-	Truncated     bool // true jika hasil kueri dipotong oleh batas jumlah baris
+	DatabaseID    string           `json:"database_id"` // target the data came from; pagination links keep it
+	SchemaName    string           `json:"schema_name"`
+	TableName     string           `json:"table_name"`
+	Columns       []string         `json:"columns"`
+	Rows          [][]string       `json:"rows"`
+	TotalRows     int64            `json:"total_rows"`
+	CurrentPage   int              `json:"current_page"`
+	TotalPages    int              `json:"total_pages"`
+	ColumnsMeta   []ColumnInfo     `json:"columns_meta"`
+	Constraints   []ConstraintInfo `json:"constraints"`
+	Indexes       []IndexInfo      `json:"indexes"`
+	ExecutedQuery string           `json:"executed_query"`
+	QueryError    string           `json:"query_error"`
+	Truncated     bool             `json:"truncated"` // true jika hasil kueri dipotong oleh batas jumlah baris
 	// IsQueryResult marks a Query Explorer result: no pagination, and the schema panel only
 	// when HasSchema (the query reads exactly one table).
-	IsQueryResult bool
-	HasSchema     bool // ColumnsMeta/Constraints/Indexes describe SchemaName.TableName
+	IsQueryResult bool `json:"is_query_result"`
+	HasSchema     bool `json:"has_schema"` // ColumnsMeta/Constraints/Indexes describe SchemaName.TableName
 }
 
 // ViewerPageView is the Database Viewer page of one database.
 type ViewerPageView struct {
-	DatabaseID   string // empty: the user has no database (empty state)
-	DatabaseName string
-	Tables       []TableSummary
-	Selected     *TableDataResult // the first table, opened on load; nil when there is none
+	DatabaseID   string           `json:"database_id"` // empty: the user has no database (empty state)
+	DatabaseName string           `json:"database_name"`
+	Tables       []TableSummary   `json:"tables"`
+	Selected     *TableDataResult `json:"selected"` // the first table, opened on load; nil when there is none
 	// Error is set when the database could not be read at all (no live connection or the
 	// table list failed): the page shows it with a retry link instead of the viewer.
-	Error string
+	Error string `json:"error"`
 	// TableError is set when the table list loaded but the first table did not.
-	TableError string
+	TableError string `json:"table_error"`
 }
