@@ -117,6 +117,12 @@ The `target-postgres` init scripts ([docker/target-init/](docker/target-init/)) 
 | `MIGRATION_STATEMENT_TIMEOUT_MS` | `60000` | (Optional) Maximum execution time in milliseconds for a single migration statement |
 | `MIGRATION_QUEUE_TIMEOUT_MS` | `15000` | (Optional) Maximum time in milliseconds a migration can wait in the queue |
 
+#### Logging
+
+| Variable | Default Value | Description |
+|---|---|---|
+| `LOG_LEVEL` | `info` | (Optional) Minimum log level: `debug`, `info`, `warn` or `error` |
+
 #### Session Handling
 
 | Variable | Default Value | Description |
@@ -200,7 +206,7 @@ When enabled, the app creates the demo users and groups that do not exist yet, r
 | Styling | Tailwind CSS 3.4 (PostCSS + Autoprefixer) |
 | Databases | PostgreSQL 16, driver `jackc/pgx/v5` |
 | Password hashing | Argon2id (`golang.org/x/crypto`) |
-| Logging | `log/slog` JSON for migration attempts, sanitized HTTP access log |
+| Logging | `log/slog` structured JSON logs on stdout (one logger, request correlation ID, redaction) |
 | Reverse proxy and TLS | Caddy 2 |
 | Deployment | Docker multi-stage build (Node -> Go -> Alpine), Docker Compose |
 | CI and security | GitHub Actions (build, vet, test), CodeQL SAST |
@@ -265,6 +271,7 @@ flowchart LR
 │   ├── migration/               # Splitter, script checks, engine, rollback/forward, approvals, EXPLAIN, history
 │   ├── bootstrap/               # Bootstrap admins and demo data seeding
 │   ├── http/                    # REST API handlers, SPA host, middleware, cookies
+│   ├── logging/                 # Structured JSON logger (slog), correlation ID and actor in context, SQL log helpers
 │   ├── ids/                     # UUID helpers
 │   ├── accesstest/, testutil/   # Test fixtures and test database helpers
 ├── frontend/                    # React + TypeScript SPA (Vite)
@@ -370,7 +377,7 @@ Database pages and API calls take the selected database as `?db_id=`.
   - Demotion, deactivation, or a password reset: all of the user's sessions are revoked, so they must log in again.
 - Expired, revoked or unknown sessions are cleared. The API answers `401` and the SPA redirects to `/login`.
 - **CSRF protection** uses a double-submit cookie: every `POST`, `PUT`, `PATCH` and `DELETE` must send an `X-CSRF-Token` header that matches the `__Host-csrf` cookie. The API returns the token in the `csrf_token` field (login, signup, `/api/auth/me`) and the SPA's fetch client sends it on every state-changing request.
-- **Logging**: the app logs method, path, status and duration only. Query parameters whose names look like passwords, sessions or tokens are redacted. Caddy removes `Cookie`, `Authorization` and `Set-Cookie` headers from its access logs.
+- **Logging**: the access log records method, path, status and duration only. Query parameters whose names look like passwords, sessions or tokens are redacted. Caddy removes `Cookie`, `Authorization` and `Set-Cookie` headers from its access logs. See [Activity Logging](#activity-logging).
 
 #### Admin Platform
 
@@ -436,6 +443,65 @@ A migration is a named SQL script for one target database. It is either a **DRAF
 
 - Only PostgreSQL targets are supported.
 - If the app process dies after a migration commits on the target but before its history is saved, that run is missing from the history.
+
+### Activity Logging
+
+Every log record is one JSON object on stdout, written by one `log/slog` logger (`internal/logging`).
+
+- **Common fields**: `time`, `level`, `event` (a stable name such as `sql.result`), `component` (`http`, `dbmanager`, `migration`), `correlation_id`, `actor` (user ID), and `database_id` and `status` where they apply.
+- **Correlation ID**: every request gets an ID, returned in the `X-Request-ID` response header. A well-formed `X-Request-ID` from the client (`[A-Za-z0-9._-]`, at most 64 characters) is reused. Every record written while handling the request carries it.
+- **Every SQL execution is logged** as a `sql.start` and `sql.result` pair: Query Explorer queries (`sql_kind: read_only`), table browsing (`table_browse`), schema lookups (`catalog`) and migration scripts (`migration`). `sql.result` has `duration_ms`, `status`, `rows` when known, and on failure `error` and the PostgreSQL `sqlstate`.
+- **Transactions that change data** also log `tx.commit` or `tx.rollback`. A run of a migration, rollback or forward ends with one `migration.attempt` record (`execution_type`, `version`, `status`).
+- **Other events**: `http.request` (access log; `WARN` for 4xx, `ERROR` for 5xx), `authz.denied`, `authz.error`, `viewer.error`, `migration.error`, and startup events such as `server.started`.
+- **Redaction**: attributes whose name contains `password`, `secret`, `token`, `session`, `cookie`, `authorization`, `dsn` or `credential` are written as `[REDACTED]`. Bind parameter values are never logged, only their types. Query text is cut at 2000 characters.
+
+Reading the logs:
+
+```sh
+# every record of one request (X-Request-ID from the browser's DevTools)
+docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.correlation_id=="<id>")'
+# failed SQL
+docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.event=="sql.result" and .status=="FAILED")'
+```
+
+Example output (one block per request; long IDs shortened). A read-only query:
+
+```json
+{"time":"2026-11-26T06:55:10.438974839Z","level":"INFO","event":"sql.start","component":"dbmanager","database_id":"4ea8b6a0-…","sql_kind":"read_only","query":"SELECT 1","correlation_id":"readme-q1","actor":"0e966767-…"}
+{"time":"2026-11-26T06:55:10.439979881Z","level":"INFO","event":"sql.result","component":"dbmanager","database_id":"4ea8b6a0-…","sql_kind":"read_only","query":"SELECT 1","duration_ms":0,"status":"SUCCESS","rows":1,"correlation_id":"readme-q1","actor":"0e966767-…"}
+{"time":"2026-11-26T06:55:10.440056923Z","level":"INFO","event":"http.request","component":"http","method":"POST","path":"/api/viewer/query","status":200,"duration_ms":5,"correlation_id":"readme-q1","actor":"0e966767-…"}
+```
+
+A failing query:
+
+```json
+{"time":"2026-11-26T06:55:10.476767964Z","level":"ERROR","event":"sql.result","component":"dbmanager","database_id":"4ea8b6a0-…","sql_kind":"read_only","query":"SELECT * FROM tidak_ada","duration_ms":3,"status":"FAILED","error":"ERROR: relation \"tidak_ada\" does not exist (SQLSTATE 42P01)","sqlstate":"42P01","correlation_id":"readme-q2","actor":"0e966767-…"}
+{"time":"2026-11-26T06:55:10.476863589Z","level":"WARN","event":"http.request","component":"http","method":"POST","path":"/api/viewer/query","status":422,"duration_ms":6,"correlation_id":"readme-q2","actor":"0e966767-…"}
+```
+
+Access to a database the user has no grant on:
+
+```json
+{"time":"2026-11-26T06:55:10.533319339Z","level":"WARN","event":"authz.denied","component":"http","database_id":"00000000-0000-0000-0000-000000000000","action":"database:view_schema","status":"DENIED","correlation_id":"readme-deny","actor":"0e966767-…"}
+{"time":"2026-11-26T06:55:10.533437673Z","level":"WARN","event":"http.request","component":"http","method":"GET","path":"/api/viewer?db_id=00000000-0000-0000-0000-000000000000","status":403,"duration_ms":6,"correlation_id":"readme-deny","actor":"0e966767-…"}
+```
+
+A migration that commits (records from an integration test run, `time` left out):
+
+```json
+{"level":"INFO","event":"sql.start","component":"migration","database_id":"dfdf7952-…","sql_kind":"migration","query":"CREATE TABLE orders (id int PRIMARY KEY)","migration_id":"a4b31c6a-…","execution_type":"UP","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+{"level":"INFO","event":"sql.result","component":"migration","database_id":"dfdf7952-…","sql_kind":"migration","query":"CREATE TABLE orders (id int PRIMARY KEY)","migration_id":"a4b31c6a-…","execution_type":"UP","duration_ms":3,"status":"SUCCESS","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+{"level":"INFO","event":"tx.commit","component":"migration","database_id":"dfdf7952-…","migration_id":"a4b31c6a-…","execution_type":"UP","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+{"level":"INFO","event":"migration.attempt","component":"migration","execution_type":"UP","migration_id":"a4b31c6a-…","execution_id":"a4b31c6a-…","database_id":"dfdf7952-…","version":1,"status":"SUCCESS","duration_ms":17,"query":"CREATE TABLE orders (id int PRIMARY KEY)","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+```
+
+A migration that fails and is rolled back:
+
+```json
+{"level":"ERROR","event":"sql.result","component":"migration","database_id":"dfdf7952-…","sql_kind":"migration","query":"INSERT INTO missing VALUES (1)","migration_id":"4cc4cfc2-…","execution_type":"UP","duration_ms":0,"status":"FAILED","error":"ERROR: relation \"missing\" does not exist (SQLSTATE 42P01)","sqlstate":"42P01","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+{"level":"WARN","event":"tx.rollback","component":"migration","database_id":"dfdf7952-…","migration_id":"4cc4cfc2-…","execution_type":"UP","error":"ERROR: relation \"missing\" does not exist (SQLSTATE 42P01)","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+{"level":"ERROR","event":"migration.attempt","component":"migration","execution_type":"UP","migration_id":"4cc4cfc2-…","execution_id":"4cc4cfc2-…","database_id":"dfdf7952-…","version":0,"status":"FAILED","duration_ms":2,"query":"INSERT INTO missing VALUES (1)","error":"ERROR 42P01: relation \"missing\" does not exist (statement 1, baris 1, kolom 13)","sqlstate":"42P01","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+```
 
 ### Testing and CI
 
