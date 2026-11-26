@@ -271,15 +271,19 @@ func (s *Server) handleAPIMigrationExecute(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	m, _, err := s.migrations.Execute(r.Context(), user.ID, r.PathValue("id"))
+	m, job, err := s.migrations.EnqueueExecute(r.Context(), user.ID, r.PathValue("id"))
 	if err != nil {
+		s.logMigrationError(r.Context(), "execute", err)
 		status, msg := migrationErrorResponse(err)
 		writeJSON(w, status, map[string]any{"error": msg})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	// 202: the run happens later in a worker; the client polls the job or the migration status.
+	writeJSON(w, http.StatusAccepted, map[string]any{
 		"migration": toMigrationView(m),
-		"message":   "Migration berhasil dieksekusi.",
+		"job_id":    job.ID,
+		"job":       toJobView(job),
+		"message":   "Migration masuk antrean dan akan dijalankan oleh worker.",
 	})
 }
 
@@ -288,14 +292,14 @@ func (s *Server) handleAPIMigrationRollback(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	m, res, err := s.migrations.Rollback(r.Context(), user.ID, r.PathValue("id"))
+	m, job, err := s.migrations.EnqueueRollback(r.Context(), user.ID, r.PathValue("id"))
 	if err != nil {
 		s.logMigrationError(r.Context(), "rollback", err)
 		status, msg := migrationErrorResponse(err)
 		writeJSON(w, status, map[string]any{"error": msg})
 		return
 	}
-	if res == nil {
+	if job == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"migration":         toMigrationView(m),
 			"requires_approval": true,
@@ -303,11 +307,12 @@ func (s *Server) handleAPIMigrationRollback(w http.ResponseWriter, r *http.Reque
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(w, http.StatusAccepted, map[string]any{
 		"migration":         toMigrationView(m),
 		"requires_approval": false,
-		"message":           "Rollback berhasil dieksekusi.",
-		"result":            toDryRunView(res),
+		"job_id":            job.ID,
+		"job":               toJobView(job),
+		"message":           "Permintaan rollback masuk antrean dan akan dijalankan oleh worker.",
 	})
 }
 
@@ -316,14 +321,14 @@ func (s *Server) handleAPIMigrationForward(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	m, res, err := s.migrations.Forward(r.Context(), user.ID, r.PathValue("id"))
+	m, job, err := s.migrations.EnqueueForward(r.Context(), user.ID, r.PathValue("id"))
 	if err != nil {
 		s.logMigrationError(r.Context(), "forward", err)
 		status, msg := migrationErrorResponse(err)
 		writeJSON(w, status, map[string]any{"error": msg})
 		return
 	}
-	if res == nil {
+	if job == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"migration":         toMigrationView(m),
 			"requires_approval": true,
@@ -331,11 +336,12 @@ func (s *Server) handleAPIMigrationForward(w http.ResponseWriter, r *http.Reques
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(w, http.StatusAccepted, map[string]any{
 		"migration":         toMigrationView(m),
 		"requires_approval": false,
-		"message":           "Forward berhasil dieksekusi.",
-		"result":            toDryRunView(res),
+		"job_id":            job.ID,
+		"job":               toJobView(job),
+		"message":           "Permintaan forward masuk antrean dan akan dijalankan oleh worker.",
 	})
 }
 
@@ -440,4 +446,34 @@ func (s *Server) handleAPIMigrationReject(w http.ResponseWriter, r *http.Request
 		"migration": toMigrationView(m),
 		"message":   "Migration berhasil ditolak.",
 	})
+}
+
+// handleAPIMigrationStatus returns a migration with its newest job, for polling.
+func (s *Server) handleAPIMigrationStatus(w http.ResponseWriter, r *http.Request) {
+	user, _, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	m, job, err := s.migrations.Status(r.Context(), user.ID, r.PathValue("id"))
+	if err != nil {
+		status, msg := migrationErrorResponse(err)
+		writeJSON(w, status, map[string]any{"error": msg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"migration": toMigrationView(m), "job": toJobView(job)})
+}
+
+// handleAPIJob returns one job, for polling after a 202 response.
+func (s *Server) handleAPIJob(w http.ResponseWriter, r *http.Request) {
+	user, _, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	job, err := s.migrations.GetJob(r.Context(), user.ID, r.PathValue("id"))
+	if err != nil {
+		status, msg := migrationErrorResponse(err)
+		writeJSON(w, status, map[string]any{"error": msg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"job": toJobView(job)})
 }

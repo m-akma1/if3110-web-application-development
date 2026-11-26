@@ -20,6 +20,8 @@ func migrationErrorResponse(err error) (int, string) {
 		return http.StatusForbidden, accessDeniedMessage(err)
 	case errors.As(err, &rejected):
 		return http.StatusUnprocessableEntity, "Script ditolak sebelum dijalankan: " + rejected.Error()
+	case errors.Is(err, migration.ErrJobActive):
+		return http.StatusConflict, err.Error()
 	case errors.Is(err, migration.ErrTargetUnavailable):
 		return http.StatusUnprocessableEntity, "Database target sedang tidak terhubung. Minta Platform Admin memeriksa koneksinya, lalu coba lagi."
 	case errors.Is(err, migration.ErrNotApproved),
@@ -199,4 +201,25 @@ func orDash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// toJobView converts a job for the API; nil stays nil (the migration never had a job).
+func toJobView(j *migration.Job) *domain.MigrationJobView {
+	if j == nil {
+		return nil
+	}
+	return &domain.MigrationJobView{
+		ID:          j.ID,
+		MigrationID: j.MigrationID,
+		DatabaseID:  j.DatabaseID,
+		JobType:     string(j.Type),
+		Status:      string(j.Status),
+		Attempt:     j.Attempt,
+		MaxAttempts: j.MaxAttempts,
+		LastError:   j.LastError,
+		NextRunAt:   j.NextRunAt,
+		CreatedAt:   j.CreatedAt,
+		FinishedAt:  j.FinishedAt,
+		Done:        j.Done(),
+	}
 }

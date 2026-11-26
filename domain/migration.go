@@ -114,3 +114,19 @@ type PlanNodeView struct {
 	NeverExecuted bool     `json:"never_executed"`
 	Misestimated  bool     `json:"misestimated"` // estimate off by 10x or more
 }
+
+// MigrationJobView is one queued run of a migration, polled by the SPA until it is done.
+type MigrationJobView struct {
+	ID          string     `json:"id"`
+	MigrationID string     `json:"migration_id"`
+	DatabaseID  string     `json:"database_id"`
+	JobType     string     `json:"job_type"`
+	Status      string     `json:"status"`
+	Attempt     int        `json:"attempt"`
+	MaxAttempts int        `json:"max_attempts"`
+	LastError   string     `json:"last_error,omitempty"`
+	NextRunAt   time.Time  `json:"next_run_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	Done        bool       `json:"done"`
+}

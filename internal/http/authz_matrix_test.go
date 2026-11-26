@@ -103,6 +103,7 @@ func TestAuthorizationMatrix_Integration(t *testing.T) {
 
 	const (
 		ok     = http.StatusOK
+		queued = http.StatusAccepted // execute only enqueues a job; a worker runs it later
 		denied = http.StatusForbidden
 	)
 	// expected status per principal, in the order of routes above
@@ -110,8 +111,8 @@ func TestAuthorizationMatrix_Integration(t *testing.T) {
 		"nogrant":      {denied, denied, denied, denied, denied, denied, denied, denied, denied, denied},
 		"adminnogrant": {denied, denied, denied, denied, denied, denied, denied, denied, denied, denied},
 		"viewer":       {ok, ok, ok, ok, ok, denied, denied, denied, denied, denied},
-		"editor":       {ok, ok, ok, ok, ok, ok, ok, ok, ok, ok},
-		"both":         {ok, ok, ok, ok, ok, ok, ok, ok, ok, ok},
+		"editor":       {ok, ok, ok, ok, ok, ok, ok, ok, queued, ok},
+		"both":         {ok, ok, ok, ok, ok, ok, ok, ok, queued, ok},
 	}
 
 	for principal, statuses := range expect {
