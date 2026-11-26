@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"dbplatform/internal/admin"
@@ -73,7 +75,10 @@ func main() {
 	adminService := admin.NewService(sessionStore, groupRepo, grantStore, targets)
 	migrationEngine := migration.NewEngine(db, registry, cfg.Migration)
 	migrationEngine.SetLogger(logger.With("component", "migration"))
-	migrations := migration.NewService(migration.NewRepository(db), migrationEngine, authorizer, grantStore)
+	migrationRepo := migration.NewRepository(db)
+	migrations := migration.NewService(migrationRepo, migrationEngine, authorizer, grantStore)
+	worker := migration.NewWorker(migrationRepo, migrationEngine, migration.DefaultWorkerConfig())
+	worker.SetLogger(logger.With("component", "worker"))
 
 	admins, err := bootstrap.EnsureAdmin(ctx, sessionStore, cfg.BootstrapAdmins)
 	if err != nil {
@@ -121,15 +126,39 @@ func main() {
 		Migrations: migrations,
 	})
 
-	slog.Info("server.started", slog.String("addr", cfg.ListenAddr))
+	// SIGINT/SIGTERM (Ctrl+C, docker stop) cancel runCtx: stop taking new requests and jobs,
+	// let running jobs finish, then exit.
+	runCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	workerDone := make(chan struct{})
+	go func() {
+		worker.Run(runCtx)
+		close(workerDone)
+	}()
+
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           srv,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	if err := httpSrv.ListenAndServe(); err != nil {
+	serverErr := make(chan error, 1)
+	go func() { serverErr <- httpSrv.ListenAndServe() }()
+	slog.Info("server.started", slog.String("addr", cfg.ListenAddr))
+
+	select {
+	case err := <-serverErr:
 		fatal("server.stopped", err)
+	case <-runCtx.Done():
 	}
+	slog.Info("server.shutting_down")
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelShutdown()
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		slog.Warn("server.shutdown_failed", slog.String("error", err.Error()))
+	}
+	<-workerDone
+	slog.Info("server.stopped")
 }
 
 // fatal logs an error event and stops the process. Like log.Fatal, deferred calls do not run.
