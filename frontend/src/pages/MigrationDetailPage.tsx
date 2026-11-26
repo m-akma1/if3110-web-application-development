@@ -5,6 +5,7 @@ import { MigrationView } from '../types'
 import { BatchProgressMonitor } from '../components/BatchProgressMonitor'
 import { fmtTime, versionLabel } from '../utils/migrationFormat'
 import { features } from '../config/features'
+import { jobFeedback, waitForJob } from '../utils/jobs'
 
 export const MigrationDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>()
@@ -81,7 +82,9 @@ export const MigrationDetailPage: React.FC = () => {
         setFeedback({ success: true, message: res.message || `Permintaan rollback untuk "${migration.name}" diajukan untuk review Group Leader.` })
         navigate(`/migration/${res.migration.id}`)
       } else {
-        setFeedback({ success: true, message: `Rollback untuk "${migration.name}" berhasil dijalankan.` })
+        setFeedback({ success: true, message: `Rollback untuk "${migration.name}" masuk antrean...` })
+        const job = await waitForJob(res.job_id)
+        setFeedback(jobFeedback(job, `Rollback untuk "${migration.name}"`))
         fetchDetail()
       }
     } catch (err: any) {
@@ -104,7 +107,9 @@ export const MigrationDetailPage: React.FC = () => {
         setFeedback({ success: true, message: res.message || `Permintaan forward untuk "${migration.name}" diajukan untuk review Group Leader.` })
         navigate(`/migration/${res.migration.id}`)
       } else {
-        setFeedback({ success: true, message: `Forward untuk "${migration.name}" berhasil dijalankan.` })
+        setFeedback({ success: true, message: `Forward untuk "${migration.name}" masuk antrean...` })
+        const job = await waitForJob(res.job_id)
+        setFeedback(jobFeedback(job, `Forward untuk "${migration.name}"`))
         fetchDetail()
       }
     } catch (err: any) {

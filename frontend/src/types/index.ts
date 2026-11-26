@@ -224,3 +224,19 @@ export interface AdminOverview {
   targets: TargetItem[]
   codes: InviteCodeItem[]
 }
+
+// One queued run of a migration (GET /api/jobs/{id}).
+export interface MigrationJobView {
+  id: string
+  migration_id: string
+  database_id: string
+  job_type: 'EXECUTE' | 'ROLLBACK' | 'FORWARD'
+  status: 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'UNCERTAIN'
+  attempt: number
+  max_attempts: number
+  last_error?: string
+  next_run_at: string
+  created_at: string
+  finished_at?: string
+  done: boolean
+}

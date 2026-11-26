@@ -1,4 +1,4 @@
-import { MigrationView } from '../types'
+import { MigrationJobView, MigrationView } from '../types'
 
 let csrfToken: string = ''
 
@@ -129,7 +129,9 @@ export const api = {
   abortPartialMigration: (id: string, data?: { rollback?: boolean }) =>
     request(`/api/migration/${encodeURIComponent(id)}/abort`, { method: 'POST', body: JSON.stringify(data || {}) }),
   getMigrationStatus: (id: string) =>
-    request(`/api/migration/${encodeURIComponent(id)}/status`),
+    request<{ migration: MigrationView; job: MigrationJobView | null }>(`/api/migration/${encodeURIComponent(id)}/status`),
+  getJob: (id: string) =>
+    request<{ job: MigrationJobView }>(`/api/jobs/${encodeURIComponent(id)}`),
 
   // Admin
   getAdminOverview: () => request('/api/admin/overview'),
