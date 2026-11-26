@@ -300,7 +300,7 @@ func TestRecoverStaleJobs(t *testing.T) {
 			t.Fatal(err)
 		}
 		// The worker ran the migration and wrote the history, then died before closing the job.
-		if _, _, err := f.engine.Execute(ctx, d.ID, f.userID); err != nil {
+		if _, _, err := f.engine.Execute(WithRun(ctx, j.ID, 1), d.ID, f.userID); err != nil {
 			t.Fatal(err)
 		}
 		f.expireLease(t, j.ID, true)

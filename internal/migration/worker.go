@@ -136,6 +136,8 @@ func (w *Worker) process(ctx context.Context, workerID string, j *Job) {
 	ctx = context.WithoutCancel(ctx)
 	// The job keeps the request's correlation ID and actor, so its logs join the HTTP request's.
 	ctx = logging.WithRequestInfo(ctx, &logging.RequestInfo{CorrelationID: j.CorrelationID, Actor: j.ExecutorID})
+	// The engine stores the job and attempt on the execution row it writes.
+	ctx = WithRun(ctx, j.ID, j.Attempt)
 	log := w.logger.With(
 		slog.String("job_id", j.ID), slog.String("migration_id", j.MigrationID),
 		slog.String("database_id", j.DatabaseID), slog.String("job_type", string(j.Type)),
@@ -169,15 +171,19 @@ func (w *Worker) process(ctx context.Context, workerID string, j *Job) {
 			w.finish(ctx, log, j, JobSuccess, "")
 			return
 		}
+		w.recordAttempt(ctx, log, j, ExecUncertain, true, err.Error())
 		w.finish(ctx, log, j, JobUncertain, err.Error())
 	case errors.Is(err, ErrTargetBusy):
-		// Not the job's fault: give the attempt back and try again soon.
+		// Not the job's fault and not an attempt: give it back and try again soon. No execution
+		// row either: the job only waited (job.retry_scheduled is logged).
 		w.requeue(ctx, log, j, err, w.cfg.PollInterval, false)
 	case isTransient(err) && j.Attempt < j.MaxAttempts:
+		w.recordAttempt(ctx, log, j, ExecFailed, false, err.Error())
 		w.requeue(ctx, log, j, err, w.backoff(j.Attempt), true)
 	default:
 		// Validation errors (no longer the latest migration, not approved, ...) and transient
 		// errors after the last attempt. No SQL ran, so the migration can be tried again later.
+		w.recordAttempt(ctx, log, j, ExecFailed, false, err.Error())
 		w.finish(ctx, log, j, JobFailed, err.Error())
 		if rerr := w.repo.RestoreMigrationStatus(ctx, j); rerr != nil {
 			log.ErrorContext(ctx, "job.restore_failed", slog.String("error", rerr.Error()))
@@ -229,6 +235,18 @@ func (w *Worker) heartbeat(ctx context.Context, log *slog.Logger, jobID, workerI
 		}
 	}()
 	return func() { close(done); <-finished }
+}
+
+// recordAttempt appends the execution row of an attempt the engine wrote no row for (see
+// Repository.RecordJobAttempt) and writes its audit event. A failure here is logged and does
+// not change the job's outcome.
+func (w *Worker) recordAttempt(ctx context.Context, log *slog.Logger, j *Job, status ExecStatus, sqlSent bool, cause string) {
+	ex, err := w.repo.RecordJobAttempt(ctx, j, status, sqlSent, cause)
+	if err != nil {
+		log.ErrorContext(ctx, "job.history_failed", slog.String("error", err.Error()))
+		return
+	}
+	auditExecution(ctx, w.logger, ex)
 }
 
 func (w *Worker) finish(ctx context.Context, log *slog.Logger, j *Job, status JobStatus, msg string) {
@@ -324,12 +342,18 @@ func (w *Worker) RecoverStaleJobs(ctx context.Context) (int, error) {
 		case done:
 			w.finish(jctx, log, j, JobSuccess, "dipulihkan: hasil sudah tercatat sebelum worker berhenti")
 		case j.SQLStartedAt == nil && j.Attempt < j.MaxAttempts:
-			w.requeue(jctx, log, j, errors.New("lease worker habis sebelum SQL dijalankan"), 0, true)
+			const cause = "lease worker habis sebelum SQL dijalankan"
+			w.recordAttempt(jctx, log, j, ExecFailed, false, cause)
+			w.requeue(jctx, log, j, errors.New(cause), 0, true)
 		case j.SQLStartedAt == nil:
-			w.finish(jctx, log, j, JobFailed, "lease worker habis setelah percobaan terakhir")
+			const cause = "lease worker habis setelah percobaan terakhir"
+			w.recordAttempt(jctx, log, j, ExecFailed, false, cause)
+			w.finish(jctx, log, j, JobFailed, cause)
 			_ = w.repo.RestoreMigrationStatus(jctx, j)
 		default:
-			w.finish(jctx, log, j, JobUncertain, "worker berhenti setelah SQL dikirim; hasil di database target belum pasti")
+			const cause = "worker berhenti setelah SQL dikirim; hasil di database target belum pasti"
+			w.recordAttempt(jctx, log, j, ExecUncertain, true, cause)
+			w.finish(jctx, log, j, JobUncertain, cause)
 		}
 		n++
 	}

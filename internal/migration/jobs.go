@@ -301,23 +301,63 @@ func (r *Repository) RestoreMigrationStatus(ctx context.Context, j *Job) error {
 	return err
 }
 
-// OutcomeRecorded reports whether the history already shows the result of j: the job's work is
-// done even if the worker stopped before marking it. This is the idempotency check: a job whose
-// outcome is recorded is never run again.
+// OutcomeRecorded reports whether the history already has the result of j: an execution of
+// this job that sent SQL and finished (SUCCESS or FAILED). The engine writes that row in the
+// same transaction as the migration's history, so this is exact even if the worker died right
+// after. This is the idempotency check: a job whose outcome is recorded is never run again.
 func (r *Repository) OutcomeRecorded(ctx context.Context, j *Job) (bool, error) {
+	return jobOutcomeRecorded(ctx, r.db, j.ID)
+}
+
+// RecordJobAttempt appends an execution for an attempt of j that has no row from the engine:
+// it stopped before any SQL was sent (sqlSent false, status FAILED), or SQL was sent but the
+// outcome is unknown (sqlSent true, status UNCERTAIN). It returns the execution written.
+func (r *Repository) RecordJobAttempt(ctx context.Context, j *Job, status ExecStatus, sqlSent bool, cause string) (Execution, error) {
 	m, err := r.Get(ctx, j.MigrationID)
 	if err != nil {
-		return false, err
+		return Execution{}, err
 	}
+	ex := newExecution(WithRun(ctx, j.ID, j.Attempt), jobKind(j, m), m.ID, j.DatabaseID, j.ExecutorID)
+	ex.Status, ex.SQLSent, ex.Error = status, sqlSent, cause
+	if sqlSent {
+		ex.SQL = jobScript(j, m)
+	}
+	if j.SQLStartedAt != nil {
+		ex.StartedAt = *j.SQLStartedAt
+	}
+	return ex, r.RecordExecution(ctx, ex)
+}
+
+// jobKind is the kind of execution a job produces. An EXECUTE job of an approved rollback or
+// forward request runs a rollback or forward.
+func jobKind(j *Job, m *Migration) ExecKind {
+	switch {
+	case j.Type == JobRollback, m.ExecutionType == "ROLLBACK" && m.RollbackTargetID != "":
+		return ExecRollback
+	case j.Type == JobForward, m.SourceMigrationID != "":
+		return ExecForward
+	}
+	return ExecExecute
+}
+
+// jobScript is the script the engine sends for j. Scripts do not change once a migration is
+// queued, so this matches what was sent.
+func jobScript(j *Job, m *Migration) string {
+	script := m.SQL
 	switch j.Type {
-	case JobExecute:
-		return m.Status == StatusSuccess || m.Status == StatusFailed || m.Status == StatusRolledBack, nil
 	case JobRollback:
-		return m.Status == StatusRolledBack, nil
+		if down, err := ResolveDownScript(m); err == nil {
+			script = down
+		}
 	case JobForward:
-		return r.HasAlreadyBeenForwarded(ctx, m.ID)
+		if m.SQLUp != "" {
+			script = m.SQLUp
+		}
 	}
-	return false, nil
+	if script == "" {
+		script = "-- (script tidak diketahui)"
+	}
+	return script
 }
 
 // TakeStaleJob takes over a RUNNING job whose lease expired, so a live worker that lost its
