@@ -3,12 +3,12 @@ package http
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"dbplatform/domain"
-	"dbplatform/internal/authn"
 	"dbplatform/internal/dbmanager"
 	"dbplatform/internal/rbac"
 )
@@ -40,7 +40,7 @@ func (s *Server) handleAPIViewer(w http.ResponseWriter, r *http.Request) {
 	dbName := databaseName(layout, dbID)
 	tables, err := s.dbRegistry.ListTables(r.Context(), dbID)
 	if err != nil {
-		s.logViewerError(user, dbID, "list tables", err)
+		s.logViewerError(r.Context(), dbID, "list tables", err)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"database_id":   dbID,
 			"database_name": dbName,
@@ -57,7 +57,7 @@ func (s *Server) handleAPIViewer(w http.ResponseWriter, r *http.Request) {
 		first := tables[0]
 		data, err := s.dbRegistry.InspectTableDataAndSchema(r.Context(), dbID, first.Schema, first.Name, 1, viewerPageSize)
 		if err != nil {
-			s.logViewerError(user, dbID, "inspect "+first.Schema+"."+first.Name, err)
+			s.logViewerError(r.Context(), dbID, "inspect "+first.Schema+"."+first.Name, err)
 			tableError = viewerErrorMessage(err)
 		} else {
 			selected = data
@@ -101,7 +101,7 @@ func (s *Server) handleAPIViewerTable(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, dbmanager.ErrTableNotFound):
 		writeJSONError(w, http.StatusNotFound, "Tabel tidak ditemukan. Tabel mungkin sudah dihapus atau dipindahkan.")
 	case err != nil:
-		s.logViewerError(user, dbID, "inspect "+schema+"."+name, err)
+		s.logViewerError(r.Context(), dbID, "inspect "+schema+"."+name, err)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"error": viewerErrorMessage(err),
 			"title": viewerErrorTitle(err),
@@ -212,12 +212,12 @@ func viewerErrorMessage(err error) string {
 	return err.Error()
 }
 
-func (s *Server) logViewerError(user *authn.User, dbID, op string, err error) {
-	s.logger.Printf("[VIEWER] %s gagal user=%s db=%s: %s",
-		stripLogNewlines(op),
-		stripLogNewlines(user.ID),
-		stripLogNewlines(dbID),
-		stripLogNewlines(err.Error()),
+// logViewerError logs a failed viewer operation. The actor comes from ctx (logging.SetActor).
+func (s *Server) logViewerError(ctx context.Context, dbID, op string, err error) {
+	s.logger.ErrorContext(ctx, "viewer.error",
+		slog.String("operation", op),
+		slog.String("database_id", dbID),
+		slog.String("error", err.Error()),
 	)
 }
 

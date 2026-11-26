@@ -1,13 +1,14 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"dbplatform/domain"
-	"dbplatform/internal/authn"
 	"dbplatform/internal/migration"
 	"dbplatform/internal/rbac"
 )
@@ -51,11 +52,16 @@ func migrationErrorResponse(err error) (int, string) {
 	}
 }
 
-func (s *Server) logMigrationError(user *authn.User, op string, err error) {
+// logMigrationError logs a failed migration operation. Forbidden is skipped: authorizeDB
+// already logs it as authz.denied. The actor comes from ctx (logging.SetActor).
+func (s *Server) logMigrationError(ctx context.Context, op string, err error) {
 	if errors.Is(err, rbac.ErrForbidden) {
 		return
 	}
-	s.logger.Printf("[MIGRATION] %s gagal user=%s: %v", op, user.ID, err)
+	s.logger.ErrorContext(ctx, "migration.error",
+		slog.String("operation", op),
+		slog.String("error", err.Error()),
+	)
 }
 
 func toMigrationView(m *migration.Migration) domain.MigrationView {

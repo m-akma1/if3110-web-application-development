@@ -3,7 +3,7 @@ package http
 import (
 	"encoding/json"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -12,6 +12,7 @@ import (
 	"dbplatform/internal/authn"
 	"dbplatform/internal/dbmanager"
 	"dbplatform/internal/groups"
+	"dbplatform/internal/logging"
 	"dbplatform/internal/migration"
 	"dbplatform/internal/rbac"
 )
@@ -20,7 +21,7 @@ import (
 type Server struct {
 	mux        *http.ServeMux
 	handler    http.Handler
-	logger     *log.Logger
+	logger     *slog.Logger
 	sessions   *authn.SessionStore
 	groups     *groups.Repository
 	access     *rbac.Authorizer
@@ -31,6 +32,7 @@ type Server struct {
 
 // Deps are the services the HTTP layer needs. All are backed by the platform PostgreSQL in production.
 type Deps struct {
+	Logger   *slog.Logger
 	Sessions *authn.SessionStore // identity and session lifecycle
 	Groups   *groups.Repository  // groups, membership, invite codes
 	Access   *rbac.Authorizer    // every database authorization decision
@@ -47,9 +49,14 @@ func NewServer(logOutput io.Writer, deps Deps) *Server {
 		logOutput = os.Stdout
 	}
 
+	logger := deps.Logger
+	if logger == nil {
+		logger = logging.New(logOutput, slog.LevelInfo)
+	}
+
 	s := &Server{
 		mux:        http.NewServeMux(),
-		logger:     log.New(logOutput, "", log.LstdFlags),
+		logger:     logger,
 		sessions:   deps.Sessions,
 		groups:     deps.Groups,
 		access:     deps.Access,
@@ -65,6 +72,7 @@ func NewServer(logOutput io.Writer, deps Deps) *Server {
 	var h http.Handler = s.mux
 	h = CSRFGuardMiddleware(h)
 	h = SanitizedLoggerMiddleware(s.logger)(h)
+	h = RequestContextMiddleware(h)
 	s.handler = h
 	return s
 }

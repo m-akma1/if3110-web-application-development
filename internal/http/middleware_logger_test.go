@@ -2,13 +2,33 @@ package http
 
 import (
 	"bytes"
-	"log"
+	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+
+	"dbplatform/internal/logging"
 )
+
+// decodeLogLines parses one JSON object per line; a line that is not JSON fails the test.
+func decodeLogLines(t *testing.T, buf *bytes.Buffer) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, ln := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if ln == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(ln), &m); err != nil {
+			t.Fatalf("log line is not valid JSON: %q (%v)", ln, err)
+		}
+		out = append(out, m)
+	}
+	return out
+}
 
 func TestSanitizeURL(t *testing.T) {
 	tests := []struct {
@@ -66,7 +86,7 @@ func TestStripLogNewlines(t *testing.T) {
 
 func TestSanitizedLoggerMiddleware_LogInjectionMitigation(t *testing.T) {
 	var buf bytes.Buffer
-	logger := log.New(&buf, "", 0)
+	logger := logging.New(&buf, slog.LevelInfo)
 
 	handler := SanitizedLoggerMiddleware(logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -80,12 +100,109 @@ func TestSanitizedLoggerMiddleware_LogInjectionMitigation(t *testing.T) {
 
 	handler.ServeHTTP(rec, req)
 
-	logged := buf.String()
-	trimmed := strings.TrimRight(logged, "\r\n")
-	if strings.Contains(trimmed, "\n") || strings.Contains(trimmed, "\r") {
-		t.Errorf("Logged output contains unescaped newline (log injection): %q", logged)
+	lines := decodeLogLines(t, &buf)
+	if len(lines) != 1 {
+		t.Fatalf("want exactly 1 log line (no injected line), got %d: %q", len(lines), buf.String())
 	}
-	if strings.Contains(logged, "supersecret") {
-		t.Errorf("Logged output leaked sensitive token: %q", logged)
+	got := lines[0]
+	if got["event"] != "http.request" {
+		t.Errorf("event = %v, want http.request", got["event"])
+	}
+	// encoding/json decodes every JSON number as float64.
+	if got["status"] != float64(http.StatusOK) {
+		t.Errorf("status = %v, want %d (key must be lowercase \"status\")", got["status"], http.StatusOK)
+	}
+	if _, ok := got["duration_ms"].(float64); !ok {
+		t.Errorf("duration_ms missing or not a number: %v", got["duration_ms"])
+	}
+	if m, _ := got["method"].(string); strings.ContainsAny(m, "\r\n") {
+		t.Errorf("method still contains CR/LF: %q", m)
+	}
+	if strings.Contains(buf.String(), "supersecret") {
+		t.Errorf("Logged output leaked sensitive token: %q", buf.String())
+	}
+}
+
+func TestSanitizedLoggerMiddleware_LevelFromStatus(t *testing.T) {
+	tests := []struct {
+		status int
+		level  string
+	}{
+		{http.StatusOK, "INFO"},
+		{http.StatusNotFound, "WARN"},
+		{http.StatusInternalServerError, "ERROR"},
+	}
+	for _, tt := range tests {
+		var buf bytes.Buffer
+		handler := SanitizedLoggerMiddleware(logging.New(&buf, slog.LevelInfo))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(tt.status)
+		}))
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/x", nil))
+
+		lines := decodeLogLines(t, &buf)
+		if len(lines) != 1 || lines[0]["level"] != tt.level {
+			t.Errorf("status %d: want level %s, got %v", tt.status, tt.level, lines)
+		}
+	}
+}
+
+func TestRequestContextMiddleware(t *testing.T) {
+	var buf bytes.Buffer
+	logger := logging.New(&buf, slog.LevelInfo)
+
+	// Same order as NewServer: RequestContext (outermost) -> access log -> handler.
+	var inner http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logging.SetActor(r.Context(), "user-1")
+		logger.InfoContext(r.Context(), "handler.ran")
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := RequestContextMiddleware(SanitizedLoggerMiddleware(logger)(inner))
+
+	tests := []struct {
+		name     string
+		headerID string
+		wantSame bool
+	}{
+		{"valid client id is reused", "abc-123.X_y", true},
+		{"missing id gets generated", "", false},
+		{"invalid id is replaced", "bad id\r\nFAKE", false},
+		{"too long id is replaced", strings.Repeat("a", 65), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf.Reset()
+			req := httptest.NewRequest("GET", "/api/x", nil)
+			if tt.headerID != "" {
+				req.Header.Set("X-Request-ID", tt.headerID)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			id := rec.Header().Get("X-Request-ID")
+			if id == "" {
+				t.Fatal("response has no X-Request-ID header")
+			}
+			if tt.wantSame && id != tt.headerID {
+				t.Errorf("X-Request-ID = %q, want client value %q", id, tt.headerID)
+			}
+			if !tt.wantSame && id == tt.headerID {
+				t.Errorf("invalid client id %q was accepted", tt.headerID)
+			}
+
+			lines := decodeLogLines(t, &buf)
+			if len(lines) != 2 {
+				t.Fatalf("want 2 log lines (handler + access log), got %d: %q", len(lines), buf.String())
+			}
+			// Both lines carry the same correlation ID; the access log is written after the
+			// handler, so it also sees the actor set inside the handler (shared *RequestInfo).
+			for _, ln := range lines {
+				if ln["correlation_id"] != id {
+					t.Errorf("event %v: correlation_id = %v, want %q", ln["event"], ln["correlation_id"], id)
+				}
+				if ln["actor"] != "user-1" {
+					t.Errorf("event %v: actor = %v, want user-1", ln["event"], ln["actor"])
+				}
+			}
+		})
 	}
 }

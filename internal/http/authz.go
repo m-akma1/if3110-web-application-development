@@ -3,11 +3,13 @@ package http
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"dbplatform/domain"
 	"dbplatform/internal/authn"
+	"dbplatform/internal/logging"
 	"dbplatform/internal/rbac"
 )
 
@@ -101,9 +103,11 @@ func (s *Server) requireSession(w http.ResponseWriter, r *http.Request) (*authn.
 		}
 		return nil, nil, false
 	}
+	// Every later log record of this request (including the access log) carries the actor.
+	logging.SetActor(r.Context(), user.ID)
 	layout, err := s.layoutUser(r.Context(), user)
 	if err != nil {
-		s.logger.Printf("[AUTHZ] gagal memuat profil user %s: %v", user.ID, err)
+		s.logger.ErrorContext(r.Context(), "authz.profile_error", slog.String("error", err.Error()))
 		http.Error(w, "Gagal memuat profil pengguna", http.StatusInternalServerError)
 		return nil, nil, false
 	}
@@ -140,12 +144,18 @@ func (s *Server) authorizeDB(ctx context.Context, u *authn.User, dbID string, ac
 		return rbac.AccessNone, rbac.ErrForbidden
 	}
 	level, err := s.access.Authorize(ctx, u.ID, dbID, action)
-	if err != nil && !errors.Is(err, rbac.ErrForbidden) {
-		s.logger.Printf("[AUTHZ] gagal memeriksa akses user=%s db=%s action=%s: %s",
-			stripLogNewlines(u.ID),
-			stripLogNewlines(dbID),
-			stripLogNewlines(string(action)),
-			stripLogNewlines(err.Error()),
+	switch {
+	case errors.Is(err, rbac.ErrForbidden):
+		s.logger.WarnContext(ctx, "authz.denied",
+			slog.String("database_id", dbID),
+			slog.String("action", string(action)),
+			slog.String("status", "DENIED"),
+		)
+	case err != nil:
+		s.logger.ErrorContext(ctx, "authz.error",
+			slog.String("database_id", dbID),
+			slog.String("action", string(action)),
+			slog.String("error", err.Error()),
 		)
 	}
 	return level, err

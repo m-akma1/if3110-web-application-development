@@ -28,7 +28,7 @@ func (s *Server) handleAPIMigrationOverview(w http.ResponseWriter, r *http.Reque
 
 	ov, err := s.migrations.Overview(r.Context(), user.ID, dbID)
 	if err != nil {
-		s.logMigrationError(user, "overview", err)
+		s.logMigrationError(r.Context(), "overview", err)
 		writeJSONError(w, http.StatusForbidden, accessDeniedMessage(err))
 		return
 	}
@@ -84,7 +84,7 @@ func (s *Server) handleAPIMigrationDetail(w http.ResponseWriter, r *http.Request
 	}
 	m, level, err := s.migrations.Get(r.Context(), user.ID, r.PathValue("id"))
 	if err != nil {
-		s.logMigrationError(user, "detail", err)
+		s.logMigrationError(r.Context(), "detail", err)
 		writeJSONError(w, http.StatusForbidden, accessDeniedMessage(err))
 		return
 	}
@@ -290,7 +290,7 @@ func (s *Server) handleAPIMigrationRollback(w http.ResponseWriter, r *http.Reque
 	}
 	m, res, err := s.migrations.Rollback(r.Context(), user.ID, r.PathValue("id"))
 	if err != nil {
-		s.logMigrationError(user, "rollback", err)
+		s.logMigrationError(r.Context(), "rollback", err)
 		status, msg := migrationErrorResponse(err)
 		writeJSON(w, status, map[string]any{"error": msg})
 		return
@@ -318,7 +318,7 @@ func (s *Server) handleAPIMigrationForward(w http.ResponseWriter, r *http.Reques
 	}
 	m, res, err := s.migrations.Forward(r.Context(), user.ID, r.PathValue("id"))
 	if err != nil {
-		s.logMigrationError(user, "forward", err)
+		s.logMigrationError(r.Context(), "forward", err)
 		status, msg := migrationErrorResponse(err)
 		writeJSON(w, status, map[string]any{"error": msg})
 		return
