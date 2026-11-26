@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
 	"dbplatform/domain"
+	"dbplatform/internal/logging"
 )
 
 var (
@@ -24,6 +26,7 @@ type ConnectionRegistry struct {
 	mu     sync.RWMutex
 	pools  map[string]*sql.DB
 	limits QueryLimits
+	logger *slog.Logger
 }
 
 // NewConnectionRegistry uses DefaultQueryLimits.
@@ -46,6 +49,27 @@ func (r *ConnectionRegistry) RegisterPool(dbID string, db *sql.DB) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pools[dbID] = db
+}
+
+// setLogger sets the logger for SQL records. Nil keeps slog.Default()
+func (r *ConnectionRegistry) SetLogger(l *slog.Logger) {
+	r.logger = l
+}
+
+func (r *ConnectionRegistry) log() *slog.Logger {
+	if r.logger != nil {
+		return r.logger
+	}
+	return slog.Default()
+}
+
+// logged runs fn between a sql.start and a sql.result record. fn returns the row count
+// (-1 when unknown).
+func (r *ConnectionRegistry) logged(ctx context.Context, q logging.SQLLog, fn func() (int64, error)) error {
+	start := logging.SQLStart(ctx, r.log(), q)
+	rows, err := fn()
+	logging.SQLResult(ctx, r.log(), q, start, rows, err)
+	return err
 }
 
 // Replace registers db under dbID and closes the pool it replaces, if any.
@@ -119,7 +143,16 @@ func (r *ConnectionRegistry) ExecuteQueryOnDB(ctx context.Context, dbID, rawSQL 
 		return nil, ErrNoPool
 	}
 
+	q := logging.SQLLog{DatabaseID: dbID, Kind: "read_only", Query: cleanedSQL}
+	start := logging.SQLStart(ctx, r.log(), q)
+
 	res, err := ExecuteReadOnlyQuery(ctx, db, cleanedSQL, r.limits)
+	rows := int64(-1)
+	if res != nil {
+		rows = res.TotalRows
+	}
+	logging.SQLResult(ctx, r.log(), q, start, rows, err)
+
 	if err != nil {
 		return nil, err
 	}
@@ -134,6 +167,17 @@ func (r *ConnectionRegistry) ExecuteQueryOnDB(ctx context.Context, dbID, rawSQL 
 // information_schema, pg_toast or temporary schemas (names starting with pg_ are reserved).
 const userSchemas = `n.nspname <> 'information_schema' AND n.nspname NOT LIKE 'pg\_%'`
 
+// listTablesSQL lists plain and partitioned tables (not partitions) of every user schema.
+const listTablesSQL = `SELECT n.nspname, c.relname
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition AND ` + userSchemas + `
+ORDER BY n.nspname, c.relname`
+
+// describeTableQuery labels the pg_catalog lookups of describeTable (columns, constraints,
+// indexes) in sql.* records; those queries are fixed and take the table name as a parameter.
+const describeTableQuery = "describeTable: pg_catalog columns, constraints, indexes"
+
 // ListTables returns the tables (plain and partitioned, not partitions) of every user schema,
 // ordered by schema then name.
 func (r *ConnectionRegistry) ListTables(ctx context.Context, dbID string) ([]domain.TableSummary, error) {
@@ -143,25 +187,24 @@ func (r *ConnectionRegistry) ListTables(ctx context.Context, dbID string) ([]dom
 	}
 
 	var tables []domain.TableSummary
-	err := withReadOnlyTx(ctx, db, r.limits, 1, func(ctx context.Context, tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `
-			SELECT n.nspname, c.relname
-			FROM pg_class c
-			JOIN pg_namespace n ON n.oid = c.relnamespace
-			WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition AND `+userSchemas+`
-			ORDER BY n.nspname, c.relname`)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var t domain.TableSummary
-			if err := rows.Scan(&t.Schema, &t.Name); err != nil {
+	q := logging.SQLLog{DatabaseID: dbID, Kind: "catalog", Query: listTablesSQL}
+	err := r.logged(ctx, q, func() (int64, error) {
+		err := withReadOnlyTx(ctx, db, r.limits, 1, func(ctx context.Context, tx *sql.Tx) error {
+			rows, err := tx.QueryContext(ctx, listTablesSQL)
+			if err != nil {
 				return err
 			}
-			tables = append(tables, t)
-		}
-		return rows.Err()
+			defer rows.Close()
+			for rows.Next() {
+				var t domain.TableSummary
+				if err := rows.Scan(&t.Schema, &t.Name); err != nil {
+					return err
+				}
+				tables = append(tables, t)
+			}
+			return rows.Err()
+		})
+		return int64(len(tables)), err
 	})
 	if err != nil {
 		return nil, err
@@ -191,14 +234,26 @@ func (r *ConnectionRegistry) InspectTableDataAndSchema(ctx context.Context, dbID
 	var res *domain.TableDataResult
 	// count + page of rows + catalog lookups: allow two full timeouts in total
 	err := withReadOnlyTx(ctx, db, r.limits, 2, func(ctx context.Context, tx *sql.Tx) error {
-		meta, err := describeTable(ctx, tx, schema, table)
+		tableAttr := slog.String("table", schema+"."+table)
+		var meta *domain.TableDataResult
+		err := r.logged(ctx, logging.SQLLog{
+			DatabaseID: dbID, Kind: "catalog", Query: describeTableQuery,
+			Extra: []slog.Attr{tableAttr},
+		}, func() (int64, error) {
+			var err error
+			meta, err = describeTable(ctx, tx, schema, table)
+			return -1, err
+		})
 		if err != nil {
 			return err
 		}
 		res = meta
 		qualified := quoteIdent(meta.SchemaName) + "." + quoteIdent(meta.TableName)
 
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+qualified).Scan(&res.TotalRows); err != nil {
+		countSQL := `SELECT COUNT(*) FROM ` + qualified
+		err = r.logged(ctx, logging.SQLLog{DatabaseID: dbID, Kind: "catalog", Query: countSQL, Extra: []slog.Attr{tableAttr}},
+			func() (int64, error) { return 1, tx.QueryRowContext(ctx, countSQL).Scan(&res.TotalRows) })
+		if err != nil {
 			return fmt.Errorf("menghitung baris: %w", err)
 		}
 		res.TotalPages = max(1, int((res.TotalRows+int64(pageSize)-1)/int64(pageSize)))
@@ -216,7 +271,14 @@ func (r *ConnectionRegistry) InspectTableDataAndSchema(ctx context.Context, dbID
 		}
 		dataSQL += fmt.Sprintf(` LIMIT %d OFFSET %d`, pageSize, (page-1)*pageSize)
 
-		res.Columns, res.Rows, _, err = queryRows(ctx, tx, dataSQL, pageSize)
+		err = r.logged(ctx, logging.SQLLog{
+			DatabaseID: dbID, Kind: "table_browse", Query: dataSQL,
+			Extra: []slog.Attr{tableAttr, slog.Int("page", page)},
+		}, func() (int64, error) {
+			var err error
+			res.Columns, res.Rows, _, err = queryRows(ctx, tx, dataSQL, pageSize)
+			return int64(len(res.Rows)), err
+		})
 		if err != nil {
 			return fmt.Errorf("membaca data: %w", err)
 		}
@@ -241,10 +303,14 @@ func (r *ConnectionRegistry) DescribeTable(ctx context.Context, dbID, schema, ta
 		return nil, ErrNoPool
 	}
 	var res *domain.TableDataResult
-	err := withReadOnlyTx(ctx, db, r.limits, 1, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		res, err = describeTable(ctx, tx, schema, table)
-		return err
+	q := logging.SQLLog{DatabaseID: dbID, Kind: "catalog", Query: describeTableQuery,
+		Extra: []slog.Attr{slog.String("table", schema+"."+table)}}
+	err := r.logged(ctx, q, func() (int64, error) {
+		return -1, withReadOnlyTx(ctx, db, r.limits, 1, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			res, err = describeTable(ctx, tx, schema, table)
+			return err
+		})
 	})
 	if err != nil {
 		return nil, err
