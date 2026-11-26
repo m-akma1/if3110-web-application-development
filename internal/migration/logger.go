@@ -1,35 +1,32 @@
 package migration
 
 import (
+	"context"
 	"log/slog"
-	"os"
 	"time"
 )
 
-var attemptLogger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
-
-func logMigrationAttempt(event, execType, migrationID, executionID, databaseID, executorID string, version int, status string, duration time.Duration, sqlScript string, res *RunResult) {
+// logAttempt writes one migration.attempt record per execution (UP, ROLLBACK or FORWARD).
+// The actor and correlation_id come from ctx. executionID is the history row of this run;
+// it is empty when a failed rollback or forward wrote no row.
+func (e *Engine) logAttempt(ctx context.Context, execType, migrationID, executionID, databaseID string,
+	version int, status string, duration time.Duration, sqlScript string, res *RunResult) {
 	attrs := []any{
-		slog.String("event", event),
 		slog.String("execution_type", execType),
 		slog.String("migration_id", migrationID),
 		slog.String("execution_id", executionID),
 		slog.String("database_id", databaseID),
-		slog.String("actor", executorID),
 		slog.Int("version", version),
 		slog.String("status", status),
 		slog.Int64("duration_ms", duration.Milliseconds()),
-		slog.String("sql", sqlScript),
+		slog.String("query", sqlScript),
 	}
 	if res != nil && res.Err != nil {
-		attrs = append(attrs,
-			slog.String("error", res.Err.String()),
-			slog.String("sqlstate", res.Err.Code),
-		)
+		attrs = append(attrs, slog.String("error", res.Err.String()), slog.String("sqlstate", res.Err.Code))
 	}
 	if status == "FAILED" {
-		attemptLogger.Error("migration_attempt", attrs...)
+		e.logger.ErrorContext(ctx, "migration.attempt", attrs...)
 	} else {
-		attemptLogger.Info("migration_attempt", attrs...)
+		e.logger.InfoContext(ctx, "migration.attempt", attrs...)
 	}
 }

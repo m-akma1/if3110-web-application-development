@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -189,13 +190,13 @@ func (e *Engine) ExecuteRollback(ctx context.Context, migrationID, executorID st
 	}
 
 	executedAt := e.now()
-	res, err := e.run(runCtx, pool, downScript, stmts)
+	res, err := e.run(runCtx, pool, migrationSQLLog(m.DatabaseID, m.ID, "ROLLBACK", downScript), stmts)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	if !res.OK {
-		logMigrationAttempt("rollback_failed", "ROLLBACK", m.ID, "", m.DatabaseID, executorID, m.Version, "FAILED", res.Duration, downScript, res)
+		e.logAttempt(runCtx, "ROLLBACK", m.ID, "", m.DatabaseID, m.Version, "FAILED", res.Duration, downScript, res)
 		return nil, res, fmt.Errorf("rollback gagal: %s", res.Err.String())
 	}
 
@@ -203,7 +204,7 @@ func (e *Engine) ExecuteRollback(ctx context.Context, migrationID, executorID st
 	if err != nil {
 		return nil, res, fmt.Errorf("rollback sudah di-COMMIT pada database target, tetapi riwayat gagal disimpan: %w", err)
 	}
-	logMigrationAttempt("rollback_committed", "ROLLBACK", m.ID, rollbackRow.ID, m.DatabaseID, executorID, m.Version, "SUCCESS", res.Duration, downScript, res)
+	e.logAttempt(runCtx, "ROLLBACK", m.ID, rollbackRow.ID, m.DatabaseID, m.Version, "SUCCESS", res.Duration, downScript, res)
 
 	origUpdated, err := getMigration(runCtx, lockConn, migrationID)
 	if err != nil {
@@ -262,12 +263,13 @@ func (e *Engine) executeApprovedRollback(ctx context.Context, rollbackDraftID, e
 	}
 
 	executedAt := e.now()
-	res, err := e.run(runCtx, pool, downScript, stmts)
+	res, err := e.run(runCtx, pool, migrationSQLLog(rb.DatabaseID, rb.ID, "ROLLBACK", downScript,
+		slog.String("rollback_target_id", target.ID)), stmts)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !res.OK {
-		logMigrationAttempt("rollback_failed", "ROLLBACK", target.ID, rb.ID, rb.DatabaseID, executorID, target.Version, "FAILED", res.Duration, downScript, res)
+		e.logAttempt(runCtx, "ROLLBACK", target.ID, rb.ID, rb.DatabaseID, target.Version, "FAILED", res.Duration, downScript, res)
 		return nil, res, fmt.Errorf("rollback gagal: %s", res.Err.String())
 	}
 
@@ -293,7 +295,7 @@ func (e *Engine) executeApprovedRollback(ctx context.Context, rollbackDraftID, e
 		return nil, res, fmt.Errorf("rollback berhasil, tetapi status target gagal diperbarui: %w", err)
 	}
 
-	logMigrationAttempt("rollback_committed", "ROLLBACK", target.ID, rb.ID, rb.DatabaseID, executorID, target.Version, "SUCCESS", res.Duration, downScript, res)
+	e.logAttempt(runCtx, "ROLLBACK", target.ID, rb.ID, rb.DatabaseID, target.Version, "SUCCESS", res.Duration, downScript, res)
 	rbUpdated, err := getMigration(runCtx, lockConn, rb.ID)
 	return rbUpdated, res, err
 }
@@ -341,12 +343,12 @@ func (e *Engine) ExecuteForward(ctx context.Context, migrationID, executorID str
 	}
 
 	executedAt := e.now()
-	res, err := e.run(runCtx, pool, upScript, stmts)
+	res, err := e.run(runCtx, pool, migrationSQLLog(m.DatabaseID, m.ID, "FORWARD", upScript), stmts)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !res.OK {
-		logMigrationAttempt("forward_failed", "FORWARD", m.ID, "", m.DatabaseID, executorID, m.Version, "FAILED", res.Duration, upScript, res)
+		e.logAttempt(runCtx, "FORWARD", m.ID, "", m.DatabaseID, m.Version, "FAILED", res.Duration, upScript, res)
 		return nil, res, fmt.Errorf("forward gagal dijalankan pada target: %s", res.Err.String())
 	}
 
@@ -375,7 +377,7 @@ func (e *Engine) ExecuteForward(ctx context.Context, migrationID, executorID str
 
 	fwdRow, err := getMigration(runCtx, lockConn, fwdID)
 	if err == nil {
-		logMigrationAttempt("forward_committed", "FORWARD", m.ID, fwdRow.ID, m.DatabaseID, executorID, fwdRow.Version, "SUCCESS", res.Duration, upScript, res)
+		e.logAttempt(runCtx, "FORWARD", m.ID, fwdRow.ID, m.DatabaseID, fwdRow.Version, "SUCCESS", res.Duration, upScript, res)
 	}
 	return fwdRow, res, err
 }
@@ -429,12 +431,13 @@ func (e *Engine) executeApprovedForward(ctx context.Context, forwardDraftID, exe
 	}
 
 	executedAt := e.now()
-	res, err := e.run(runCtx, pool, upScript, stmts)
+	res, err := e.run(runCtx, pool, migrationSQLLog(fwd.DatabaseID, fwd.ID, "FORWARD", upScript,
+		slog.String("source_migration_id", src.ID)), stmts)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !res.OK {
-		logMigrationAttempt("forward_failed", "FORWARD", src.ID, fwd.ID, fwd.DatabaseID, executorID, src.Version, "FAILED", res.Duration, upScript, res)
+		e.logAttempt(runCtx, "FORWARD", src.ID, fwd.ID, fwd.DatabaseID, src.Version, "FAILED", res.Duration, upScript, res)
 		return nil, res, fmt.Errorf("forward gagal dijalankan pada target: %s", res.Err.String())
 	}
 
@@ -459,7 +462,7 @@ func (e *Engine) executeApprovedForward(ctx context.Context, forwardDraftID, exe
 
 	fwdUpdated, err := getMigration(runCtx, lockConn, fwd.ID)
 	if err == nil {
-		logMigrationAttempt("forward_committed", "FORWARD", src.ID, fwdUpdated.ID, fwd.DatabaseID, executorID, fwdUpdated.Version, "SUCCESS", res.Duration, upScript, res)
+		e.logAttempt(runCtx, "FORWARD", src.ID, fwdUpdated.ID, fwd.DatabaseID, fwdUpdated.Version, "SUCCESS", res.Duration, upScript, res)
 	}
 	return fwdUpdated, res, err
 }

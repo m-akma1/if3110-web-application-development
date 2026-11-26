@@ -6,8 +6,10 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"dbplatform/internal/logging"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -56,10 +58,17 @@ type Engine struct {
 	pools    PoolSource
 	limits   Limits
 	now      func() time.Time
+	logger   *slog.Logger
 }
 
 func NewEngine(platform *sql.DB, pools PoolSource, limits Limits) *Engine {
-	return &Engine{platform: platform, pools: pools, limits: limits.normalized(), now: time.Now}
+	return &Engine{platform: platform, pools: pools, limits: limits.normalized(), now: time.Now, logger: slog.Default()}
+}
+
+func (e *Engine) SetLogger(l *slog.Logger) {
+	if l != nil {
+		e.logger = l
+	}
 }
 
 // DryRun runs script on the target inside a transaction that is always rolled back, so the
@@ -145,7 +154,7 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	}
 
 	executedAt := e.now()
-	res, err := e.run(runCtx, pool, m.SQL, stmts)
+	res, err := e.run(runCtx, pool, migrationSQLLog(m.DatabaseID, m.ID, "UP", m.SQL), stmts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -161,13 +170,26 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	if res.Err != nil {
 		rec.Error = res.Err.String()
 	}
+	status := "SUCCESS"
+	if !res.OK {
+		status = "FAILED"
+	}
 	if err := recordExecution(runCtx, lockConn, rec); err != nil {
+		// The attempt still happened on the target; log it even though history was not saved.
+		e.logAttempt(runCtx, "UP", m.ID, m.ID, m.DatabaseID, 0, status, res.Duration, m.SQL, res)
 		if res.OK {
 			return nil, res, fmt.Errorf("migration sudah di-COMMIT pada database target, tetapi riwayat gagal disimpan: %w", err)
 		}
 		return nil, res, fmt.Errorf("gagal menyimpan riwayat migration: %w", err)
 	}
+	databaseID := m.DatabaseID
 	m, err = getMigration(runCtx, lockConn, migrationID)
+	version := 0
+	if m != nil {
+		version = m.Version // assigned by recordExecution on success
+	}
+	// One row is one execution for now, so the execution ID is the migration ID.
+	e.logAttempt(runCtx, "UP", migrationID, migrationID, databaseID, version, status, res.Duration, rec.SQL, res)
 	return m, res, err
 }
 
@@ -202,21 +224,41 @@ func (e *Engine) begin(ctx context.Context, pool *sql.DB) (*sql.Conn, *sql.Tx, e
 	return conn, tx, nil
 }
 
+// migrationSQLLog describes one migration script run for the sql.* and tx.* log events.
+// extra adds attributes such as rollback_target_id or source_migration_id.
+func migrationSQLLog(databaseID, migrationID, execType, script string, extra ...slog.Attr) logging.SQLLog {
+	return logging.SQLLog{
+		DatabaseID: databaseID,
+		Kind:       "migration",
+		Query:      script,
+		Extra: append([]slog.Attr{
+			slog.String("migration_id", migrationID),
+			slog.String("execution_type", execType),
+		}, extra...),
+	}
+}
+
 // run executes the whole script on the target in one transaction and commits it when every
 // statement succeeds. It returns an error only when the transaction could not be started;
 // script failures are reported in RunResult.
-func (e *Engine) run(ctx context.Context, pool *sql.DB, script string, stmts []Statement) (*RunResult, error) {
+func (e *Engine) run(ctx context.Context, pool *sql.DB, q logging.SQLLog, stmts []Statement) (*RunResult, error) {
+	script := q.Query
 	start := time.Now()
 	conn, tx, err := e.begin(ctx, pool)
 	if err != nil {
+		e.logger.ErrorContext(ctx, "tx.begin_failed",
+			slog.String("database_id", q.DatabaseID), slog.String("error", err.Error()))
 		return nil, err
 	}
 	defer conn.Close()
 	defer func() { _ = tx.Rollback() }()
 
+	sqlStart := logging.SQLStart(ctx, e.logger, q)
 	// Without arguments pgx sends the script with the simple query protocol, so the server parses
 	// all statements itself and error positions are relative to the whole script.
 	_, execErr := tx.ExecContext(ctx, script)
+	logging.SQLResult(ctx, e.logger, q, sqlStart, -1, execErr)
+
 	committed := false
 	if execErr == nil {
 		execErr = tx.Commit()
@@ -227,12 +269,15 @@ func (e *Engine) run(ctx context.Context, pool *sql.DB, script string, stmts []S
 		res.Err = toScriptError(script, stmts, execErr)
 	}
 
-	// A committed script may have changed session settings (SET search_path, SET ROLE, ...).
-	// Reset them so the pooled connection is clean for the viewer and the next migration.
 	if committed {
+		e.logger.InfoContext(ctx, "tx.commit", txAttrs(q)...)
+		// A committed script may have changed session settings (SET search_path, SET ROLE, ...).
+		// Reset them so the pooled connection is clean for the viewer and the next migration.
 		if _, err := conn.ExecContext(ctx, "RESET ALL"); err != nil {
 			discardConn(conn)
 		}
+	} else {
+		e.logger.WarnContext(ctx, "tx.rollback", append(txAttrs(q), slog.String("error", errString(execErr)))...)
 	}
 	return res, nil
 }
@@ -290,4 +335,19 @@ func toScriptError(script string, stmts []Statement, err error) *ScriptError {
 		}
 	}
 	return se
+}
+
+func txAttrs(q logging.SQLLog) []any {
+	out := []any{slog.String("database_id", q.DatabaseID)}
+	for _, a := range q.Extra {
+		out = append(out, a)
+	}
+	return out
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
