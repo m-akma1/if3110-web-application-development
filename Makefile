@@ -35,7 +35,7 @@ test-db-up:
 	docker compose --profile test up -d postgres-test
 
 test-db-down:
-	docker compose --profile test down -v
+	docker compose --profile test rm -sfv postgres-test
 
 test-integration: test-db-up
 	@echo "Waiting for test PostgreSQL to be healthy..."
