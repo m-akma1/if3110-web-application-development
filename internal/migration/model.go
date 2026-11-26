@@ -116,6 +116,12 @@ func (m *Migration) IsDraft() bool {
 	return m != nil && (m.Status == StatusDraft || m.Status == StatusRejected)
 }
 
+// IsExecutable reports whether the engine may run the migration: a draft, an approved
+// migration, or one a worker has taken from the queue (QUEUED, RUNNING).
+func (m *Migration) IsExecutable() bool {
+	return m != nil && (m.IsDraft() || m.Status == StatusApproved || m.Status == StatusQueued || m.Status == StatusRunning)
+}
+
 // NormalizeDraft trims and validates a draft's name and script.
 func NormalizeDraft(name, script string) (string, string, error) {
 	name = strings.TrimSpace(name)

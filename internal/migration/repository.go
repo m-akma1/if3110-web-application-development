@@ -268,7 +268,7 @@ type executionRecord struct {
 	Error      string
 }
 
-// recordExecution moves an APPROVED or DRAFT migration to SUCCESS (with the next version for its database) or FAILED.
+// recordExecution moves a DRAFT, APPROVED, QUEUED or RUNNING migration to SUCCESS (with the next version for its database) or FAILED.
 // The caller must hold the database's advisory lock, so max(version)+1 cannot race.
 func recordExecution(ctx context.Context, q querier, rec executionRecord) error {
 	var executedBy any
@@ -292,7 +292,7 @@ func recordExecution(ctx context.Context, q querier, rec executionRecord) error 
 			duration_ms   = $5,
 			error_message = $6,
 			updated_at    = NOW()
-		WHERE m.id = $1 AND m.status IN ('DRAFT', 'APPROVED')`,
+		WHERE m.id = $1 AND m.status IN ('DRAFT', 'APPROVED', 'QUEUED', 'RUNNING')`,
 		rec.ID, string(status), executedBy, rec.ExecutedAt, rec.Duration.Milliseconds(), rec.Error, rec.SQL)
 	if err != nil {
 		return err
@@ -371,14 +371,14 @@ func hasPendingActionFor(ctx context.Context, q querier, migrationID, execType s
 				SELECT 1 FROM migrations
 				WHERE rollback_target_id = $1
 				  AND execution_type = $2
-				  AND status IN ('DRAFT', 'PENDING_REVIEW', 'APPROVED')
+				  AND status IN ('DRAFT', 'PENDING_REVIEW', 'APPROVED', 'QUEUED', 'RUNNING')
 			)`
 		forwardQuery = `
 			SELECT EXISTS (
 				SELECT 1 FROM migrations
 				WHERE source_migration_id = $1
 				  AND execution_type = $2
-				  AND status IN ('DRAFT', 'PENDING_REVIEW', 'APPROVED')
+				  AND status IN ('DRAFT', 'PENDING_REVIEW', 'APPROVED', 'QUEUED', 'RUNNING')
 			)`
 	)
 	query := forwardQuery

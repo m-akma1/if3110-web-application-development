@@ -54,11 +54,12 @@ const lockPollInterval = 100 * time.Millisecond
 
 // Engine runs scripts on target databases and records executions in the platform database.
 type Engine struct {
-	platform *sql.DB
-	pools    PoolSource
-	limits   Limits
-	now      func() time.Time
-	logger   *slog.Logger
+	platform   *sql.DB
+	pools      PoolSource
+	limits     Limits
+	now        func() time.Time
+	logger     *slog.Logger
+	onRunStart func(ctx context.Context, migrationID string) error
 }
 
 func NewEngine(platform *sql.DB, pools PoolSource, limits Limits) *Engine {
@@ -69,6 +70,20 @@ func (e *Engine) SetLogger(l *slog.Logger) {
 	if l != nil {
 		e.logger = l
 	}
+}
+
+// SetRunStartHook registers fn to run right before a script is sent to the target.
+// The worker uses it to record that SQL may have run: a crash after this point must not be
+// retried blindly. An error from fn stops the run before any SQL is sent.
+func (e *Engine) SetRunStartHook(fn func(ctx context.Context, migrationID string) error) {
+	e.onRunStart = fn
+}
+
+func (e *Engine) runStarted(ctx context.Context, migrationID string) error {
+	if e.onRunStart == nil {
+		return nil
+	}
+	return e.onRunStart(ctx, migrationID)
 }
 
 // DryRun runs script on the target inside a transaction that is always rolled back, so the
@@ -112,7 +127,7 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	if err != nil {
 		return nil, nil, err
 	}
-	if !m.IsDraft() && m.Status != StatusApproved {
+	if !m.IsExecutable() {
 		return nil, nil, ErrNotDraft
 	}
 	if m.ExecutionType == "ROLLBACK" && m.RollbackTargetID != "" {
@@ -145,11 +160,15 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	if err != nil {
 		return nil, nil, err
 	}
-	if !m.IsDraft() && m.Status != StatusApproved {
+	if !m.IsExecutable() {
 		return nil, nil, ErrNotDraft
 	}
 	stmts, err := CheckScript(m.SQL)
 	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := e.runStarted(runCtx, m.ID); err != nil {
 		return nil, nil, err
 	}
 

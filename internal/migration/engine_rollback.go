@@ -188,6 +188,9 @@ func (e *Engine) ExecuteRollback(ctx context.Context, migrationID, executorID st
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := e.runStarted(runCtx, m.ID); err != nil {
+		return nil, nil, err
+	}
 
 	executedAt := e.now()
 	res, err := e.run(runCtx, pool, migrationSQLLog(m.DatabaseID, m.ID, "ROLLBACK", downScript), stmts)
@@ -241,7 +244,7 @@ func (e *Engine) executeApprovedRollback(ctx context.Context, rollbackDraftID, e
 	if err != nil {
 		return nil, nil, err
 	}
-	if !rb.IsDraft() && rb.Status != StatusApproved {
+	if !rb.IsExecutable() {
 		return nil, nil, ErrNotDraft
 	}
 	target, err := getMigration(runCtx, lockConn, rb.RollbackTargetID)
@@ -259,6 +262,10 @@ func (e *Engine) executeApprovedRollback(ctx context.Context, rollbackDraftID, e
 
 	stmts, err := CheckScript(downScript)
 	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := e.runStarted(runCtx, rb.ID); err != nil {
 		return nil, nil, err
 	}
 
@@ -285,7 +292,7 @@ func (e *Engine) executeApprovedRollback(ctx context.Context, rollbackDraftID, e
 			duration_ms   = $4,
 			error_message = '',
 			updated_at    = NOW()
-		WHERE id = $1 AND status IN ('DRAFT', 'APPROVED')`,
+		WHERE id = $1 AND status IN ('DRAFT', 'APPROVED', 'QUEUED', 'RUNNING')`,
 		rb.ID, executedBy, executedAt, res.Duration.Milliseconds()); err != nil {
 		return nil, res, fmt.Errorf("rollback sudah di-COMMIT pada database target, tetapi riwayat gagal disimpan: %w", err)
 	}
@@ -339,6 +346,10 @@ func (e *Engine) ExecuteForward(ctx context.Context, migrationID, executorID str
 
 	stmts, err := CheckScript(upScript)
 	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := e.runStarted(runCtx, m.ID); err != nil {
 		return nil, nil, err
 	}
 
@@ -410,7 +421,7 @@ func (e *Engine) executeApprovedForward(ctx context.Context, forwardDraftID, exe
 	if err != nil {
 		return nil, nil, err
 	}
-	if !fwd.IsDraft() && fwd.Status != StatusApproved {
+	if !fwd.IsExecutable() {
 		return nil, nil, ErrNotDraft
 	}
 	src, err := getMigration(runCtx, lockConn, fwd.SourceMigrationID)
@@ -427,6 +438,10 @@ func (e *Engine) executeApprovedForward(ctx context.Context, forwardDraftID, exe
 
 	stmts, err := CheckScript(upScript)
 	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := e.runStarted(runCtx, fwd.ID); err != nil {
 		return nil, nil, err
 	}
 
@@ -454,7 +469,7 @@ func (e *Engine) executeApprovedForward(ctx context.Context, forwardDraftID, exe
 			duration_ms   = $4,
 			error_message = '',
 			updated_at    = NOW()
-		WHERE m.id = $1 AND m.status IN ('DRAFT', 'APPROVED')`,
+		WHERE m.id = $1 AND m.status IN ('DRAFT', 'APPROVED', 'QUEUED', 'RUNNING')`,
 		fwd.ID, executedBy, executedAt, res.Duration.Milliseconds())
 	if err != nil {
 		return nil, res, fmt.Errorf("forward berhasil di-COMMIT tetapi riwayat gagal diperbarui: %w", err)
