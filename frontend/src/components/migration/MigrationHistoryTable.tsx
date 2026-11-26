@@ -2,6 +2,7 @@ import React from 'react'
 import { Link } from 'react-router-dom'
 import { MigrationView } from '../../types'
 import { fmtTime, versionLabel } from '../../utils/migrationFormat'
+import { features } from '../../config/features'
 
 interface MigrationHistoryTableProps {
   history: MigrationView[]
@@ -178,7 +179,7 @@ export const MigrationHistoryTable: React.FC<MigrationHistoryTableProps> = ({
                   <td className="px-4 py-3 text-xs whitespace-nowrap">
                     {canEdit && (
                       <div className="flex items-center gap-1.5">
-                        {h.status === 'PARTIAL' && (
+                        {h.status === 'PARTIAL' && features.batchActions && (
                           <>
                             <button
                               type="button"

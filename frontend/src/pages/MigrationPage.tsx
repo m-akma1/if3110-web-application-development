@@ -7,6 +7,7 @@ import { NoDatabaseAccess } from '../components/NoDatabaseAccess'
 import { MigrationDraftSidebar } from '../components/migration/MigrationDraftSidebar'
 import { MigrationEditor } from '../components/migration/MigrationEditor'
 import { MigrationHistoryTable } from '../components/migration/MigrationHistoryTable'
+import { features } from '../config/features'
 
 export const MigrationPage: React.FC = () => {
   const { user, groups, activeDBID } = useAuth()
@@ -333,6 +334,7 @@ export const MigrationPage: React.FC = () => {
   }
 
   const handleResumeBatch = async (m: MigrationView) => {
+    if (!features.batchActions) return
     const cursor = m.checkpoint_cursor ?? m.batch_committed_count ?? 0
     const ok = window.confirm(`Lanjutkan eksekusi migrasi "${m.name}" dari checkpoint cursor (${cursor})?`)
     if (!ok) return
@@ -351,6 +353,8 @@ export const MigrationPage: React.FC = () => {
   }
 
   const handleAbortBatch = async (m: MigrationView) => {
+    if (!features.batchActions) return
+    
     const ok = window.confirm(
       `Konfirmasi Pembatalan: Apakah Anda yakin ingin membatalkan migrasi "${m.name}" dan me-rollback ${m.batch_committed_count || 0} batch yang sudah tersimpan?`
     )

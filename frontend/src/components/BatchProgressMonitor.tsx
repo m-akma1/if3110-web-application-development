@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import { MigrationView } from '../types'
 import { api } from '../api/client'
+import { features } from '../config/features'
+
 
 interface BatchProgressMonitorProps {
   migration: MigrationView
@@ -230,11 +232,19 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
             </div>
           )}
 
-          <div className="text-xs text-zinc-400">
-            Anda dapat melanjutkan eksekusi dari checkpoint terakhir atau membatalkan batch yang telah tersimpan.
-          </div>
+          {features.batchActions ? (
+            <div className="text-xs text-zinc-400">
+              Anda dapat melanjutkan eksekusi dari checkpoint terakhir atau membatalkan batch yang telah tersimpan.
+            </div>
 
-          {canEdit && (
+          ): (
+            <div className="text-xs text-zinc-500">
+              Aksi lanjutkan/batalkan batch belum tersedia di versi ini.
+            </div>
+            )
+          }
+
+          {canEdit && features.batchActions && (
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <button
                 type="button"
@@ -263,6 +273,8 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
                 Tandai Dihentikan
               </button>
             </div>
+
+
           )}
         </div>
       )}

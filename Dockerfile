@@ -5,6 +5,8 @@ WORKDIR /app/frontend
 COPY frontend/package.json ./
 RUN npm install
 COPY frontend/ ./
+ARG VITE_ENABLE_BATCH_ACTIONS=false
+ENV VITE_ENABLE_BATCH_ACTIONS=$VITE_ENABLE_BATCH_ACTIONS
 RUN npm run build
 
 # Stage 2: Build Go Binary

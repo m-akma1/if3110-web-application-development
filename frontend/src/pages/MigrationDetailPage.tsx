@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import { MigrationView } from '../types'
 import { BatchProgressMonitor } from '../components/BatchProgressMonitor'
 import { fmtTime, versionLabel } from '../utils/migrationFormat'
+import { features } from '../config/features'
 
 export const MigrationDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>()
@@ -374,12 +375,9 @@ export const MigrationDetailPage: React.FC = () => {
       )}
 
       {/* Batch Progress & PARTIAL Monitor */}
-      {(migration.execution_mode === 'BATCH' ||
-        migration.status === 'RUNNING' ||
-        migration.status === 'QUEUED' ||
-        migration.status === 'PARTIAL' ||
-        migration.status === 'ABORTED' ||
-        (migration.batch_total_count && migration.batch_total_count > 0)) && (
+      {features.batchActions &&
+        (migration.execution_mode === 'BATCH' ||
+          (migration.batch_total_count ?? 0) > 0) && (
         <BatchProgressMonitor
           migration={migration}
           canEdit={canEdit}
