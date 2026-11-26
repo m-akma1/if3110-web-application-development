@@ -1,10 +1,12 @@
 package http
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"dbplatform/domain"
+	"dbplatform/internal/audit"
 	"dbplatform/internal/authn"
 	"dbplatform/internal/migration"
 	"dbplatform/internal/rbac"
@@ -272,6 +274,7 @@ func (s *Server) handleAPIMigrationExecute(w http.ResponseWriter, r *http.Reques
 	}
 
 	m, job, err := s.migrations.EnqueueExecute(r.Context(), user.ID, r.PathValue("id"))
+	s.audit(r.Context(), audit.Enqueue, err, enqueueAttrs("execute", r.PathValue("id"), m, job)...)
 	if err != nil {
 		s.logMigrationError(r.Context(), "execute", err)
 		status, msg := migrationErrorResponse(err)
@@ -293,6 +296,7 @@ func (s *Server) handleAPIMigrationRollback(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	m, job, err := s.migrations.EnqueueRollback(r.Context(), user.ID, r.PathValue("id"))
+	s.audit(r.Context(), audit.Enqueue, err, enqueueAttrs("rollback", r.PathValue("id"), m, job)...)
 	if err != nil {
 		s.logMigrationError(r.Context(), "rollback", err)
 		status, msg := migrationErrorResponse(err)
@@ -322,6 +326,7 @@ func (s *Server) handleAPIMigrationForward(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	m, job, err := s.migrations.EnqueueForward(r.Context(), user.ID, r.PathValue("id"))
+	s.audit(r.Context(), audit.Enqueue, err, enqueueAttrs("forward", r.PathValue("id"), m, job)...)
 	if err != nil {
 		s.logMigrationError(r.Context(), "forward", err)
 		status, msg := migrationErrorResponse(err)
@@ -382,6 +387,7 @@ func (s *Server) handleAPIMigrationSubmitReview(w http.ResponseWriter, r *http.R
 		return
 	}
 	m, err := s.migrations.SubmitReview(r.Context(), user.ID, r.PathValue("id"))
+	s.audit(r.Context(), audit.Submit, err, migrationAttrs(r.PathValue("id"), m)...)
 	if err != nil {
 		status, msg := migrationErrorResponse(err)
 		writeJSON(w, status, map[string]any{"error": msg})
@@ -407,6 +413,7 @@ func (s *Server) handleAPIMigrationApprove(w http.ResponseWriter, r *http.Reques
 		body.Note = r.FormValue("note")
 	}
 	m, err := s.migrations.Approve(r.Context(), user.ID, r.PathValue("id"), strings.TrimSpace(body.Note))
+	s.audit(r.Context(), audit.Approve, err, migrationAttrs(r.PathValue("id"), m)...)
 	if err != nil {
 		status, msg := migrationErrorResponse(err)
 		writeJSON(w, status, map[string]any{"error": msg})
@@ -437,6 +444,7 @@ func (s *Server) handleAPIMigrationReject(w http.ResponseWriter, r *http.Request
 		return
 	}
 	m, err := s.migrations.Reject(r.Context(), user.ID, r.PathValue("id"), reason)
+	s.audit(r.Context(), audit.Reject, err, append(migrationAttrs(r.PathValue("id"), m), slog.String("reason", reason))...)
 	if err != nil {
 		status, msg := migrationErrorResponse(err)
 		writeJSON(w, status, map[string]any{"error": msg})
@@ -476,4 +484,19 @@ func (s *Server) handleAPIJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"job": toJobView(job)})
+}
+
+// handleAPIMigrationExecutions returns every execution attempt of a migration, oldest first.
+func (s *Server) handleAPIMigrationExecutions(w http.ResponseWriter, r *http.Request) {
+	user, _, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	list, err := s.migrations.Executions(r.Context(), user.ID, r.PathValue("id"))
+	if err != nil {
+		status, msg := migrationErrorResponse(err)
+		writeJSON(w, status, map[string]any{"error": msg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"executions": toExecutionViews(list)})
 }

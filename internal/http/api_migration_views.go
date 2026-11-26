@@ -42,7 +42,8 @@ func migrationErrorResponse(err error) (int, string) {
 		errors.Is(err, migration.ErrAlreadyForwarded),
 		errors.Is(err, migration.ErrPendingRollbackExists),
 		errors.Is(err, migration.ErrPendingForwardExists),
-		errors.Is(err, migration.ErrImmutableRollbackScript):
+		errors.Is(err, migration.ErrImmutableRollbackScript),
+		errors.Is(err, migration.ErrHasHistory):
 		return http.StatusUnprocessableEntity, err.Error()
 	default:
 		// If error is descriptive validation or target error, return 422 with message
@@ -222,4 +223,29 @@ func toJobView(j *migration.Job) *domain.MigrationJobView {
 		FinishedAt:  j.FinishedAt,
 		Done:        j.Done(),
 	}
+}
+
+func toExecutionViews(list []migration.Execution) []domain.MigrationExecutionView {
+	out := make([]domain.MigrationExecutionView, 0, len(list))
+	for _, ex := range list {
+		out = append(out, domain.MigrationExecutionView{
+			ID:                 ex.ID,
+			MigrationID:        ex.MigrationID,
+			JobID:              ex.JobID,
+			Attempt:            ex.Attempt,
+			ExecutionType:      string(ex.Kind),
+			Status:             string(ex.Status),
+			SQLSent:            ex.SQLSent,
+			SQLExecuted:        ex.SQL,
+			RevertsExecutionID: ex.RevertsExecutionID,
+			ExecutorName:       ex.ExecutorName,
+			Error:              ex.Error,
+			SQLState:           ex.SQLState,
+			CorrelationID:      ex.CorrelationID,
+			StartedAt:          ex.StartedAt,
+			FinishedAt:         ex.FinishedAt,
+			DurationMs:         ex.Duration.Milliseconds(),
+		})
+	}
+	return out
 }

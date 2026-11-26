@@ -550,3 +550,12 @@ func correlationID(ctx context.Context) string {
 	}
 	return ""
 }
+
+// Executions returns the execution attempts of a migration the user may view, oldest first.
+func (s *Service) Executions(ctx context.Context, userID, id string) ([]Execution, error) {
+	m, _, err := s.load(ctx, userID, id, rbac.ActionViewMigration)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListExecutions(ctx, m.ID)
+}

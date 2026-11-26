@@ -130,3 +130,23 @@ type MigrationJobView struct {
 	FinishedAt  *time.Time `json:"finished_at,omitempty"`
 	Done        bool       `json:"done"`
 }
+
+// MigrationExecutionView is one attempt to run a migration (append-only history).
+type MigrationExecutionView struct {
+	ID                 string    `json:"id"`
+	MigrationID        string    `json:"migration_id"`
+	JobID              string    `json:"job_id,omitempty"`
+	Attempt            int       `json:"attempt"`
+	ExecutionType      string    `json:"execution_type"`
+	Status             string    `json:"status"`
+	SQLSent            bool      `json:"sql_sent"`
+	SQLExecuted        string    `json:"sql_executed"`
+	RevertsExecutionID string    `json:"reverts_execution_id,omitempty"`
+	ExecutorName       string    `json:"executor_name"`
+	Error              string    `json:"error,omitempty"`
+	SQLState           string    `json:"sqlstate,omitempty"`
+	CorrelationID      string    `json:"correlation_id,omitempty"`
+	StartedAt          time.Time `json:"started_at"`
+	FinishedAt         time.Time `json:"finished_at"`
+	DurationMs         int64     `json:"duration_ms"`
+}
