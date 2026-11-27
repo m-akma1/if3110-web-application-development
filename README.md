@@ -61,6 +61,9 @@ The `Makefile` holds the developer shortcuts. Run them from the repository root.
 | `make test` | Run unit tests (integration tests are skipped without `TEST_DATABASE_URL`) |
 | `make test-integration` | Start the disposable test PostgreSQL and run every test against it |
 | `make test-db-down` | Stop the test PostgreSQL |
+| `make observability` | Start the stack plus the OpenTelemetry Collector, Tempo, Loki, Prometheus and Grafana (<http://localhost:3000>), with traces and logs exported over OTLP; `make observability-down` stops it |
+| `make loadtest` | Run the k6 stress test against the running stack, with databases created from this repository (see [Stress Test (k6)](#stress-test-k6)) |
+| `make loadtest-local` | The same with the IF3140 databases in `demo/` (team only; `demo/` is git-ignored) |
 | `make seed-large` | Create the 2,000,000-row `events` table on the demo target (for trying batch mode, see [Per-Batch Execution](#per-batch-execution)); needs the Compose stack running |
 
 Run `npm --prefix frontend install` once before using the frontend targets. The Go server serves the built SPA from `frontend/dist`, so run `make frontend-build` at least once before `make dev`.
@@ -133,7 +136,10 @@ The worker pool itself uses fixed settings: 4 workers, a 30 s lease renewed ever
 | Variable | Default Value | Description |
 |---|---|---|
 | `OTEL_TRACES_EXPORTER` | `console` | (Optional) `console` writes every finished span as one JSON line on stdout, next to the logs. `none` still creates spans (so logs keep their `trace_id`/`span_id`) but exports nothing |
-| `OTEL_SERVICE_NAME` | `dbplatform` | (Optional) `service.name` on every span |
+| `OTEL_SERVICE_NAME` | `dbplatform` | (Optional) `service.name` on every span and exported log record |
+| `OTEL_LOGS_EXPORTER` | `none` | (Optional) `otlp` also sends every log record over OTLP (stdout stays as it is). See [Observability](#observability) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://otel-collector:4318` in Compose | (Optional) Where `otlp` traces and logs go (OTLP/HTTP). The other standard `OTEL_EXPORTER_OTLP_*` variables work too |
+| `METRICS_ADDR` | `:9091` | (Optional) Address of the Prometheus endpoint `/metrics`, separate from the app port and not routed by Caddy. `off` disables it |
 
 #### Session Handling
 
@@ -300,7 +306,8 @@ flowchart LR
 │   ├── bootstrap/               # Bootstrap admins and demo data seeding
 │   ├── http/                    # REST API handlers, SPA host, middleware, cookies
 │   ├── logging/                 # Structured JSON logger (slog), correlation ID and actor in context, SQL log + span helper
-│   ├── tracing/                 # OpenTelemetry setup, traceparent inject/extract for the job queue
+│   ├── tracing/                 # OpenTelemetry setup (console/otlp traces, otlp logs), traceparent for the job queue
+│   ├── metrics/                 # Prometheus metrics (jobs, lock wait, batches, HTTP routes, pools) on METRICS_ADDR
 │   ├── ids/                     # UUID helpers
 │   ├── accesstest/, testutil/   # Test fixtures and test database helpers
 ├── frontend/                    # React + TypeScript SPA (Vite)
@@ -313,8 +320,10 @@ flowchart LR
 ├── docs/                        # Extra documentation (CodeQL SAST report)
 ├── docker/target-init/          # Init scripts for the demo target database
 ├── docker/seed/                 # Optional large dataset for batch mode (make seed-large)
+├── docker/observability/        # Collector, Tempo, Loki, Prometheus, Grafana config + dashboard (make observability)
+├── loadtest/                    # k6 stress test (stress.js, run.sh, local-run.sh) and the documented results
 ├── Dockerfile                   # SPA build (Node) -> Go build -> Alpine runtime
-├── docker-compose.yml           # caddy, app, postgres, target-postgres, postgres-test (profile "test")
+├── docker-compose.yml           # caddy, app, postgres, target-postgres; profiles "test" and "observability"
 ├── Caddyfile                    # TLS, reverse proxy, log filtering
 ├── Makefile                     # Developer shortcuts
 ├── .github/workflows/codeql.yml # CodeQL SAST
@@ -789,6 +798,157 @@ A batch migration (`UPDATE shipments SET status = 'SHIPPED'`, cursor `id`, batch
 ["migration.batch","batch_no=2 rows=1 cursor_to=3",["tx.commit"]]
 ["migration.batch","batch_no=3 rows=0",[]]
 ```
+
+### Observability
+
+`make observability` starts the normal stack plus an observability profile in Docker Compose:
+
+```text
+app ──OTLP/HTTP──► otel-collector ──► Tempo   (traces)
+ │                                └─► Loki    (logs, via Loki's OTLP endpoint)
+ └── :9091/metrics ◄── Prometheus (scrape every 5 s)
+                         Grafana ◄── Prometheus, Tempo, Loki (provisioned, linked)
+```
+
+- **Grafana**: <http://localhost:3000> (anonymous visitors can view; sign in as `admin`/`admin` to edit). The home dashboard is **DB Platform**. Prometheus is also on <http://localhost:9090> for raw queries. Both are published on `127.0.0.1` only; the collector, Tempo, Loki and the app's `:9091` are only reachable inside the Compose network.
+- **Traces**: `OTEL_TRACES_EXPORTER=otlp` sends the spans described in [Tracing](#tracing) to the collector, which forwards them to Tempo.
+- **Logs**: `OTEL_LOGS_EXPORTER=otlp` adds a second output to the logger (the `otelslog` bridge) next to stdout. It gets exactly the records stdout gets: the same level, the same `correlation_id`/`actor`, and the same redaction (the redaction runs before the export, so a password never reaches Loki either). Each record keeps the trace and span of its context. In Loki the event name is the log line and the attributes (`job_id`, `migration_id`, `correlation_id`, `sql_kind`, ...) and `trace_id`/`span_id` are structured metadata; the only stream label is `service_name`.
+- **Metrics** (`internal/metrics`, Prometheus client on `METRICS_ADDR`):
+
+  | Metric | Labels | What it shows |
+  |---|---|---|
+  | `dbplatform_jobs` | `status` | Jobs in `migration_jobs` by status, read at scrape time |
+  | `dbplatform_jobs_enqueued_total`, `dbplatform_jobs_finished_total` | `job_type`, `status` | Queue input and output (throughput) |
+  | `dbplatform_job_retries_total` | `job_type`, `reason` | `busy` (database locked, no attempt used), `transient` (target unreachable), `interrupted` (shutdown between batches), `recovered` (lease expired) |
+  | `dbplatform_job_queue_wait_seconds` | `job_type` | From a job being due to a worker claiming it |
+  | `dbplatform_migration_lock_wait_seconds` | `outcome` | Waiting for the database's advisory lock (`acquired`, `busy`, `error`) |
+  | `dbplatform_migration_run_seconds` | `job_type`, `outcome` | One attempt in the engine (`success`, `script_failed`, `partial`, `busy`, `revalidation_failed`, ...) |
+  | `dbplatform_migration_batches_total`, `dbplatform_migration_batch_rows_total`, `dbplatform_migration_batch_seconds` | `direction` | Batch mode: committed batches, rows, transaction time |
+  | `dbplatform_http_requests_total`, `dbplatform_http_request_duration_seconds` | `route`, `method`, `code` | API requests by route pattern (`POST /api/migration/{id}/execute`), status class |
+  | `dbplatform_db_pool_*` | `pool` | `sql.DB.Stats()` of the platform pool and of every target pool by target name: open, in use, idle, max, waits |
+
+  Labels never contain user IDs, job or migration IDs, raw paths or SQL: those would create a series per value. They are in the logs and traces instead, one click away.
+- **Correlation in Grafana**:
+  - a log line's `trace_id` has a **Buka trace di Tempo** link (Loki derived field);
+  - a span in Tempo has **Logs for this span**, which opens the Loki records of the same trace (`{service_name="dbplatform"} | trace_id="..."`);
+  - the dashboard's last row shows warnings/errors from Loki and the newest `job.process` traces from Tempo next to the metrics.
+- **Without the profile** nothing changes: `OTEL_TRACES_EXPORTER` stays `console`, `OTEL_LOGS_EXPORTER` stays `none`, and `/metrics` is still served on `:9091` inside the network (set `METRICS_ADDR=off` to turn it off).
+
+Useful queries:
+
+```promql
+# job throughput and queue wait (p95)
+sum by (status) (rate(dbplatform_jobs_finished_total[1m]))
+histogram_quantile(0.95, sum by (le) (rate(dbplatform_job_queue_wait_seconds_bucket[1m])))
+# is a database pool saturated?
+rate(dbplatform_db_pool_wait_seconds_total[1m])
+```
+
+```logql
+# every record of one trace, or of one job
+{service_name="dbplatform"} | trace_id="<trace id>"
+{service_name="dbplatform"} | job_id="<job id>"
+# failed SQL
+{service_name="dbplatform"} |= "sql.result" | status="FAILED"
+```
+
+### Stress Test (k6)
+
+`loadtest/stress.js` stress-tests the running stack with [k6](https://k6.io). It goes through Caddy (`https://localhost`), like a browser. Two runners start it:
+
+| Runner | Databases | For |
+|---|---|---|
+| `make loadtest` (`loadtest/run.sh`) | the demo database plus `loadtest_a`, `loadtest_b`, created on `target-postgres` | anyone: it needs nothing but this repository |
+| `make loadtest-local` (`loadtest/local-run.sh`) | the demo database plus the IF3140 praktikum databases `airport`, `bioskop` and `sales`, started from `demo/<name>/docker-compose.yml` on the platform's network | the team: `demo/` is git-ignored |
+
+Both take the same settings (`MIGRATIONS_PER_DB`, `JOB_VU_RATIO`, `INCLUDE_DEMO`, `RUN_NAME`; `LOCAL_DBS` for the local runner). Results go to `loadtest/results/stress-NN.json`.
+
+**Setup.** `setup()` works only through the public API, as an admin and the group leaders would:
+- creates the user `k6runner` and the group **k6 Load Test**, led by `k6runner`;
+- registers the databases as targets and grants the group View & Edit on each;
+- prepares a pool of **approved** migrations per database. Each is submitted and approved by the leader of every group with access; on the demo database that includes `akmal` and `dzaki`.
+
+Every migration is a one-row `UPDATE` on a real table, and its SQL Down is the exact inverse:
+
+| Database | API browses | A job changes |
+|---|---|---|
+| PostgreSQL Demo | `orders` | `products.stock ± 1` |
+| `airport` | `booking` (72,000 rows) | `booking.price ± 1` |
+| `bioskop` | `_reservasi` (102,628 rows) | `_film.durasi ± 1` |
+| `sales` | `orders` (50,000 rows, partitioned by month) | `customers.updated_at ± 1 s` |
+| `loadtest_*` | `k6_counters` | `k6_counters.n ± 1` |
+
+**Scenarios.** Both run at the same time with the same VU shape: ramp for 30 s, then hold for 30 s at 10, 20, 40 and 80 VUs (80 is held for 60 s), then down to 10 and to 0. That is 6 minutes in total.
+
+| Scenario | VUs | One iteration |
+|---|---|---|
+| `api` | 10 → 20 → 40 → 80 → 10 → 0 | What a user does on the pages: `GET /api/auth/me`, the viewer (table list, then a random page of the database's table), the migration list, one migration's detail. Then 0.5–1.5 s of think time |
+| `jobs` | 25 % of that: 3 → 5 → 10 → 20 → 3 → 0 | Takes the next approved migration of the pool and sends `POST .../execute`. Then it polls `GET /api/jobs/{id}` every 200 ms until the job is done and pauses 1 s. A job counts as a success only when it ends `SUCCESS`; the `202` of the execute request does not count |
+
+**Normal load.** We set the platform's normal load at **10–20 VUs**: about the whole team plus reviewers working at once, with 3–5 migrations running at the same time. 40 and 80 VUs are the stress levels above it, and the last 10-VU hold shows whether the system recovers.
+
+**Metrics and thresholds.** Every metric is tagged with the stage and the database, so the summary has a line per stage and per database.
+
+| Metric | Threshold | Meaning |
+|---|---|---|
+| `http_req_duration{scenario:api}` p95 | < 500 ms, overall and per stage | API response time (p50/p95/p99 are reported) |
+| `http_req_failed` | < 1 % | error rate of every request, jobs scenario included |
+| `job_success` | > 99 % | jobs that ended `SUCCESS` |
+| `http_reqs` | (reported) | request throughput, overall and per stage |
+| `job_completion_ms` | (reported) | from the execute request until the job is seen done |
+| `job_queue_wait_ms` | (reported) | the job's `started_at - created_at`, from the server's own timestamps: queue plus lock wait |
+
+**Results** (2026-11-27, `make loadtest-local` on one laptop; k6, Caddy, the app, every PostgreSQL server and the observability stack shared the same CPUs):
+
+| | `stress-01`: demo + airport + bioskop + sales | `stress-02`: airport only |
+|---|---|---|
+| Migrations prepared | 700 per database | 1,800 |
+| HTTP requests | 61,817 (151.4/s), **0.00 % failed** | 49,104 (130.1/s), **0.00 % failed** |
+| API p50 / p95 / p99 | 32 / **223** / 348 ms | 59 / **585** / 892 ms |
+| Jobs | **1,973 SUCCESS, 0 failed** | **1,139 SUCCESS, 0 failed** |
+| Job completion p50 / p95 | 482 ms / 1.0 s | 448 ms / 9.1 s |
+| Job queue wait p50 / p95 | 321 ms / 630 ms | 325 ms / 8.5 s |
+| Thresholds | **all passed** | API p95 crossed from the ramp to 80 VUs on (so also overall) |
+
+Per load level (API p95, jobs completed in the stage, job completion p95, job queue wait p95):
+
+| Stage | 01: API p95 | 01: jobs | 01: job p95 | 01: queue p95 | 02: API p95 | 02: jobs | 02: job p95 | 02: queue p95 |
+|---|---|---|---|---|---|---|---|---|
+| hold 10 VUs (normal) | 29 ms | 63 | 0.64 s | 0.49 s | 76 ms | 62 | 0.65 s | 0.48 s |
+| hold 20 VUs (normal) | 32 ms | 104 | 0.65 s | 0.50 s | 96 ms | 113 | 0.65 s | 0.44 s |
+| hold 40 VUs | 63 ms | 219 | 0.67 s | 0.46 s | 163 ms | 212 | 0.73 s | 0.53 s |
+| ramp to 80 VUs | 182 ms | 287 | 1.10 s | 0.70 s | **586 ms** | 135 | 9.9 s | 9.3 s |
+| hold 80 VUs (60 s) | 303 ms | **703** | 1.12 s | 0.76 s | **812 ms** | **123** | 11.4 s | 10.9 s |
+| down to 10 VUs | 167 ms | 245 | 0.80 s | 0.51 s | 487 ms | 138 | 5.5 s | 5.0 s |
+| hold 10 VUs again | 41 ms | 59 | 0.64 s | 0.50 s | 86 ms | 60 | 0.65 s | 0.50 s |
+
+In `stress-01` the four databases came out even: 493–494 jobs each, job p95 1.0 s and queue wait p95 0.61–0.65 s on every one.
+
+**Server side at the 80-VU peak** (Prometheus):
+
+| | `stress-01` | `stress-02` |
+|---|---|---|
+| Requests/s | 288 | 221 |
+| Jobs finished/s | 11.5 | 2.1 |
+| Migration run p95 (engine, lock wait included) | 0.25 s | 0.48 s |
+| App CPU | 2.1 cores | 2.4 cores |
+| Platform pool in use (no waits) | 39 | 60 |
+| Target pool waits | none to speak of | `airport`: 39 ms per second |
+| Slowest route p95 | `GET /api/migration` 0.47 s | `GET /api/migration` 1.1 s |
+
+**Analysis.**
+- **Normal load is comfortable.** At 10–20 VUs the API p95 stays at 29–96 ms, and a job completes in about 0.65 s (p95), most of it the worker's poll interval and the queue.
+- **The system holds up and recovers.** Neither run had a failed request or a failed job: 3,112 jobs in total, none `UNCERTAIN`, and no retries (the Grafana retry panel stays empty). Thirty seconds after the load drops back to 10 VUs, every number is back to its normal-load value, including the queue that built up in `stress-02`.
+- **Jobs scale with the number of databases, not with the number of workers.** Up to 40 VUs both runs finish the same number of jobs, because the load is still below capacity. At 80 VUs, `stress-01` finishes 703 jobs in the minute (11.5/s, spread evenly over four databases) and `stress-02` only 123 (2.1/s).
+
+  This is the platform's rule: one database runs one migration at a time, in queue order, under its advisory lock. With four databases, the 4 workers run four migrations in parallel. With one, they take turns on it, so jobs pile up in the queue (queue wait p95 10.9 s) while the throughput stays at the rate of a single database.
+- **The API slows down where the work concentrates.** In `stress-01` the API stays under its target at every level (p95 303 ms at 80 VUs). In `stress-02` it passes 500 ms from 80 VUs. The slowest route in both runs is `GET /api/migration`: it returns every draft and history row of the database, and the single database of `stress-02` holds 1,800 drafts against 700 per database in `stress-01`.
+
+  `stress-02` also puts every query on one target pool. Its 5 connections are shared by the viewer and the migrations, so they start waiting (39 ms per second), and more platform connections are busy at the same time (60 against 39).
+- **What to change first:** page the migration list instead of returning every row, and make the per-target pool size (fixed at 5 connections in `internal/dbmanager/targets.go`) configurable for a database that gets most of the traffic. The one-migration-per-database rule is intended and stays: it is what keeps versions ordered and runs safe.
+- These numbers come from one laptop that also ran k6 and the observability stack. Compare the runs with each other and the stages with each other, rather than reading the absolute numbers as production capacity.
+
+To reproduce: `make observability`, then `make loadtest` (repository only) or `make loadtest-local` (`stress-01`). `stress-02` is `LOCAL_DBS=airport INCLUDE_DEMO=false MIGRATIONS_PER_DB=1800 make loadtest-local`. Watch it on the Grafana dashboard. The raw k6 summaries of both runs are in `loadtest/results/`.
 
 ### Testing and CI
 
