@@ -13,20 +13,14 @@ In this milestone, we implemented a database web platform where a team can work 
 
 ### Milestone 2
 
-In this milestone, the platform was extended so that database changes are validated and reviewed before they run, large migrations run in the background, and every run can be traced.
+In this milestone, the platform was extended so that database changes are reviewed before they run, large migrations run in the background, and every run can be traced.
 
-- **Single-page application**: every page, including login, signup and the admin console, is a React SPA that talks to the Go backend through a JSON API. Pages are responsive from phone to desktop width. See [Routes](#routes).
-- **Review and approval**: a migration goes `DRAFT → PENDING_REVIEW → APPROVED → QUEUED → RUNNING → SUCCESS | FAILED`. The **leader of every group with access** to the database (View Only or View & Edit) must approve it. The same applies to rollbacks, forwards and batch actions. Permission and approvals are checked again right before the SQL runs. See [Review and Approval](#review-and-approval).
-- **Rollback and forward**: every migration has a SQL Down, or is marked irreversible with a reason. Rollback undoes only the latest active migration (LIFO). Forward re-applies it as a new run. Both use the original, immutable scripts. See [Migrations](#migrations).
-- **Execution history**: every attempt is kept in an append-only history, including failures, retries, rollbacks and forwards. Each attempt records the exact SQL that was sent. A rollback points at the execution it undid, and **Hide rollback** filters such pairs out without deleting anything. See [Execution History and Audit](#execution-history-and-audit).
-- **Asynchronous execution**: execute, rollback and forward only queue a job and return its ID. A worker pool then runs it under a per-database lock, with leases, bounded retries and no double commit. See [Asynchronous Execution](#asynchronous-execution).
-- **Per-batch execution**: large `UPDATE`/`DELETE` migrations can run one transaction per batch. Each batch saves a checkpoint and recovery data in the same transaction, and a stopped run can be resumed or aborted with a safe rollback. See [Per-Batch Execution](#per-batch-execution). It was measured on 2,000,000 rows.
-- **Logging and tracing**: structured JSON logs record every SQL statement, transaction, job and audit event. OpenTelemetry traces run from the API through the queue and worker to every batch and statement. See [Activity Logging](#activity-logging) and [Tracing](#tracing).
-- **Automated tests**: unit and integration tests cover success, failure and access-denied cases. They run in CI with the race detector. See [Testing and CI](#testing-and-ci).
-- **Bonuses**:
-  - [Observability](#observability): OpenTelemetry Collector, Tempo, Loki, Prometheus and Grafana.
-  - [Stress Test (k6)](#stress-test-k6).
-  - [SAST with CodeQL](#security-sast-with-codeql), with a re-scan for this milestone.
+- The whole interface is a **responsive single-page application** backed by a JSON API.
+- Every change to a database, including rollbacks and forwards, needs **approval from the leader of every group** that can access it.
+- Migrations can be **rolled back and forwarded** in order, and every attempt is kept in an **immutable execution history**.
+- Migrations run **asynchronously** in a worker pool, one at a time per database. Large data changes can run **per batch**, and a stopped run can be resumed or undone.
+- **Structured logs** and **OpenTelemetry traces** follow each run from the request to every SQL statement, with **metrics and dashboards** in Grafana.
+- The platform is covered by **unit and integration tests** in CI, **stress-tested with k6**, and scanned with **CodeQL SAST**.
 
 ## Build and Run
 
@@ -35,7 +29,7 @@ In this milestone, the platform was extended so that database changes are valida
 - Docker with Docker Compose v2
 - `openssl` (to generate secrets)
 - For local development only: Go 1.26 and Node.js 22
-- Optional: `jq` to read the JSON logs. The k6 stress test runs in the `grafana/k6` Docker image, so k6 does not need to be installed
+- Optional: `jq` to filter the JSON logs. k6 runs in Docker, so it needs no install
 
 ### Steps
 
@@ -65,6 +59,35 @@ To reset all data (platform database and demo database), remove the volumes:
 docker compose down -v
 ```
 
+### Target Databases
+
+Any PostgreSQL server the app container can reach can be a target. To run one in Docker next to the stack:
+
+1. Start it on the platform's network. Compose names that network `<project>_app_net`, where the project is the repository folder name by default (check with `docker network ls`):
+   ```yaml
+   # my-db/docker-compose.yml
+   services:
+     my-db:
+       image: postgres:16-alpine
+       environment:
+         POSTGRES_USER: app
+         POSTGRES_PASSWORD: change-me
+         POSTGRES_DB: mydb
+       networks: [platform]
+   networks:
+     platform:
+       external: true
+       name: if3110-web-application-development_app_net
+   ```
+   ```sh
+   docker compose -f my-db/docker-compose.yml up -d   # after the platform stack is up
+   ```
+2. In **Admin → Databases**, register it with host `my-db` (the service name), port `5432` and the credentials above.
+3. In **Admin → Groups**, grant groups access to it. A group needs an active leader first.
+
+To remove it, delete it in **Admin → Databases** (this also removes its grants and migration history), then `docker compose -f my-db/docker-compose.yml down -v`.
+
+
 ### Local Development
 
 The `Makefile` holds the developer shortcuts. Run them from the repository root.
@@ -81,8 +104,8 @@ The `Makefile` holds the developer shortcuts. Run them from the repository root.
 | `make test-db-down` | Stop the test PostgreSQL |
 | `make observability` | Start the stack plus the OpenTelemetry Collector, Tempo, Loki, Prometheus and Grafana (<http://localhost:3000>), with traces and logs exported over OTLP; `make observability-down` stops it |
 | `make loadtest` | Run the k6 stress test against the running stack, with databases created from this repository (see [Stress Test (k6)](#stress-test-k6)) |
-| `make loadtest-local` | The same with the IF3140 databases in `demo/` (team only; `demo/` is git-ignored) |
-| `make seed-large` | Create the 2,000,000-row `events` table on the demo target (for trying batch mode, see [Per-Batch Execution](#per-batch-execution)); needs the Compose stack running |
+| `make loadtest-local` | The same with our private local databases (not in the repository) |
+| `make seed-large` | Create the 2,000,000-row `events` table on the demo target, for trying batch mode; needs the Compose stack running |
 
 Run `npm --prefix frontend install` once before using the frontend targets. The Go server serves the built SPA from `frontend/dist`, so run `make frontend-build` at least once before `make dev`.
 
@@ -92,7 +115,7 @@ Run `npm --prefix frontend install` once before using the frontend targets. The 
 
 All variables are **required** unless marked optional. Copy `.env.example` to `.env` and replace every `change-me-*` value before deploying. For required variables, the value column shows the `.env.example` value. For optional variables, it shows the default used when the variable is unset.
 
-#### Application Internal Database
+#### Platform Database
 
 | Variable | Default Value | Description |
 |---|---|---|
@@ -124,14 +147,14 @@ The `target-postgres` init scripts ([docker/target-init/](docker/target-init/)) 
 |---|---|---|
 | `TARGET_CREDENTIALS_KEY` | `change-me-credentials-key` | Encryption key for target database passwords: 32 random bytes encoded as base64. Generate with `openssl rand -base64 32`. **Do not change once injected**, or existing stored credentials can no longer be decrypted |
 
-#### Data Viewer Query Limits
+#### Query Limits
 
 | Variable | Default Value | Description |
 |---|---|---|
 | `QUERY_TIMEOUT_MS` | `5000` | (Optional) Maximum execution time in milliseconds for each read-only statement: Query Explorer queries and table browsing (row count, page of rows, schema lookups) |
 | `QUERY_ROW_LIMIT` | `500` | (Optional) Maximum number of rows returned by a read-only query |
 
-#### Migration Execution Limits
+#### Migration Limits
 
 | Variable | Default Value | Description |
 |---|---|---|
@@ -254,7 +277,7 @@ When enabled, the app creates the demo users and groups that do not exist yet, r
 | Deployment | Docker multi-stage build (Node -> Go -> Alpine), Docker Compose |
 | CI and security | GitHub Actions (frontend build, gofmt, vet, build, tests with `-race`, Docker build), CodeQL SAST (`security-extended`) |
 
-### Architectural Diagram
+### Architecture
 
 ```mermaid
 flowchart LR
@@ -303,10 +326,9 @@ flowchart LR
 
 - The browser loads the SPA once (`index.html` + `/assets/*`). Every page change after that is handled by React Router on the client, and data comes from the JSON API under `/api/*`.
 - The **platform database** stores users, sessions, groups, grants, invite codes, registered targets (with sealed passwords), migrations, the **job queue** (`migration_jobs`) and the **execution history** (`migration_executions`). It is never exposed as a viewer target.
-- Execute, rollback and forward requests only **enqueue a job** and answer `202 Accepted`. A worker in the same process runs the job later; the SPA polls until it is done.
 - **Target databases** are only reached through the connection registry, which holds one small pool (up to 5 connections) per connected target. The Data Viewer, the target manager and the migration engine share it.
 - Every request that touches a target first identifies the user (`authn`), then asks `rbac.Authorizer` whether the action is allowed. Handlers never compare access levels themselves.
-- Logging, audit events, tracing and metrics are used by every component, so the diagram shows them as one box instead of an arrow from each component. See [Activity Logging](#activity-logging), [Tracing](#tracing) and [Observability](#observability), which also shows where the optional observability containers fit.
+- Logging, audit events, tracing and metrics are used by every component, so the diagram shows them as one box.
 
 ### Repository Structure
 
@@ -355,7 +377,7 @@ flowchart LR
 
 ### Routes
 
-#### SPA pages (client-side routes)
+#### SPA Pages
 
 The Go server answers every non-API `GET` with `index.html`; React Router renders the page.
 
@@ -445,7 +467,7 @@ Database pages and API calls take the selected database as `?db_id=`.
   - Demotion, deactivation, or a password reset: all of the user's sessions are revoked, so they must log in again.
 - Expired, revoked or unknown sessions are cleared. The API answers `401` and the SPA redirects to `/login`.
 - **CSRF protection** uses a double-submit cookie: every `POST`, `PUT`, `PATCH` and `DELETE` must send an `X-CSRF-Token` header that matches the `__Host-csrf` cookie. The API returns the token in the `csrf_token` field (login, signup, `/api/auth/me`) and the SPA's fetch client sends it on every state-changing request.
-- **Logging**: the access log records method, path, status and duration only. Query parameters whose names look like passwords, sessions or tokens are redacted. Caddy removes `Cookie`, `Authorization` and `Set-Cookie` headers from its access logs. See [Activity Logging](#activity-logging).
+- **Logging**: the access log records method, path, status and duration only, with sensitive query parameters redacted. Caddy removes `Cookie`, `Authorization` and `Set-Cookie` headers from its own access log.
 
 #### Admin Platform
 
@@ -493,31 +515,30 @@ A migration is a named SQL script (SQL Up, and SQL Down for rollback) for one ta
 `DRAFT → PENDING_REVIEW → APPROVED → QUEUED → RUNNING → SUCCESS | FAILED`, plus `PARTIAL` and `ABORTED` for batch migrations. Once it is `SUCCESS`, `FAILED` or `ABORTED` the row never changes again; `ROLLED_BACK` and `PARTIALLY_REVERTED` are not stored but derived from the history (see below).
 
 - **Drafts** (View & Edit): create, edit, delete, and duplicate. Names are up to 200 characters and scripts are up to 1 MiB. Duplicating copies any migration into a new draft.
-- **SQL Down, or irreversible with a reason**: a draft can be saved without SQL Down, but it can only be **submitted for review or executed** when it has a SQL Down, or is marked irreversible with a written reason. The editor shows what is missing under the field and keeps both buttons disabled until then; the server checks again (`422`). Rollback and forward requests are exempt, since their scripts are copied from the executed migration. In batch mode a `DELETE` must be irreversible: deleted rows cannot be brought back by an `UPDATE`/`DELETE` SQL Down.
+- **Reversibility**: a draft can be saved without SQL Down, but it can only be **submitted for review or executed** when it has a SQL Down, or is marked irreversible with a written reason. The editor shows what is missing under the field and keeps both buttons disabled until then; the server checks again (`422`). Rollback and forward requests are exempt, since their scripts are copied from the executed migration. In batch mode a `DELETE` must be irreversible: deleted rows cannot be brought back by an `UPDATE`/`DELETE` SQL Down.
 - **Script checks**: the platform wraps every script in one transaction, so statements that cannot run inside it are rejected before anything runs: transaction control (`BEGIN`, `COMMIT`, `ROLLBACK`, ...), `VACUUM`, `DISCARD`, `CREATE`/`DROP DATABASE` or `TABLESPACE`, `ALTER SYSTEM`, the `CONCURRENTLY` forms of index commands, and `COPY ... FROM STDIN / TO STDOUT`. `SAVEPOINT`, `RELEASE` and `ROLLBACK TO SAVEPOINT` are allowed.
 - **Execute**:
   - The whole script runs in one transaction: **COMMIT** when every statement succeeds, **ROLLBACK** otherwise.
   - Each statement is bounded by `MIGRATION_LOCK_TIMEOUT_MS` and `MIGRATION_STATEMENT_TIMEOUT_MS`.
-  - Executions on the same database run one at a time, in the order they were queued; different databases run in parallel (see **Asynchronous Execution**).
   - A successful run gets the next **version number** of its database (1, 2, 3, ...). A failed run is kept in the history without a version, with the error message and the line, column and statement where it failed.
   - Session settings changed by a committed script (`SET search_path`, `SET ROLE`, ...) are reset before the connection goes back to the pool.
 - **Rollback and forward**: rollback runs the SQL Down of the **latest active** migration only (LIFO); forward re-applies the earliest rolled-back migration as a new run with a new version (linear). Irreversible migrations cannot be rolled back. When groups have access to the database, both are requests that need the same leader approvals as a migration (see below).
-- **History**: every run with version, status, executor, time and duration. A database trigger blocks any change to an executed migration. The migration page can hide rollback pairs.
+- **Hide rollback**: the migration page can hide each rolled-back execution together with the rollback that undid it. Nothing is deleted (see [Execution History and Audit](#history-and-audit)).
 
 #### Review and Approval
 
 Every change to a database must be approved by the **leader of every group that has access to it** (View Only or View & Edit), because every team using the database is affected. This covers migrations, rollbacks, forwards, and the resume and abort actions of batch migrations.
 
 - **Leaders**: every group has one leader, who must be an active member. The first member of a new group becomes its leader; an admin can change it. When a leader leaves the group or is deactivated, the earliest active member takes over (for Public, the earliest active Platform Admin).
-- **No group without a leader**: an admin cannot give database access to a group that has no active leader, and cannot remove the leader of a group that has access. If a group still ends up without one (for example, its last active member was deactivated), the startup log warns `groups.leaderless_with_grants`, the admin console flags the group, and new reviews on its databases are refused with the group's name until a leader is assigned. Nothing gets stuck waiting for an approval nobody can give.
+- **Leaderless groups**: an admin cannot give database access to a group that has no active leader, and cannot remove the leader of a group that has access. If a group still ends up without one (for example, its last active member was deactivated), the startup log warns `groups.leaderless_with_grants`, the admin console flags the group, and new reviews on its databases are refused with the group's name until a leader is assigned. Nothing gets stuck waiting for an approval nobody can give.
 - **Review**: the author submits a draft (`PENDING_REVIEW`). One approval per group with access is opened. Each leader approves or rejects (a reason is required) for their group. When every group approved, the migration is `APPROVED` and an editor can execute it; one rejection makes it `REJECTED`. When no group has access, a submitted draft is approved at once.
 - **Rollback and forward** create a request (a rollback or forward draft with the original, unchangeable scripts) that goes through the same review.
 - **Batch actions**: resume, abort with rollback, and mark as stopped of a `PARTIAL` batch migration each open a **batch action request** with one approval per group. The monitor on the detail page shows the request and its approvals; leaders approve it there or on **Persetujuan Migrasi** (`/migration/reviews`). Once it is approved, an editor runs it with the same button. One request per migration can be open at a time; a rejected request is final and a new one can be made. An approved request that was not run is cancelled when a request for another action replaces it.
 - **Fail closed**: if the groups with access cannot be read (for example, the platform database is unavailable), nothing is executed.
-- **Grants that change during a review**: when an admin gives a group access, takes it away, or deletes a group, open reviews follow at once (the same sync also runs at startup):
+- **Grant changes**: when an admin gives a group access, takes it away, or deletes a group, open reviews follow at once (the same sync also runs at startup):
   - a group that **lost** access no longer blocks: its pending approval is dropped, and a review that has nothing pending left becomes `APPROVED`;
   - a group that **got** access must approve too: it gets a pending approval, and an `APPROVED` migration or batch request that has not run yet goes back to review.
-- **Revalidation under the lock**: a job can wait in the queue while grants change, so the worker checks again right after it takes the database lock, before any SQL is sent:
+- **Revalidation**: a job can wait in the queue while grants change, so the worker checks again right after it takes the database lock, before any SQL is sent:
   - the executor must still have View & Edit on the database;
   - every group that has access **now** must have approved this run: the migration's own review, or for a resume/abort the batch request the job runs. A direct rollback/forward was queued without approval because no group had access then, so it is refused if one has now.
 
@@ -551,15 +572,14 @@ A migration can run in **batch mode** (*Mode Eksekusi → Per-batch* in the edit
     AND ($1::bigint IS NULL OR orders.id > $1) AND orders.id <= $2::bigint
   ```
   where `$1` is the previous batch's upper bound and `$2` the largest `id` among the next `batch_size` keys (`WHERE id > $1 ORDER BY id LIMIT n`).
-- **Checkpoint in the same transaction**: each batch writes its checkpoint (batch number, key range, rows changed) to `_dbplatform_batch_checkpoints` **on the target, in the same transaction as its data change**, then commits. A batch is either committed with its checkpoint or not at all. The platform keeps a copy in `migration_batches` and re-reads the target's checkpoints at the start of every run, so a batch that committed just before a crash is never run again. The checkpoint table is hidden from the Database Viewer.
-- **The database's lock is held for the whole run**, across all batches, and the worker's heartbeat keeps the lease. Every batch has its own lock and statement timeouts.
-- **When a batch fails** (an SQL error), its transaction is rolled back and the run stops: the migration is **`PARTIAL`** (or `FAILED` if no batch was ever committed). The monitor on the detail page shows committed/total batches, the checkpoint cursor and the error. A `PARTIAL` migration **holds every other migration of its database** until it is finished or aborted. Then:
-  Each of these actions first needs the approval of every group's leader (see [Review and Approval](#review-and-approval)):
+- **Checkpoints**: each batch writes its checkpoint (batch number, key range, rows changed) to `_dbplatform_batch_checkpoints` **on the target, in the same transaction as its data change**, then commits. A batch is either committed with its checkpoint or not at all. The platform keeps a copy in `migration_batches` and re-reads the target's checkpoints at the start of every run, so a batch that committed just before a crash is never run again. The checkpoint table is hidden from the Database Viewer.
+- **Lock**: the database's lock is held for the whole run, across all batches, and the worker's heartbeat keeps the lease. Every batch has its own lock and statement timeouts.
+- **When a batch fails** (an SQL error), its transaction is rolled back and the run stops: the migration is **`PARTIAL`** (or `FAILED` if no batch was ever committed). The monitor on the detail page shows committed/total batches, the checkpoint cursor and the error. A `PARTIAL` migration **holds every other migration of its database** until it is finished or aborted. With the approval of every group's leader, an editor can then:
   - **Resume** (*Lanjutkan dari Checkpoint*) runs the remaining batches, starting after the last checkpoint;
   - **Abort with rollback** (*Batalkan & Rollback Batch*) runs SQL Down over the same key ranges, **newest batch first**. When every batch is undone the migration is `ABORTED`; if it stops early it reads as **`PARTIALLY_REVERTED`** and can only be aborted again;
   - **Mark as stopped** (*Tandai Dihentikan*) sets `ABORTED` and leaves the committed batches in place.
 - **Recovery data**: before an UP batch of an `UPDATE` changes its rows, it stores a copy of them (the *before-image*) in `_dbplatform_batch_rows` on the target, in the batch's own transaction. Irreversible migrations store nothing.
-- **The abort safety rule**: an abort with rollback is refused when a committed batch has no recovery data. Each DOWN batch commits only when the rows are back exactly as they were before the migration; otherwise that batch is rolled back and the abort stops as **unsafe**. A batch is never left half-reverted. Recovery rows are deleted when the migration is final.
+- **Abort safety**: an abort with rollback is refused when a committed batch has no recovery data. Each DOWN batch commits only when the rows are back exactly as they were before the migration; otherwise that batch is rolled back and the abort stops as **unsafe**. A batch is never left half-reverted. Recovery rows are deleted when the migration is final.
 
   How the before-images are captured, checked and cleaned up is in [docs/batch-mode.md](docs/batch-mode.md).
 - **Restarts are safe**: on `SIGTERM` a batch run stops at the next batch boundary and its job goes back to the queue without using an attempt; when a worker dies mid-run, the job is put back in the queue instead of becoming `UNCERTAIN`. In both cases the next run continues after the last checkpoint.
@@ -567,12 +587,12 @@ A migration can run in **batch mode** (*Mode Eksekusi → Per-batch* in the edit
 
 **Large dataset.** `make seed-large` creates `events` (2,000,000 rows, 173 MB) on the demo target. On one laptop, `UPDATE events SET status = 'ARCHIVED'` took **6.9 s** as one statement, holding row locks on every row. In batch mode with `batch_size` 10,000 it took 20.5 s with recovery data (7.7 s without), and no single transaction ran longer than 145 ms. The full measurements and their analysis are in [docs/batch-mode.md](docs/batch-mode.md#large-dataset).
 
-#### Execution History and Audit
+#### History and Audit
 
 - Every attempt to run a migration is one row in **`migration_executions`**: execution ID, attempt, job ID, the exact SQL sent, executor, status (`SUCCESS`, `FAILED`, `UNCERTAIN`), error and SQLSTATE, and `reverts_execution_id`. The migration detail page lists them under **Riwayat Eksekusi**.
 - Attempts that stopped **before any SQL reached the target** are recorded too, with `sql_sent = false`. For example, three attempts while the target is down give three rows.
 - The table is **append-only**: a trigger rejects every `UPDATE` and `DELETE`. The only exceptions are the executor becoming `NULL` when a user is deleted, and rows removed together with their target database. A draft that already has attempts cannot be deleted.
-- **Rollback does not rewrite history.** It adds a `ROLLBACK` execution whose `reverts_execution_id` points at the execution it undid; a forward adds a `FORWARD` execution that reverts that rollback. A migration is shown as `ROLLED_BACK` when such a rollback exists (view `migration_chain`), so the original row stays exactly as it was.
+- **Rollbacks** do not rewrite history. A rollback adds a `ROLLBACK` execution whose `reverts_execution_id` points at the execution it undid; a forward adds a `FORWARD` execution that reverts that rollback. A migration is shown as `ROLLED_BACK` when such a rollback exists (view `migration_chain`), so the original row stays exactly as it was.
 - The migration row and its execution row are written in **one transaction**, so the history never has one without the other.
 - **Audit events** record who did what and with which outcome (`success`, `failure`, `denied`, `uncertain`), as `audit.<action>` log records with `actor` and `correlation_id`:
 
@@ -582,7 +602,7 @@ A migration can run in **batch mode** (*Mode Eksekusi → Per-batch* in the edit
   | `audit.enqueue` | Execute, rollback, forward, resume or abort is requested (`request`, plus `job_id` or `requires_approval`; `batch_request_id` for batch actions) |
   | `audit.grant` | A group's access level on a database changes (`group_id`, `database_id`, `access_level`) |
   | `audit.execute`, `audit.rollback`, `audit.forward` | An execution is recorded (`execution_id`, `attempt`, `sql_sent`, `reverts_execution_id`); outcome `partial` for a batch run that stopped |
-  | `audit.abort` | A `PARTIAL` batch migration is marked `ABORTED` without rollback (resume and abort with rollback are `audit.enqueue` with `request: resume / abort`; a mark-stopped request waiting for approval is `audit.enqueue` with `request: abort_mark`) |
+  | `audit.abort` | A `PARTIAL` batch migration is marked `ABORTED` without rollback. Requesting resume, abort or mark-stopped is `audit.enqueue` (`request: resume`, `abort`, `abort_mark`) |
 
   Audit events never contain SQL; it is in the execution history, found through `execution_id`.
 
@@ -597,7 +617,7 @@ WHERE e.database_id = '<database id>'
 ORDER BY e.finished_at;
 ```
 
-#### Dry Run and Query Plans
+#### Dry Run
 
 - A dry run executes the draft on the target inside a transaction that is **always rolled back**, so the data and schema are left unchanged.
 - Statements run one at a time. DML statements (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`, ...) run through `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`, so each one shows its plan tree with node types, estimated and actual rows, cost, actual time, loops and buffer hits/reads. Each plan sees the schema built by the statements before it, for example an index created two statements earlier.
@@ -608,7 +628,6 @@ ORDER BY e.finished_at;
 
 - Only PostgreSQL targets are supported.
 - If the app process dies after a migration commits on the target but before its history is saved, the job becomes `UNCERTAIN` and holds that database. There is no UI to resolve it yet: check the target, then update the job (and, for a run that did commit, the migration) in the platform database.
-- Worker settings (number of workers, lease, attempts, backoff) are fixed in code and cannot be set through environment variables yet.
 - Batch mode supports one `UPDATE` or `DELETE` with an integer cursor column. Rows inserted beyond the last key while a run is in progress are included; keys below the checkpoint that appear later are not. Rolling back a **completed** batch migration (`SUCCESS`) runs SQL Down in one transaction, like a standard migration.
 - Batch mode creates `_dbplatform_batch_checkpoints` and `_dbplatform_batch_rows` in the target's default schema; the platform's database role must be allowed to create tables there.
 - The recovery data takes about as much space as the rows the batches changed (as JSON), until the migration is final; see the measurements in [docs/batch-mode.md](docs/batch-mode.md#large-dataset).
@@ -620,19 +639,19 @@ Every log record is one JSON object on stdout, written by one `log/slog` logger 
 
 - **Common fields**: `time`, `level`, `event` (a stable name such as `sql.result`), `component` (`http`, `dbmanager`, `migration`, `worker`), `correlation_id`, `actor` (user ID), `trace_id` and `span_id` (see [Tracing](#tracing)), and `database_id` and `status` where they apply.
 - **Correlation ID**: every request gets an ID, returned in the `X-Request-ID` response header. A well-formed `X-Request-ID` from the client (`[A-Za-z0-9._-]`, at most 64 characters) is reused. Every record written while handling the request carries it.
-- **Every SQL execution on a target is logged** as a `sql.start` and `sql.result` pair, with `sql_kind`:
+- **SQL**: every execution on a target is logged as a `sql.start` and `sql.result` pair, with `sql_kind`:
   - Query Explorer queries (`read_only`), table browsing (`table_browse`), schema lookups (`catalog`);
   - migration scripts (`migration`) and dry-run statements (`dry_run`, one pair per statement);
   - in batch mode: the key range of the next batch (`batch_bounds`), the batch statement itself (`migration_batch`), the estimate of the batches left (`batch_estimate`), checkpoint reads and writes (`checkpoint`), and the recovery data: storing the before-images (`recovery_capture`), the check after SQL Down (`recovery_verify`), and deleting them (`recovery_release` per batch, `recovery_purge` when the migration is final). Each has `batch_no` when it belongs to a batch.
 
   `sql.result` has `duration_ms`, `status`, `rows` when known, and on failure `error` and the PostgreSQL `sqlstate`. Bind parameters are listed by type only (`params`), never by value.
-- **Transactions on a target** log `tx.commit` or `tx.rollback`: once per migration run, once per batch in batch mode, and a `tx.rollback` with `reason: dry_run` at the end of every dry run. A run of a migration, rollback or forward ends with one `migration.attempt` record (`execution_type`, `execution_id`, `version`, `status`).
+- **Transactions** on a target log `tx.commit` or `tx.rollback`: once per migration run, once per batch in batch mode, and a `tx.rollback` with `reason: dry_run` at the end of every dry run. A run of a migration, rollback or forward ends with one `migration.attempt` record (`execution_type`, `execution_id`, `version`, `status`).
 - **Jobs** log `job.claimed`, `job.finished`, `job.retry_scheduled` (with `delay_ms` and `counts_as_attempt`), `job.uncertain`, `worker.reaped`, and `migration.revalidation_failed` when a run is refused under the lock (see [Review and Approval](#review-and-approval)). A job keeps the `correlation_id` and `actor` of the request that queued it, so the worker's records join the HTTP request's.
 - **Batches** log `migration.batch` (direction, `batch_no`, `cursor_from`, `cursor_to`, `rows`, `duration_ms`), `migration.batch_failed`, and `migration.batch_recovered` when checkpoints are copied from the target after a crash.
 - **Audit** events are `audit.*` (see **Execution History and Audit**).
 - **Other events**: `http.request` (access log; `WARN` for 4xx, `ERROR` for 5xx), `authz.denied`, `authz.error`, `viewer.error`, `migration.error`, and startup events such as `server.started`.
 - **Redaction**: attributes whose name contains `password`, `passwd`, `secret`, `token`, `session`, `cookie`, `authorization`, `dsn` or `credential` are written as `[REDACTED]`. Bind parameter values are never logged, only their types. Query text is cut at 2000 characters.
-- **Why parameter values are masked** (a decision, not an omission): the SQL that changes a target never uses bind parameters. Migration scripts are sent as text, logged in full in `sql.start` and stored in the execution history, so a run can always be reproduced. Bind parameters carry two other kinds of value: the platform's own (IDs, batch bounds, the batch size), which already appear as separate fields (`migration_id`, `batch_no`, `cursor_from`, `cursor_to`) in the same records, and user input from the Database Viewer, which can be personal data or something secret typed into a query. Logging only the types keeps the second kind out of the logs and loses nothing needed to debug the first.
+- **Masked parameters**: migration scripts never use bind parameters; they are logged in full and stored in the history, so every run can be reproduced. Bind parameters carry either the platform's own values (IDs, batch bounds), which are already separate fields in the same records, or Database Viewer input, which can be personal or secret. Logging only their types loses nothing needed for debugging.
 
 Example: a read-only query (long IDs shortened). The `jq` commands for reading the logs, and examples of a failing query, a denied access, a migration run, a failed run, a rollback and a retry while the target is down, are in [docs/logging-and-tracing.md](docs/logging-and-tracing.md#logs).
 
@@ -680,18 +699,20 @@ The spans of one executed migration (name, span ID, parent span ID, status). The
 
 ### Observability
 
-`make observability` starts the normal stack plus an observability profile in Docker Compose:
+`make observability` starts the normal stack plus the `observability` Compose profile:
 
-```text
-app ──OTLP/HTTP──► otel-collector ──► Tempo   (traces)
- │                                └─► Loki    (logs, via Loki's OTLP endpoint)
- └── :9091/metrics ◄── Prometheus (scrape every 5 s)
-                         Grafana ◄── Prometheus, Tempo, Loki (provisioned, linked)
+```mermaid
+flowchart LR
+    app["Go app"] -- "traces and logs<br/>(OTLP/HTTP)" --> collector["OpenTelemetry<br/>Collector"]
+    collector -- traces --> tempo[("Tempo")]
+    collector -- logs --> loki[("Loki")]
+    prometheus[("Prometheus")] -- "scrapes :9091/metrics<br/>every 5 s" --> app
+    grafana["Grafana<br/>:3000"] --> prometheus & tempo & loki
 ```
 
 - **Grafana**: <http://localhost:3000> (anonymous visitors can view; sign in as `admin`/`admin` to edit). The home dashboard is **DB Platform**. Prometheus is also on <http://localhost:9090> for raw queries. Both are published on `127.0.0.1` only; the collector, Tempo, Loki and the app's `:9091` are only reachable inside the Compose network.
 - **Traces**: `OTEL_TRACES_EXPORTER=otlp` sends the spans described in [Tracing](#tracing) to the collector, which forwards them to Tempo.
-- **Logs**: `OTEL_LOGS_EXPORTER=otlp` adds a second output to the logger (the `otelslog` bridge) next to stdout. It gets exactly the records stdout gets: the same level, the same `correlation_id`/`actor`, and the same redaction (the redaction runs before the export, so a password never reaches Loki either). Each record keeps the trace and span of its context. In Loki the event name is the log line and the attributes (`job_id`, `migration_id`, `correlation_id`, `sql_kind`, ...) and `trace_id`/`span_id` are structured metadata; the only stream label is `service_name`.
+- **Logs**: `OTEL_LOGS_EXPORTER=otlp` also sends every log record, already redacted, to Loki through the `otelslog` bridge; stdout is unchanged. In Loki the event name is the log line, the attributes and `trace_id`/`span_id` are structured metadata, and the only stream label is `service_name`.
 - **Metrics** (`internal/metrics`, Prometheus client on `METRICS_ADDR`): jobs by status, queue throughput, retries, queue and lock wait, migration and batch duration, batches and rows, HTTP requests by route, and connection pool stats per pool. Labels never contain user, job or migration IDs, raw paths or SQL.
 - **Correlation in Grafana**: a log line links to its trace in Tempo, a span links to its logs in Loki, and the dashboard shows recent errors and `job.process` traces next to the metrics.
 - **Without the profile** nothing changes: `OTEL_TRACES_EXPORTER` stays `console`, `OTEL_LOGS_EXPORTER` stays `none`, and `/metrics` is still served on `:9091` inside the network (set `METRICS_ADDR=off` to turn it off).
@@ -705,9 +726,9 @@ Every metric, the correlation setup and example PromQL/LogQL queries are in [doc
 | Runner | Databases | For |
 |---|---|---|
 | `make loadtest` (`loadtest/run.sh`) | the demo database plus `loadtest_a`, `loadtest_b`, created on `target-postgres` | anyone: it needs nothing but this repository |
-| `make loadtest-local` (`loadtest/local-run.sh`) | the demo database plus the IF3140 lab databases `airport`, `bioskop` and `sales`, started from `demo/<name>/docker-compose.yml` on the platform's network | the team: `demo/` is git-ignored |
+| `make loadtest-local` (`loadtest/local-run.sh`) | the demo database plus our private local databases `airport`, `bioskop` and `sales` | the team only: they are not in the repository |
 
-Both take the same settings (`MIGRATIONS_PER_DB`, `JOB_VU_RATIO`, `INCLUDE_DEMO`, `RUN_NAME`; `LOCAL_DBS` for the local runner). Results go to `loadtest/results/stress-NN.json`.
+Both take the same settings (`MIGRATIONS_PER_DB`, `JOB_VU_RATIO`, `INCLUDE_DEMO`, `RUN_NAME`; `LOCAL_DBS` for the local runner).
 
 **Setup.** `setup()` works only through the public API, as an admin and the group leaders would:
 - creates the user `k6runner` and the group **k6 Load Test**, led by `k6runner`;
@@ -733,7 +754,7 @@ Every migration is a one-row `UPDATE` on a real table, and its SQL Down is the e
 
 **Normal load.** We set the platform's normal load at **10–20 VUs**: about the whole team plus reviewers working at once, with 3–5 migrations running at the same time. 40 and 80 VUs are the stress levels above it, and the last 10-VU hold shows whether the system recovers.
 
-**Metrics and thresholds.** Every metric is tagged with the stage and the database, so the summary has a line per stage and per database.
+**Thresholds.** Every metric is tagged with the stage and the database, so the summary has a line per stage and per database.
 
 | Metric | Threshold | Meaning |
 |---|---|---|
@@ -785,41 +806,29 @@ In `stress-01` the four databases came out even: 493–494 jobs each, job p95 1.
 **Analysis.**
 - **Normal load is comfortable.** At 10–20 VUs the API p95 stays at 29–96 ms, and a job completes in about 0.65 s (p95), most of it the worker's poll interval and the queue.
 - **The system holds up and recovers.** Neither run had a failed request or a failed job: 3,112 jobs in total, none `UNCERTAIN`, and no retries (the Grafana retry panel stays empty). Thirty seconds after the load drops back to 10 VUs, every number is back to its normal-load value, including the queue that built up in `stress-02`.
-- **Jobs scale with the number of databases, not with the number of workers.** Up to 40 VUs both runs finish the same number of jobs, because the load is still below capacity. At 80 VUs, `stress-01` finishes 703 jobs in the minute (11.5/s, spread evenly over four databases) and `stress-02` only 123 (2.1/s).
+- **Jobs scale with databases, not workers.** Up to 40 VUs both runs finish the same number of jobs, because the load is still below capacity. At 80 VUs, `stress-01` finishes 703 jobs in the minute (11.5/s, spread evenly over four databases) and `stress-02` only 123 (2.1/s).
 
   This is the platform's rule: one database runs one migration at a time, in queue order, under its advisory lock. With four databases, the 4 workers run four migrations in parallel. With one, they take turns on it, so jobs pile up in the queue (queue wait p95 10.9 s) while the throughput stays at the rate of a single database.
-- **The API slows down where the work concentrates.** In `stress-01` the API stays under its target at every level (p95 303 ms at 80 VUs). In `stress-02` it passes 500 ms from 80 VUs. The slowest route in both runs is `GET /api/migration`: it returns every draft and history row of the database, and the single database of `stress-02` holds 1,800 drafts against 700 per database in `stress-01`.
+- **The API slows where the work concentrates.** In `stress-01` the API stays under its target at every level (p95 303 ms at 80 VUs). In `stress-02` it passes 500 ms from 80 VUs. The slowest route in both runs is `GET /api/migration`: it returns every draft and history row of the database, and the single database of `stress-02` holds 1,800 drafts against 700 per database in `stress-01`.
 
   `stress-02` also puts every query on one target pool. Its 5 connections are shared by the viewer and the migrations, so they start waiting (39 ms per second), and more platform connections are busy at the same time (60 against 39).
 - **What to change first:** page the migration list instead of returning every row, and make the per-target pool size (fixed at 5 connections in `internal/dbmanager/targets.go`) configurable for a database that gets most of the traffic. The one-migration-per-database rule is intended and stays: it is what keeps versions ordered and runs safe.
 - These numbers come from one laptop that also ran k6 and the observability stack. Compare the runs with each other and the stages with each other, rather than reading the absolute numbers as production capacity.
 
-To reproduce: `make observability`, then `make loadtest` (repository only) or `make loadtest-local` (`stress-01`). `stress-02` is `LOCAL_DBS=airport INCLUDE_DEMO=false MIGRATIONS_PER_DB=1800 make loadtest-local`. Watch it on the Grafana dashboard. Each run writes its raw k6 summary to `loadtest/results/<name>.json`; these files are git-ignored, so the numbers above are the record of `stress-01` and `stress-02`.
+To reproduce: `make observability`, then `make loadtest`. `stress-01` was `make loadtest-local` and `stress-02` was `LOCAL_DBS=airport INCLUDE_DEMO=false MIGRATIONS_PER_DB=1800 make loadtest-local`. The raw k6 summaries (`loadtest/results/*.json`) are git-ignored.
 
 ### Testing and CI
 
-- Unit tests run without a database: `make test`.
-- Integration tests use a disposable PostgreSQL from the `postgres-test` Compose profile (port 5433 on localhost, data on tmpfs): `make test-integration`.
-- **Unit tests** cover parts that need no database, replacing dependencies with stubs or in-memory stores where needed. Examples: the access rules with a stub grant store, sessions with an in-memory store, the script splitter and checks, the read-only guard, batch planning, config parsing, and log redaction and escaping.
-- **Integration tests** run real components against the test PostgreSQL, through the HTTP handlers or the services directly. They cover:
-  - every access level and action (`internal/http/authz_matrix_test.go`);
-  - the approval workflow, including leader rules, grant changes during a review, and revalidation under the lock;
-  - the job queue and worker: retries, leases, uncertain outcomes and no double commit;
-  - batch mode: checkpoints, resume, abort with rollback, and the unsafe-abort rule;
-  - the append-only history, logging and tracing.
-- Tests cover the successful path, failures, and access denial. On 2026-11-27, `make test-integration` ran 327 tests (including subtests) with `-race`: none failed or were skipped.
-- GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on pushes to `main` and `dev` and on pull requests. It installs and builds the frontend SPA, then runs `gofmt`, `go vet`, `go build`, and every test with the race detector against a PostgreSQL service. A second job builds the Docker image.
+- **Unit tests** (`make test`) need no database and replace dependencies with stubs or in-memory stores: access rules, sessions, the script splitter and checks, the read-only guard, batch planning, config parsing, and log redaction and escaping.
+- **Integration tests** (`make test-integration`) run real components against a disposable PostgreSQL (Compose profile `test`, port 5433, data on tmpfs), through the HTTP handlers or the services. They cover every access level and action (`internal/http/authz_matrix_test.go`), the approval workflow and revalidation, the job queue and worker (retries, leases, uncertain outcomes, no double commit), batch mode (resume, abort, unsafe abort), and the history, logging and tracing.
+- Tests cover success, failure and access denial. On 2026-11-27, 327 tests (including subtests) passed with `-race`, none skipped.
+- **CI** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on pushes to `main` and `dev` and on pull requests: frontend build, `gofmt`, `go vet`, `go build`, every test with the race detector against a PostgreSQL service, and a Docker image build.
 
-### Security: SAST with CodeQL
+### SAST (CodeQL)
 
-- **GitHub CodeQL** ([.github/workflows/codeql.yml](.github/workflows/codeql.yml)) analyses `go` (`autobuild`) and `javascript-typescript` (`build-mode: none`) with the `security-extended` query suite, on pushes and pull requests to `main` and `dev`.
-- Results go to **GitHub Code Scanning**, a summary table in the **Actions job summary**, and a **SARIF artifact** (`codeql-sarif-go`, `codeql-sarif-javascript-typescript`).
-- Milestone 2 re-scan (`main@31dc68f`):
-  - `javascript-typescript`: **0 findings**.
-  - `go`: **9 findings**:
-    - 8 `go/log-injection` are false positives: every log record is written as JSON by `slog.JSONHandler`, which escapes `\r`/`\n`. The test `TestUserInputCannotForgeLogLines` shows that user input cannot forge a log line.
-    - 1 `go/sql-injection` in the SQL Query Explorer is an accepted risk: the feature exists to run user queries, behind several layers of protection.
-- Every finding with its decision, the fixes, the scan history and the limits of SAST are in [docs/SAST-CodeQL.md](docs/SAST-CodeQL.md).
+- **CodeQL** ([.github/workflows/codeql.yml](.github/workflows/codeql.yml)) scans the Go and TypeScript code with the `security-extended` queries on every push and pull request to `main` and `dev`. Results go to GitHub Code Scanning, the Actions job summary and a SARIF artifact.
+- The Milestone 2 rescan found nothing in the frontend. Of the 9 Go findings, 8 are false positives (log injection, but every log is JSON with escaped newlines) and 1 is an accepted risk (the SQL Query Explorer runs user queries by design).
+- Every finding with its decision, the scan history and the limits of SAST: [docs/SAST-CodeQL.md](docs/SAST-CodeQL.md).
 
 ## Credits
 
