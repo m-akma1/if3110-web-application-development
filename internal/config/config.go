@@ -22,6 +22,7 @@ import (
 	"dbplatform/internal/groups"
 	"dbplatform/internal/migration"
 	"dbplatform/internal/rbac"
+	"dbplatform/internal/tracing"
 )
 
 // Config is the process configuration.
@@ -35,6 +36,7 @@ type Config struct {
 	Session   authn.SessionConfig   // SESSION_*
 	Query     dbmanager.QueryLimits // QUERY_*
 	Migration migration.Limits      // MIGRATION_*
+	Tracing   tracing.Config        // OTEL_TRACES_EXPORTER, OTEL_SERVICE_NAME
 
 	// BootstrapAdmins are created only when the platform has no active admin (BOOTSTRAP_ADMINS).
 	BootstrapAdmins []bootstrap.Admin
@@ -78,6 +80,10 @@ func load(getenv func(string) string) (Config, error) {
 	r.duration("MIGRATION_LOCK_TIMEOUT_MS", time.Millisecond, &cfg.Migration.LockTimeout)
 	r.duration("MIGRATION_STATEMENT_TIMEOUT_MS", time.Millisecond, &cfg.Migration.StatementTimeout)
 	r.duration("MIGRATION_QUEUE_TIMEOUT_MS", time.Millisecond, &cfg.Migration.QueueTimeout)
+	cfg.Tracing = tracing.Config{
+		Exporter:    r.oneOf("OTEL_TRACES_EXPORTER", tracing.ExporterConsole, tracing.ExporterConsole, tracing.ExporterNone),
+		ServiceName: r.optional("OTEL_SERVICE_NAME", tracing.InstrumentationName),
+	}
 
 	r.jsonList("BOOTSTRAP_ADMINS", false, &cfg.BootstrapAdmins)
 	taken := r.checkAdmins(cfg.BootstrapAdmins)
@@ -169,6 +175,18 @@ func (r *reader) port(name string) int {
 
 func (r *reader) sslMode(name string, allowed ...string) string {
 	v := r.optional(name, "disable")
+	for _, a := range allowed {
+		if v == a {
+			return v
+		}
+	}
+	r.invalid("%s must be one of %s, got %q", name, strings.Join(allowed, ", "), v)
+	return v
+}
+
+// oneOf returns the variable's value, or fallback when unset; any value outside allowed is invalid.
+func (r *reader) oneOf(name, fallback string, allowed ...string) string {
+	v := r.optional(name, fallback)
 	for _, a := range allowed {
 		if v == a {
 			return v

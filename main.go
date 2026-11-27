@@ -21,6 +21,7 @@ import (
 	"dbplatform/internal/migration"
 	"dbplatform/internal/platformdb"
 	"dbplatform/internal/rbac"
+	"dbplatform/internal/tracing"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -31,6 +32,10 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		fatal("app.config_invalid", err)
+	}
+	shutdownTracing, err := tracing.Setup(context.Background(), cfg.Tracing)
+	if err != nil {
+		fatal("tracing.setup_failed", err)
 	}
 
 	db, err := sql.Open("pgx", cfg.DatabaseURL)
@@ -158,6 +163,12 @@ func main() {
 		slog.Warn("server.shutdown_failed", slog.String("error", err.Error()))
 	}
 	<-workerDone
+	// Last: running jobs have ended their spans by now; flush them to the exporter.
+	flushCtx, cancelFlush := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelFlush()
+	if err := shutdownTracing(flushCtx); err != nil {
+		slog.Warn("tracing.shutdown_failed", slog.String("error", err.Error()))
+	}
 	slog.Info("server.stopped")
 }
 

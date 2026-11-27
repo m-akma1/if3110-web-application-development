@@ -138,6 +138,24 @@ func TestLoad_Limits(t *testing.T) {
 	}
 }
 
+func TestLoad_Tracing(t *testing.T) {
+	cfg, err := load(envOf(minimal(nil)))
+	if err != nil {
+		t.Fatalf("valid configuration rejected: %v", err)
+	}
+	if cfg.Tracing.Exporter != "console" || cfg.Tracing.ServiceName != "dbplatform" {
+		t.Fatalf("tracing defaults wrong: %+v", cfg.Tracing)
+	}
+	cfg, err = load(envOf(minimal(map[string]string{"OTEL_TRACES_EXPORTER": "none", "OTEL_SERVICE_NAME": "dbp-test"})))
+	if err != nil {
+		t.Fatalf("valid configuration rejected: %v", err)
+	}
+	if cfg.Tracing.Exporter != "none" || cfg.Tracing.ServiceName != "dbp-test" {
+		t.Fatalf("tracing settings not read: %+v", cfg.Tracing)
+	}
+	mustFail(t, minimal(map[string]string{"OTEL_TRACES_EXPORTER": "jaeger"}), "OTEL_TRACES_EXPORTER")
+}
+
 func TestLoad_InvalidBool(t *testing.T) {
 	mustFail(t, minimal(map[string]string{"SEED_DEMO_DATA": "maybe"}), "SEED_DEMO_DATA")
 }
