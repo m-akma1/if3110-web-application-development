@@ -20,8 +20,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleMenu }) => {
   const { user, databases, activeDBID, setActiveDBID } = useAuth()
 
   return (
-    <header className="h-16 w-full border-b border-app-border px-4 md:px-6 flex items-center justify-between shrink-0 bg-app-sidebar">
-      <div className="flex items-center gap-3">
+    <header className="h-16 w-full border-b border-app-border px-4 md:px-6 flex items-center justify-between gap-3 shrink-0 bg-app-sidebar">
+      <div className="flex items-center gap-3 min-w-0">
         {onToggleMenu && (
           <button
             type="button"
@@ -41,7 +41,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleMenu }) => {
             value={activeDBID}
             aria-label="Pilih database"
             onChange={(e) => setActiveDBID(e.target.value)}
-            className="max-w-[180px] sm:max-w-none bg-app-input border border-app-border text-zinc-200 text-xs font-mono rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary/50 cursor-pointer truncate"
+            className="min-w-0 max-w-[11rem] sm:max-w-xs bg-app-input border border-app-border text-zinc-200 text-xs font-mono rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-brand-primary/50 cursor-pointer truncate"
           >
             {databases.map((db) => (
               <option key={db.database_id} value={db.database_id}>
@@ -56,15 +56,17 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleMenu }) => {
         )}
       </div>
 
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2.5 min-w-0 shrink-0">
         {user ? (
           <>
             {user.is_platform_admin && (
-              <span className="text-[10px] font-bold tracking-wider uppercase bg-brand-primary text-app-bg px-2.5 py-1 rounded-lg">
+              <span className="hidden sm:inline text-[10px] font-bold tracking-wider uppercase bg-brand-primary text-app-bg px-2.5 py-1 rounded-lg">
                 ADMIN
               </span>
             )}
-            <span className="text-xs font-semibold text-zinc-200">{user.username}</span>
+            <span className="text-xs font-semibold text-zinc-200 truncate max-w-[6rem] sm:max-w-[12rem]" title={user.username}>
+              {user.username}
+            </span>
           </>
         ) : (
           <span className="text-xs font-medium text-zinc-400">Guest</span>

@@ -532,7 +532,7 @@ export const MigrationDetailPage: React.FC = () => {
       {/* Dual SQL Viewer */}
       <div className="space-y-3">
         <div className="flex items-center justify-between border-b border-app-border">
-          <div className="flex space-x-1">
+          <div className="flex space-x-1 max-w-full shrink-0 overflow-x-auto whitespace-nowrap">
             <button
               type="button"
               onClick={() => setSqlTab('up')}
@@ -542,7 +542,7 @@ export const MigrationDetailPage: React.FC = () => {
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-app-active/40'
               }`}
             >
-              <span>SQL Up (Apply)</span>
+              <span>SQL Up<span className="hidden lg:inline"> (Apply)</span></span>
             </button>
             <button
               type="button"
@@ -553,7 +553,7 @@ export const MigrationDetailPage: React.FC = () => {
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-app-active/40'
               }`}
             >
-              <span>SQL Down (Rollback)</span>
+              <span>SQL Down<span className="hidden lg:inline"> (Rollback)</span></span>
               {migration.is_irreversible && (
                 <span className="text-[10px] px-1.5 py-0.2 rounded bg-sem-warning/15 text-sem-warning font-semibold">
                   Irreversible
@@ -561,7 +561,7 @@ export const MigrationDetailPage: React.FC = () => {
               )}
             </button>
           </div>
-          <div className="text-[11px] text-zinc-400 hidden sm:block px-2">
+          <div className="text-[11px] text-zinc-400 hidden xl:block px-2 min-w-0 truncate">
             {sqlTab === 'up'
               ? 'Perubahan skema yang diterapkan'
               : migration.is_irreversible

@@ -389,7 +389,7 @@ export const MigrationReviewsPage: React.FC = () => {
       {/* Review Confirmation Modal */}
       {selectedReview && modalMode && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-app-surface border border-app-border rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+          <div role="dialog" aria-modal="true" className="bg-app-surface border border-app-border rounded-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto p-5 sm:p-6 space-y-4 shadow-2xl">
             <div>
               <div className="flex items-center justify-between">
                 <h3 className="text-base font-bold text-zinc-100">

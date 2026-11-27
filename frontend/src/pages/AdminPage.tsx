@@ -59,11 +59,14 @@ export const AdminPage: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex flex-wrap gap-2 border-b border-app-border pb-3">
+      {/* One row that scrolls sideways on narrow screens instead of wrapping into a block. */}
+      <div role="tablist" className="-mx-1 px-1 flex gap-2 overflow-x-auto whitespace-nowrap border-b border-app-border pb-3">
         <button
           type="button"
           onClick={() => setTab('users')}
-          className={`px-4 py-2 rounded-xl text-xs transition cursor-pointer ${
+          role="tab"
+          aria-selected={activeTab === 'users'}
+          className={`shrink-0 px-4 py-2 rounded-xl text-xs transition cursor-pointer ${
             activeTab === 'users' ? 'bg-brand-primary text-app-bg font-bold' : 'text-zinc-400 hover:bg-app-hover hover:text-zinc-200'
           }`}
         >
@@ -72,7 +75,9 @@ export const AdminPage: React.FC = () => {
         <button
           type="button"
           onClick={() => setTab('groups')}
-          className={`px-4 py-2 rounded-xl text-xs transition cursor-pointer ${
+          role="tab"
+          aria-selected={activeTab === 'groups'}
+          className={`shrink-0 px-4 py-2 rounded-xl text-xs transition cursor-pointer ${
             activeTab === 'groups' ? 'bg-brand-primary text-app-bg font-bold' : 'text-zinc-400 hover:bg-app-hover hover:text-zinc-200'
           }`}
         >
@@ -81,7 +86,9 @@ export const AdminPage: React.FC = () => {
         <button
           type="button"
           onClick={() => setTab('databases')}
-          className={`px-4 py-2 rounded-xl text-xs transition cursor-pointer ${
+          role="tab"
+          aria-selected={activeTab === 'databases'}
+          className={`shrink-0 px-4 py-2 rounded-xl text-xs transition cursor-pointer ${
             activeTab === 'databases' ? 'bg-brand-primary text-app-bg font-bold' : 'text-zinc-400 hover:bg-app-hover hover:text-zinc-200'
           }`}
         >
@@ -90,7 +97,9 @@ export const AdminPage: React.FC = () => {
         <button
           type="button"
           onClick={() => setTab('codes')}
-          className={`px-4 py-2 rounded-xl text-xs transition cursor-pointer ${
+          role="tab"
+          aria-selected={activeTab === 'codes'}
+          className={`shrink-0 px-4 py-2 rounded-xl text-xs transition cursor-pointer ${
             activeTab === 'codes' ? 'bg-brand-primary text-app-bg font-bold' : 'text-zinc-400 hover:bg-app-hover hover:text-zinc-200'
           }`}
         >

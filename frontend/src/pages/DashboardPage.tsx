@@ -175,9 +175,9 @@ export const DashboardPage: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col md:flex-row gap-6 h-full">
-      {/* Sidebar Daftar Tabel */}
-      <div className="w-full md:w-60 bg-app-card border border-app-border rounded-2xl p-4 flex flex-col shrink-0 max-h-60 md:max-h-none">
+    <div className="flex flex-col lg:flex-row gap-6 h-full">
+      {/* Sidebar Daftar Tabel: beside the content only from lg, where the app sidebar leaves room */}
+      <div className="w-full lg:w-60 bg-app-card border border-app-border rounded-2xl p-4 flex flex-col shrink-0 max-h-60 lg:max-h-none">
         <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 px-2">
           Daftar Tabel
         </h3>
@@ -218,15 +218,15 @@ export const DashboardPage: React.FC = () => {
       <div className="flex-1 min-w-0 space-y-5">
         {/* Read-Only SQL Query Runner */}
         <div className="bg-app-card border border-app-border rounded-2xl p-4 shadow-xl space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
               <span className="text-xs font-bold text-white uppercase tracking-wider">
                 SQL Query Explorer
               </span>
               <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-brand-primary/10 text-brand-primary border border-brand-primary/20">
                 SELECT Only (Read-Only Guard)
               </span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-app-input text-zinc-300 border border-app-border">
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-app-input text-zinc-300 border border-app-border max-w-full truncate">
                 Target DB: {dbLabel}
               </span>
             </div>

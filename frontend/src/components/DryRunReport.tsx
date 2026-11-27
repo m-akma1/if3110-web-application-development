@@ -61,12 +61,12 @@ export const DryRunReport: React.FC<{ report: DryRunView }> = ({ report }) => {
 
       {steps.map((st) => (
         <div key={st.index} className="bg-app-bg border border-app-border rounded-lg overflow-hidden">
-          <div className="flex items-start justify-between gap-3 px-3 py-2 border-b border-app-border">
-            <pre className="font-mono text-[11px] text-zinc-300 whitespace-pre-wrap break-all flex-1">
+          <div className="flex flex-col-reverse sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-3 px-3 py-2 border-b border-app-border">
+            <pre className="font-mono text-[11px] text-zinc-300 whitespace-pre-wrap break-all flex-1 min-w-0 max-h-48 overflow-y-auto">
               <span className="text-zinc-500">{`#${st.index}  `}</span>
               {st.sql}
             </pre>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
               {st.kind !== 'SKIPPED' && (
                 <span className="text-[10px] font-mono text-zinc-500">{fmtMs(st.duration_ms)}</span>
               )}
@@ -78,16 +78,16 @@ export const DryRunReport: React.FC<{ report: DryRunView }> = ({ report }) => {
 
           {st.nodes && st.nodes.length > 0 && (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-[11px] text-zinc-300">
+              <table className="w-full min-w-[40rem] text-left text-[11px] text-zinc-300">
                 <thead className="text-[10px] uppercase tracking-wider text-zinc-500 border-b border-app-border">
                   <tr>
                     <th className="px-3 py-1.5 font-semibold">Node</th>
-                    <th className="px-3 py-1.5 font-semibold text-right">Rows est.</th>
-                    <th className="px-3 py-1.5 font-semibold text-right">Rows actual</th>
-                    <th className="px-3 py-1.5 font-semibold text-right">Loops</th>
-                    <th className="px-3 py-1.5 font-semibold text-right">Cost</th>
-                    <th className="px-3 py-1.5 font-semibold text-right">Actual time</th>
-                    <th className="px-3 py-1.5 font-semibold text-right">Buffers hit/read</th>
+                    <th className="px-3 py-1.5 font-semibold text-right whitespace-nowrap">Rows est.</th>
+                    <th className="px-3 py-1.5 font-semibold text-right whitespace-nowrap">Rows actual</th>
+                    <th className="px-3 py-1.5 font-semibold text-right whitespace-nowrap">Loops</th>
+                    <th className="px-3 py-1.5 font-semibold text-right whitespace-nowrap">Cost</th>
+                    <th className="px-3 py-1.5 font-semibold text-right whitespace-nowrap">Actual time</th>
+                    <th className="px-3 py-1.5 font-semibold text-right whitespace-nowrap">Buffers hit/read</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-app-border/60">
@@ -102,7 +102,7 @@ export const DryRunReport: React.FC<{ report: DryRunView }> = ({ report }) => {
                           )}
                         </div>
                         {n.conditions && n.conditions.length > 0 && (
-                          <div className="text-[10px] text-zinc-400 font-mono mt-0.5">
+                          <div className="text-[10px] text-zinc-400 font-mono mt-0.5 break-words">
                             {n.conditions.join(' · ')}
                           </div>
                         )}
@@ -112,10 +112,10 @@ export const DryRunReport: React.FC<{ report: DryRunView }> = ({ report }) => {
                           </div>
                         )}
                       </td>
-                      <td className="px-3 py-1.5 text-right font-mono text-zinc-400">
+                      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-zinc-400">
                         {fmtRows(n.est_rows)}
                       </td>
-                      <td className="px-3 py-1.5 text-right font-mono">
+                      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
                         {n.never_executed ? (
                           <span className="text-zinc-500">tidak dijalankan</span>
                         ) : (
@@ -124,16 +124,16 @@ export const DryRunReport: React.FC<{ report: DryRunView }> = ({ report }) => {
                           </span>
                         )}
                       </td>
-                      <td className="px-3 py-1.5 text-right font-mono text-zinc-400">
+                      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-zinc-400">
                         {n.loops}
                       </td>
-                      <td className="px-3 py-1.5 text-right font-mono text-zinc-400">
+                      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-zinc-400">
                         {n.total_cost ? n.total_cost.toFixed(1) : '-'}
                       </td>
-                      <td className="px-3 py-1.5 text-right font-mono text-zinc-200">
+                      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-zinc-200">
                         {n.actual_ms ? fmtMs(n.actual_ms) : '-'}
                       </td>
-                      <td className="px-3 py-1.5 text-right font-mono text-zinc-400">
+                      <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap text-zinc-400">
                         {n.shared_hit || n.shared_read ? `${n.shared_hit} / ${n.shared_read}` : '-'}
                       </td>
                     </tr>

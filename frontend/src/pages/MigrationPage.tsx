@@ -425,7 +425,7 @@ export const MigrationPage: React.FC = () => {
       </div>
 
       {canEdit ? (
-        <div className="grid grid-cols-1 lg:grid-cols-[16rem_1fr] gap-4">
+        <div className="grid grid-cols-[minmax(0,1fr)] lg:grid-cols-[16rem_minmax(0,1fr)] gap-4">
           <MigrationDraftSidebar
             drafts={drafts}
             selectedDraft={selectedDraft}

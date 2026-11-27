@@ -186,7 +186,7 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
 
       {/* Progress Bar Container */}
       <div className="space-y-2">
-        <div className="flex justify-between items-center text-xs">
+        <div className="flex flex-wrap justify-between items-center gap-x-3 gap-y-1 text-xs">
           <span className="text-zinc-400 font-medium">
             {isRunning
               ? 'Memproses data per-batch...'
@@ -216,7 +216,7 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
           />
         </div>
 
-        <div className="flex justify-between items-center text-[11px] text-zinc-500 font-mono">
+        <div className="flex flex-wrap justify-between items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500 font-mono">
           <span>
             Tersimpan: <strong className="text-zinc-300">{committed}</strong> dari{' '}
             <strong className="text-zinc-300">{total > 0 ? total : '?'}</strong> batch
@@ -231,7 +231,7 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
 
       {/* Current phase indicator */}
       {migration.current_phase && (
-        <div className="p-2.5 rounded-lg bg-app-input border border-app-border flex items-center justify-between text-xs">
+        <div className="p-2.5 rounded-lg bg-app-input border border-app-border flex flex-wrap items-center justify-between gap-2 text-xs">
           <span className="text-zinc-400">Fase Saat Ini:</span>
           <span className="text-brand-primary font-mono font-medium">{migration.current_phase}</span>
         </div>
@@ -296,7 +296,7 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
           {(migration.error || migration.batch_error) && (
             <div className="space-y-1">
               <span className="text-[10px] uppercase font-bold text-zinc-400">Penyebab Terhenti:</span>
-              <pre className="p-2.5 rounded bg-app-bg border border-sem-warning/20 text-sem-danger font-mono text-[11px] whitespace-pre-wrap">
+              <pre className="p-2.5 rounded bg-app-bg border border-sem-warning/20 text-sem-danger font-mono text-[11px] whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
                 {migration.error || migration.batch_error}
               </pre>
             </div>
