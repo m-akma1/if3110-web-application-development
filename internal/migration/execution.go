@@ -28,6 +28,7 @@ const (
 	ExecSuccess   ExecStatus = "SUCCESS"
 	ExecFailed    ExecStatus = "FAILED"
 	ExecUncertain ExecStatus = "UNCERTAIN" // SQL was sent, outcome unknown
+	ExecPartial   ExecStatus = "PARTIAL"   // a batch run that stopped after committing batches
 )
 
 // Execution is one attempt to run a migration. Rows are append-only (see 009_migration_executions.sql).
@@ -225,6 +226,6 @@ func auditExecution(ctx context.Context, l *slog.Logger, ex Execution) {
 		attrs = append(attrs, slog.String("error", ex.Error))
 	}
 	action := map[ExecKind]string{ExecExecute: audit.Execute, ExecRollback: audit.Rollback, ExecForward: audit.Forward}[ex.Kind]
-	outcome := map[ExecStatus]string{ExecSuccess: audit.Success, ExecFailed: audit.Failure, ExecUncertain: audit.Uncertain}[ex.Status]
+	outcome := map[ExecStatus]string{ExecSuccess: audit.Success, ExecFailed: audit.Failure, ExecUncertain: audit.Uncertain, ExecPartial: audit.Partial}[ex.Status]
 	audit.Log(ctx, l, action, outcome, attrs...)
 }

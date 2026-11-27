@@ -28,6 +28,9 @@ const (
 	StatusFailed        Status = "FAILED"
 	StatusAborted       Status = "ABORTED"
 	StatusRolledBack    Status = "ROLLED_BACK"
+	// StatusPartiallyReverted is derived, never stored: a PARTIAL batch migration whose abort
+	// has undone some, but not all, of its committed batches.
+	StatusPartiallyReverted Status = "PARTIALLY_REVERTED"
 )
 
 const (
@@ -59,6 +62,8 @@ var (
 	ErrPendingForwardExists     = errors.New("sudah terdapat pengajuan forward yang sedang menunggu review/eksekusi")
 	ErrImmutableRollbackScript  = errors.New("naskah SQL pada permintaan rollback atau forward bersifat immutable dan tidak dapat diubah")
 	ErrHasHistory               = errors.New("migration ini sudah punya riwayat eksekusi dan tidak dapat dihapus")
+	ErrNotPartial               = errors.New("hanya migration berstatus PARTIAL yang dapat dilanjutkan atau dibatalkan")
+	ErrBatchReverting           = errors.New("pembatalan batch sudah dimulai; lanjutkan pembatalannya, migration tidak dapat dilanjutkan lagi")
 )
 
 // Approval is one group's review and approval record for a migration.
@@ -102,6 +107,15 @@ type Migration struct {
 	RollbackExecutionID string // the successful ROLLBACK that undid it
 	ForwardExecutionID  string // the successful FORWARD that undid that rollback
 
+	// Per-batch execution (ExecutionMode BATCH). The counts come from migration_batches.
+	ExecutionMode    string // ModeStandard or ModeBatch
+	BatchAttribute   string // integer cursor column
+	BatchSize        int
+	BatchTotal       int    // estimated number of batches
+	BatchesUp        int    // committed batches
+	BatchesDown      int    // committed batches already undone by an abort
+	CheckpointCursor *int64 // upper bound of the last committed batch
+
 	ReviewRequired  bool
 	CanApprove      bool
 	RejectionReason string
@@ -126,6 +140,9 @@ func (m *Migration) IsDraft() bool {
 
 // IsExecutable reports whether the engine may run the migration: a draft, an approved
 // migration, or one a worker has taken from the queue (QUEUED, RUNNING).
+// IsBatch reports whether the migration runs per batch.
+func (m *Migration) IsBatch() bool { return m != nil && m.ExecutionMode == ModeBatch }
+
 func (m *Migration) IsExecutable() bool {
 	return m != nil && (m.IsDraft() || m.Status == StatusApproved || m.Status == StatusQueued || m.Status == StatusRunning)
 }
@@ -152,6 +169,12 @@ type RunResult struct {
 	Duration   time.Duration
 	Err        *ScriptError // set when OK is false
 	Steps      []Step       // per-statement report; only dry runs fill it (see explain.go)
+
+	// Batch runs only.
+	Batches     int   // batches committed by this run
+	Rows        int64 // rows changed by this run
+	Partial     bool  // stopped after batches were committed, before the end (status PARTIAL)
+	Interrupted bool  // stopped between batches because the worker is shutting down
 }
 
 // StepKind says what a dry run did with one statement.

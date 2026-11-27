@@ -139,6 +139,9 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	if m.ExecutionType == "FORWARD" && m.SourceMigrationID != "" {
 		return e.executeApprovedForward(ctx, m.ID, executorID)
 	}
+	if m.IsBatch() {
+		return e.executeBatch(ctx, m.ID, executorID, DirUp)
+	}
 	pool, ok := e.pools.GetPool(m.DatabaseID)
 	if !ok {
 		return nil, nil, ErrTargetUnavailable

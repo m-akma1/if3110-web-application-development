@@ -20,6 +20,7 @@ const (
 	Rollback = "rollback"
 	Forward  = "forward"
 	Grant    = "grant" // group access level on a database changed
+	Abort    = "abort" // a PARTIAL batch migration was marked ABORTED without rollback
 )
 
 // Outcomes.
@@ -28,6 +29,7 @@ const (
 	Failure   = "failure"
 	Denied    = "denied"
 	Uncertain = "uncertain"
+	Partial   = "partial" // a batch run stopped with some batches committed
 )
 
 // Log writes one audit event. Failures and denials are warnings so they stand out.
