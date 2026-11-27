@@ -2,12 +2,9 @@ name: "CodeQL SAST"
 
 on:
   push:
-    branches: ["main", "dev", "feat/**"]
+    branches: ["main", "dev"]
   pull_request:
     branches: ["main", "dev"]
-  schedule:
-    - cron: "30 2 * * 1"
-  workflow_dispatch:
 
 permissions:
   actions: read
@@ -76,7 +73,7 @@ jobs:
 
           lines = [f"## CodeQL SAST Summary (`{lang}`)", ""]
           if not sarif_files:
-              lines.append("Tidak ditemukan file SARIF pada `sarif-results/`.")
+              lines.append("No SARIF file found in `sarif-results/`.")
           else:
               total = 0
               rows = []
@@ -107,16 +104,16 @@ jobs:
                               loc_str = f"`{uri}:{line}`" if line else f"`{uri}`"
                           rows.append(f"| `{rule_id}` | {sev} | {loc_str} | {msg[:180]} |")
 
-              lines.append(f"- **Total temuan:** {total}")
+              lines.append(f"- **Total findings:** {total}")
               lines.append("")
               if rows:
                   lines.extend([
-                      "| Rule | Severity | Lokasi | Pesan |",
+                      "| Rule | Severity | Location | Message |",
                       "|---|---|---|---|",
                       *rows,
                   ])
               else:
-                  lines.append("Tidak ada temuan kerentanan (`0 alerts`) untuk query suite `security-extended`.")
+                  lines.append("No findings (`0 alerts`) for the `security-extended` query suite.")
 
           output = "\n".join(lines) + "\n"
           print(output)
