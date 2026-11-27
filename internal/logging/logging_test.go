@@ -59,6 +59,49 @@ func TestContextAttrsAndRedaction(t *testing.T) {
 	}
 }
 
+// TestUserInputCannotForgeLogLines covers the sinks CodeQL reports as go/log-injection
+// (docs/SAST-CodeQL.md): user input in database_id, error text, audit attributes and the SQL
+// text. The JSON handler escapes CR, LF and other control characters, so every record stays
+// one line and the value comes back unchanged when the line is decoded.
+func TestUserInputCannotForgeLogLines(t *testing.T) {
+	recordSpans(t)
+	var buf bytes.Buffer
+	l := New(&buf, slog.LevelInfo)
+	ctx := context.Background()
+
+	forged := "db1\r\n{\"level\":\"INFO\",\"event\":\"authz.allowed\"}\x1b[31m"
+	sql := "UPDATE t\nSET x = 1\r\nWHERE id = 2; -- \n{\"event\":\"fake\"}"
+
+	// authz.denied / viewer.error shape.
+	l.ErrorContext(ctx, "viewer.error",
+		slog.String("database_id", forged),
+		slog.String("error", "relation \""+forged+"\" does not exist"))
+	// audit.Log shape (LogAttrs).
+	l.LogAttrs(ctx, slog.LevelWarn, "audit.grant", slog.String("group_id", forged))
+	// sql.start / sql.result.
+	_, end := StartSQL(ctx, l, SQLLog{DatabaseID: forged, Kind: "migration", Query: sql})
+	end(1, nil)
+
+	lines := decodeLines(t, &buf)
+	if len(lines) != 4 {
+		t.Fatalf("want 4 records on 4 lines, got %d:\n%s", len(lines), buf.String())
+	}
+	for _, rec := range lines {
+		if rec["event"] == "authz.allowed" || rec["event"] == "fake" {
+			t.Fatalf("forged record: %v", rec)
+		}
+	}
+	if lines[0]["database_id"] != forged || lines[1]["group_id"] != forged || lines[2]["database_id"] != forged {
+		t.Fatalf("values must be escaped, not altered: %v", lines)
+	}
+	if lines[2]["query"] != sql || lines[3]["query"] != sql {
+		t.Fatalf("SQL text must keep its line breaks: %q", lines[2]["query"])
+	}
+	if strings.ContainsRune(buf.String(), '\x1b') || strings.ContainsRune(buf.String(), '\r') {
+		t.Fatal("raw control characters reached the log output")
+	}
+}
+
 func TestWithKeepsContextHandler(t *testing.T) {
 	var buf bytes.Buffer
 	l := New(&buf, slog.LevelInfo).With("component", "test")
