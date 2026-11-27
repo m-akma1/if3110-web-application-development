@@ -21,6 +21,14 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    # Telemetry export. The defaults keep today's behaviour (spans and logs on stdout only);
+    # `make observability` sets both exporters to otlp for the observability profile below.
+    # Values from the shell or .env win over the defaults.
+    environment:
+      OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-console}
+      OTEL_LOGS_EXPORTER: ${OTEL_LOGS_EXPORTER:-none}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      METRICS_ADDR: ${METRICS_ADDR:-:9091}
     depends_on:
       postgres:
         condition: service_healthy
@@ -94,7 +102,76 @@ services:
       timeout: 3s
       retries: 15
 
+  # ---- Observability (profile "observability", see README "Observability") ----
+  # app --OTLP--> otel-collector --> tempo (traces), loki (logs); prometheus scrapes app:9091;
+  # grafana reads all three. Only Grafana (and Prometheus, for debugging) are published, and only
+  # on 127.0.0.1.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.117.0
+    profiles: ["observability"]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./docker/observability/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    depends_on:
+      - tempo
+      - loki
+    networks:
+      - app_net
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    profiles: ["observability"]
+    command: ["-config.file=/etc/tempo.yaml"]
+    # Tempo runs as uid 10001; its data lives in a volume that only it writes.
+    user: "10001"
+    volumes:
+      - ./docker/observability/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    networks:
+      - app_net
+
+  loki:
+    image: grafana/loki:3.3.2
+    profiles: ["observability"]
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./docker/observability/loki.yaml:/etc/loki/config.yaml:ro
+    networks:
+      - app_net
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    profiles: ["observability"]
+    volumes:
+      - ./docker/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks:
+      - app_net
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    profiles: ["observability"]
+    # Local demo: anonymous visitors are Viewers; sign in as admin/admin to edit.
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/dbplatform.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./docker/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
+    networks:
+      - app_net
+
 volumes:
+  tempo_data:
   caddy_data:
   caddy_config:
   postgres_data:

@@ -1,0 +1,32 @@
+# OpenTelemetry Collector: the app pushes traces and logs here over OTLP/HTTP (:4318); the
+# collector batches them and forwards traces to Tempo and logs to Loki (Loki's own OTLP endpoint).
+# Metrics do not pass through here: Prometheus scrapes the app's METRICS_ADDR directly.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch: {}
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/tempo]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/loki]

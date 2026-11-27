@@ -1,0 +1,9 @@
+# Prometheus scrapes the app's internal metrics endpoint (METRICS_ADDR, :9091). That port is
+# only on the Compose network, never published and never behind Caddy.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+scrape_configs:
+  - job_name: dbplatform
+    static_configs:
+      - targets: ["app:9091"]

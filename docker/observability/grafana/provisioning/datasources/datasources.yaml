@@ -1,0 +1,49 @@
+# Provisioned data sources, linked to each other:
+#   Tempo span  -> "Logs for this span": Loki records with the same trace_id
+#   Loki record -> "Buka trace di Tempo": its trace_id structured metadata opens the trace
+#   Tempo span  -> job metrics in Prometheus
+# A literal $ is written $$ (Grafana expands environment variables in these files).
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 5s
+
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      nodeGraph:
+        enabled: true
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: -5m
+        spanEndTimeShift: 5m
+        customQuery: true
+        query: '{service_name="dbplatform"} | trace_id="$${__trace.traceId}"'
+      tracesToMetrics:
+        datasourceUid: prometheus
+        queries:
+          - name: Job throughput
+            query: sum by (status) (rate(dbplatform_jobs_finished_total[1m]))
+
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      derivedFields:
+        - name: Trace
+          matcherType: label
+          matcherRegex: trace_id
+          datasourceUid: tempo
+          url: "$${__value.raw}"
+          urlDisplayLabel: Buka trace di Tempo
