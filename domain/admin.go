@@ -21,12 +21,15 @@ type MemberItem struct {
 
 // GroupItem is one group in the admin console, with members and its grant per database.
 type GroupItem struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	IsSystem    bool              `json:"is_system"`
-	LeaderID    string            `json:"leader_id,omitempty"`
-	LeaderName  string            `json:"leader_name,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	IsSystem    bool   `json:"is_system"`
+	LeaderID    string `json:"leader_id,omitempty"`
+	LeaderName  string `json:"leader_name,omitempty"`
+	// NeedsLeader: the group has database access but no active leader, so changes to those
+	// databases cannot be approved.
+	NeedsLeader bool              `json:"needs_leader,omitempty"`
 	MemberCount int               `json:"member_count"`
 	Members     []MemberItem      `json:"members"`
 	Grants      map[string]string `json:"grants"` // database id -> VIEW_ONLY / VIEW_EDIT (missing = NONE)

@@ -190,42 +190,6 @@ func (r *Repository) MemberGroupsByUser(ctx context.Context) (map[string][]Group
 	return out, rows.Err()
 }
 
-// SetLeader sets or clears the leader of a group. The leader must be an existing member of the group.
-// Non-system groups with members cannot have their leader cleared to NULL; if userID is empty,
-// the earliest joined member is selected as leader.
-func (r *Repository) SetLeader(ctx context.Context, groupID, userID string) error {
-	if !ids.IsValid(groupID) {
-		return ErrGroupNotFound
-	}
-	if groupID == PublicGroupID {
-		return ErrSystemGroup
-	}
-	if userID != "" {
-		if !ids.IsValid(userID) {
-			return errors.New("user tidak valid")
-		}
-		var isMember bool
-		err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2)`, groupID, userID).Scan(&isMember)
-		if err != nil {
-			return err
-		}
-		if !isMember {
-			return errors.New("user bukan anggota dari group ini")
-		}
-		_, err = r.db.ExecContext(ctx, `UPDATE groups SET leader_id = $1 WHERE id = $2`, userID, groupID)
-		return err
-	}
-	// Fallback to earliest member if any members exist
-	var earliest string
-	err := r.db.QueryRowContext(ctx, `SELECT user_id FROM group_members WHERE group_id = $1 ORDER BY added_at ASC LIMIT 1`, groupID).Scan(&earliest)
-	if err == nil && earliest != "" {
-		_, err = r.db.ExecContext(ctx, `UPDATE groups SET leader_id = $1 WHERE id = $2`, earliest, groupID)
-		return err
-	}
-	_, err = r.db.ExecContext(ctx, `UPDATE groups SET leader_id = NULL WHERE id = $1`, groupID)
-	return err
-}
-
 // GetLeader returns the leader user id of a group, or empty string if no leader is set.
 func (r *Repository) GetLeader(ctx context.Context, groupID string) (string, error) {
 	if !ids.IsValid(groupID) {
@@ -240,23 +204,6 @@ func (r *Repository) GetLeader(ctx context.Context, groupID string) (string, err
 		return "", err
 	}
 	return leaderID.String, nil
-}
-
-// EnsureLeaders sets leader_id to the earliest joined member for any non-system group that has members but no leader.
-func (r *Repository) EnsureLeaders(ctx context.Context) error {
-	_, err := r.db.ExecContext(ctx, `
-		UPDATE groups g
-		SET leader_id = (
-			SELECT gm.user_id
-			FROM group_members gm
-			WHERE gm.group_id = g.id
-			ORDER BY gm.added_at ASC
-			LIMIT 1
-		)
-		WHERE g.leader_id IS NULL AND g.is_system = FALSE AND EXISTS (
-			SELECT 1 FROM group_members gm WHERE gm.group_id = g.id
-		)`)
-	return err
 }
 
 // AddMember adds a user to a group. Adding an existing member is a no-op.
@@ -275,13 +222,17 @@ func (r *Repository) AddMember(ctx context.Context, groupID, userID string) erro
 		return err
 	}
 
+	// A group without an active leader gets the new member as leader (Public's leader is the
+	// bootstrap admin or another Platform Admin, see leaders.go).
 	if groupID != PublicGroupID {
-		_, _ = r.db.ExecContext(ctx, `
-			UPDATE groups
-			SET leader_id = $1
-			WHERE id = $2 AND leader_id IS NULL`, userID, groupID)
+		if _, err := r.db.ExecContext(ctx, `
+			UPDATE groups g SET leader_id = $1
+			WHERE g.id = $2
+			  AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = g.leader_id AND u.is_active)
+			  AND EXISTS (SELECT 1 FROM users u WHERE u.id = $1 AND u.is_active)`, userID, groupID); err != nil {
+			return err
+		}
 	}
-
 	return nil
 }
 
@@ -445,24 +396,18 @@ func (r *Repository) RemoveMember(ctx context.Context, groupID, userID string) e
 		return err
 	}
 
+	// The leader left (or there was none): the earliest active member takes over (see leaders.go).
 	var currentLeader sql.NullString
-	_ = r.db.QueryRowContext(ctx, `SELECT leader_id FROM groups WHERE id = $1`, groupID).Scan(&currentLeader)
-
-	if !currentLeader.Valid || currentLeader.String == userID {
-		var nextLeader string
-		err := r.db.QueryRowContext(ctx, `
-			SELECT user_id
-			FROM group_members
-			WHERE group_id = $1
-			ORDER BY added_at ASC
-			LIMIT 1`, groupID).Scan(&nextLeader)
-		if err == nil && nextLeader != "" {
-			_, _ = r.db.ExecContext(ctx, `UPDATE groups SET leader_id = $1 WHERE id = $2`, nextLeader, groupID)
-		} else {
-			_, _ = r.db.ExecContext(ctx, `UPDATE groups SET leader_id = NULL WHERE id = $1`, groupID)
-		}
+	if err := r.db.QueryRowContext(ctx, `SELECT leader_id FROM groups WHERE id = $1`, groupID).Scan(&currentLeader); err != nil {
+		return err
 	}
-
+	if !currentLeader.Valid || currentLeader.String == userID {
+		next, err := r.defaultLeader(ctx, groupID, userID)
+		if err != nil {
+			return err
+		}
+		return r.setLeader(ctx, groupID, next)
+	}
 	return nil
 }
 

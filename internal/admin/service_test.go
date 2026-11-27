@@ -150,6 +150,14 @@ func TestGroupMembershipAndGrants_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Access needs a leader to approve changes: refused while the group has none.
+	if err := e.svc.SetGrant(ctx, g.ID, db, "VIEW_ONLY"); !errors.Is(err, groups.ErrNoActiveLeader) {
+		t.Fatalf("grant to a group without a leader = %v, want ErrNoActiveLeader", err)
+	}
+	leadID, _ := e.newUser(t, "lead")
+	if err := e.svc.AddMember(ctx, g.ID, leadID); err != nil {
+		t.Fatal(err)
+	}
 	if err := e.svc.SetGrant(ctx, g.ID, db, "VIEW_ONLY"); err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +214,13 @@ func TestCreateUserWithGroupsAndOverview_Integration(t *testing.T) {
 	ctx := context.Background()
 	db := insertTarget("analytics")
 	g, _ := e.svc.CreateGroup(ctx, "Analysts", "lihat saja")
-	_ = e.svc.SetGrant(ctx, g.ID, db, "VIEW_ONLY")
+	leadID, _ := e.newUser(t, "lead")
+	if err := e.svc.AddMember(ctx, g.ID, leadID); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.SetGrant(ctx, g.ID, db, "VIEW_ONLY"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := e.svc.CreateInviteCode(ctx, e.adminID, g.ID, "ANALYST-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -223,16 +237,48 @@ func TestCreateUserWithGroupsAndOverview_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ov.Users) != 2 || len(ov.Targets) != 1 || len(ov.Codes) != 1 || len(ov.Groups) != 2 {
+	if len(ov.Users) != 3 || len(ov.Targets) != 1 || len(ov.Codes) != 1 || len(ov.Groups) != 2 {
 		t.Fatalf("overview tidak lengkap: users=%d targets=%d codes=%d groups=%d", len(ov.Users), len(ov.Targets), len(ov.Codes), len(ov.Groups))
 	}
 	var analysts bool
 	for _, gi := range ov.Groups {
 		if gi.ID == g.ID {
-			analysts = gi.GrantFor(db) == "VIEW_ONLY" && gi.HasMember(u.ID) && gi.MemberCount == 1
+			analysts = gi.GrantFor(db) == "VIEW_ONLY" && gi.HasMember(u.ID) && gi.MemberCount == 2 &&
+				gi.LeaderID == leadID && !gi.NeedsLeader
 		}
 	}
 	if !analysts {
 		t.Fatalf("group Analysts di overview seharusnya punya grant dan anggota: %+v", ov.Groups)
+	}
+}
+
+func TestDeactivatingALeaderHandsTheGroupOver_Integration(t *testing.T) {
+	e, insertTarget := newEnv(t)
+	ctx := context.Background()
+	db := insertTarget("prod")
+	lead, _ := e.newUser(t, "lead")
+	next, _ := e.newUser(t, "next")
+	g, _ := e.svc.CreateGroup(ctx, "Ops", "")
+	for _, uid := range []string{lead, next} {
+		if err := e.svc.AddMember(ctx, g.ID, uid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.svc.SetGrant(ctx, g.ID, db, "VIEW_EDIT"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := e.svc.SetUserActive(ctx, e.adminID, lead, false); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := e.groups.GetLeader(ctx, g.ID); got != next {
+		t.Fatalf("leader after deactivation = %q, want the next active member", got)
+	}
+	// Public is led by an admin, so the console can always assign it; a plain user can lead it too.
+	if err := e.svc.SetGroupLeader(ctx, groups.PublicGroupID, next); err != nil {
+		t.Fatalf("set Public leader = %v", err)
+	}
+	if err := e.svc.SetGroupLeader(ctx, groups.PublicGroupID, lead); !errors.Is(err, groups.ErrLeaderInactive) {
+		t.Fatalf("inactive Public leader = %v, want ErrLeaderInactive", err)
 	}
 }

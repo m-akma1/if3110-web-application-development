@@ -92,7 +92,12 @@ func (s *Service) SetUserActive(ctx context.Context, actorID, userID string, act
 	if active {
 		return s.sessions.ReactivateUser(ctx, userID)
 	}
-	return s.sessions.RevokeUserAccess(ctx, userID)
+	if err := s.sessions.RevokeUserAccess(ctx, userID); err != nil {
+		return err
+	}
+	// A deactivated user cannot approve anything: the groups they led get a new leader.
+	_, err := s.groups.HandOverLeadership(ctx, userID)
+	return err
 }
 
 // ResetPassword sets a new password and signs the user out everywhere.
@@ -144,10 +149,22 @@ func (s *Service) SetGroupLeader(ctx context.Context, groupID, userID string) er
 // ---------- grants ----------
 
 // SetGrant sets a group's access level on a database. Raising it rotates every member's session.
+//
+// A group can only get access when it has an active leader: every change to the database needs
+// that leader's approval, so a leaderless group would block them all (groups.ErrNoActiveLeader).
 func (s *Service) SetGrant(ctx context.Context, groupID, databaseID, level string) error {
 	lvl := rbac.AccessLevel(level)
 	if rbac.Normalize(lvl) != lvl {
 		return ErrInvalidLevel
+	}
+	if lvl != rbac.AccessNone {
+		ok, err := s.groups.HasActiveLeader(ctx, groupID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return groups.ErrNoActiveLeader
+		}
 	}
 	previous, err := s.grants.SetGroupGrant(ctx, groupID, databaseID, lvl)
 	if err != nil {
@@ -253,8 +270,18 @@ func (s *Service) Overview(ctx context.Context) (*domain.AdminOverview, error) {
 		}
 		grantsByGroup[gr.GroupID][gr.DatabaseID] = string(gr.Level)
 	}
+	activeUsers := map[string]bool{}
+	for _, u := range users {
+		activeUsers[u.ID] = u.IsActive
+	}
 	for _, g := range allGroups {
+		hasAccess := false
+		for _, lvl := range grantsByGroup[g.ID] {
+			hasAccess = hasAccess || lvl != string(rbac.AccessNone)
+		}
 		ov.Groups = append(ov.Groups, domain.GroupItem{
+			// Changes to its databases cannot be approved until an active leader is assigned.
+			NeedsLeader: hasAccess && !activeUsers[g.LeaderID],
 			ID:          g.ID,
 			Name:        g.Name,
 			Description: g.Description,

@@ -458,6 +458,7 @@ func adminErrorMessage(err error) (string, int) {
 		authn.ErrEmailTaken, authn.ErrInvalidRole, authn.ErrUserNotFound,
 		groups.ErrGroupNotFound, groups.ErrGroupNameTaken, groups.ErrInvalidGroupName, groups.ErrInvalidInviteCode,
 		groups.ErrInviteCodeTaken, groups.ErrSystemGroup,
+		groups.ErrNoActiveLeader, groups.ErrLeaderRequired, groups.ErrLeaderNotMember, groups.ErrLeaderInactive,
 		rbac.ErrUnknownGrantTarget,
 		dbmanager.ErrTargetNotFound, dbmanager.ErrTargetNameTaken,
 	}
