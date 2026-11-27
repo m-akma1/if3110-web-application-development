@@ -354,7 +354,7 @@ The Go server answers every non-API `GET` with `index.html`; React Router render
 | `POST /api/migration/{id}`, `DELETE /api/migration/{id}` | View & Edit | Saves or deletes a draft |
 | `POST /api/migration/{id}/dry-run` | View & Edit | Dry-runs a draft |
 | `POST /api/migration/{id}/submit-review` | View & Edit | Sends a draft to group leaders for review |
-| `GET /api/migration/pending-reviews` | Group Leader | Lists migrations waiting for review |
+| `GET /api/migration/pending-reviews` | Group Leader | Lists migrations (`reviews`) and batch action requests (`batch_requests`) waiting for review |
 | `POST /api/migration/{id}/approve`, `POST /api/migration/{id}/reject` | Group Leader | Approves or rejects for the leader's group |
 | `POST /api/migration/{id}/execute` | View & Edit | Queues an approved migration: `202` with the job, `409` when it is already queued |
 | `POST /api/migration/{id}/rollback` | View & Edit | Rollback of the latest active migration: a request for approval (`200`), or a queued job (`202`) when no group needs to approve |
@@ -363,8 +363,9 @@ The Go server answers every non-API `GET` with `index.html`; React Router render
 | `GET /api/migration/{id}/executions` | View Only | Every execution attempt of the migration, oldest first |
 | `GET /api/jobs/{id}` | View Only | One job, for polling after a `202` |
 | `GET /api/migration/{id}/batches` | View Only | Committed batches of a batch migration (`UP`, and `DOWN` for undone ones) |
-| `POST /api/migration/{id}/resume` | View & Edit | Continues a `PARTIAL` batch migration from its checkpoint (`202`) |
-| `POST /api/migration/{id}/abort` | View & Edit | `{"rollback": true}` undoes the committed batches (`202`); `{"rollback": false}` marks it `ABORTED` (`200`) |
+| `POST /api/migration/{id}/resume` | View & Edit | Resumes a `PARTIAL` batch migration from its checkpoint: a request for approval (`200`, `requires_approval`), or a queued job (`202`) once the request is approved or when no group needs to approve. `409` while a request waits |
+| `POST /api/migration/{id}/abort` | View & Edit | `{"rollback": true}` undoes the committed batches (job, `202`); `{"rollback": false}` marks it `ABORTED` (`200`). Same approval flow as resume |
+| `POST /api/batch-requests/{id}/approve`, `POST /api/batch-requests/{id}/reject` | Group Leader | Approves or rejects a batch action request for the leader's group (`{"note"}` / `{"reason"}`, reason required) |
 | `POST /api/migration/{id}/duplicate` | View & Edit | Copies a migration into a new draft |
 | `GET /api/admin/overview` and `/api/admin/*` | Platform Admin | Admin console data and actions |
 
@@ -419,7 +420,7 @@ Database pages and API calls take the selected database as `?db_id=`.
 The admin console (`/admin`) is only available to Platform Admins and has four tabs:
 
 - **Users**: create users (with role and groups), change roles, deactivate or reactivate accounts, and reset passwords. An admin cannot demote or deactivate their own account.
-- **Groups**: create groups, edit name and description, add and remove members, delete groups, and set each group's access level per database (`NONE`, `VIEW_ONLY`, `VIEW_EDIT`). Deleting a group also removes its memberships, grants and invite codes.
+- **Groups**: create groups, edit name and description, add and remove members, choose each group's **leader** (Public included), delete groups, and set each group's access level per database (`NONE`, `VIEW_ONLY`, `VIEW_EDIT`). A group needs an active leader before it can get access to a database (see [Review and Approval](#review-and-approval)); a group that has access but lost its leader is flagged in red. Deleting a group also removes its memberships, grants and invite codes.
 - **Databases**: register target PostgreSQL databases (display name, host, port, database name, username, password, SSL mode `disable`/`require`/`verify-full`).
   - The connection is tested on save. A target that fails the test is still saved with status `ERROR` and the reason, so the admin can fix it.
   - Editing with an empty password keeps the stored one. **Test connection** reconnects and updates the status.
@@ -430,6 +431,7 @@ The admin console (`/admin`) is only available to Platform Admins and has four t
 #### Access Management
 
 - **Public** is a built-in system group. Every user joins it automatically when the account is created, and cannot leave it. Public cannot be renamed or deleted, and it cannot have invite codes. It has no database access unless an admin grants it.
+- Public's leader is the **first account in `BOOTSTRAP_ADMINS`**, set at startup whenever Public has no active leader. If that account does not exist or is deactivated, the earliest active Platform Admin leads Public. An admin can choose any active user instead.
 - Users join other groups through an admin, or by signing up with an invite code.
 - On first start, the accounts in `BOOTSTRAP_ADMINS` are created if there is no active Platform Admin. If there is none and the variable is empty, the app refuses to start. Existing accounts are never overwritten or promoted.
 
@@ -466,8 +468,20 @@ A migration is a named SQL script (SQL Up, and SQL Down for rollback) for one ta
   - Executions on the same database run one at a time, in the order they were queued; different databases run in parallel (see **Asynchronous Execution**).
   - A successful run gets the next **version number** of its database (1, 2, 3, ...). A failed run is kept in the history without a version, with the error message and the line, column and statement where it failed.
   - Session settings changed by a committed script (`SET search_path`, `SET ROLE`, ...) are reset before the connection goes back to the pool.
-- **Rollback and forward**: rollback runs the SQL Down of the **latest active** migration only (LIFO); forward re-applies the earliest rolled-back migration as a new run with a new version (linear). Irreversible migrations cannot be rolled back. When groups have access to the database, both are requests that need the same leader approvals as a migration.
+- **Rollback and forward**: rollback runs the SQL Down of the **latest active** migration only (LIFO); forward re-applies the earliest rolled-back migration as a new run with a new version (linear). Irreversible migrations cannot be rolled back. When groups have access to the database, both are requests that need the same leader approvals as a migration (see below).
 - **History**: every run with version, status, executor, time and duration. A database trigger blocks any change to an executed migration. The migration page can hide rollback pairs.
+
+#### Review and Approval
+
+Every change to a database must be approved by the **leader of every group that has access to it** (View Only or View & Edit), because every team using the database is affected. This covers migrations, rollbacks, forwards, and the resume and abort actions of batch migrations.
+
+- **Leaders**: every group has one leader, who must be an active member. The first member of a new group becomes its leader; an admin can change it. When a leader leaves the group or is deactivated, the earliest active member takes over (for Public, the earliest active Platform Admin).
+- **No group without a leader**: an admin cannot give database access to a group that has no active leader, and cannot remove the leader of a group that has access. If a group still ends up without one (for example, its last active member was deactivated), the startup log warns `groups.leaderless_with_grants`, the admin console flags the group, and new reviews on its databases are refused with the group's name until a leader is assigned. Nothing gets stuck waiting for an approval nobody can give.
+- **Review**: the author submits a draft (`PENDING_REVIEW`). One approval per group with access is opened. Each leader approves or rejects (a reason is required) for their group. When every group approved, the migration is `APPROVED` and an editor can execute it; one rejection makes it `REJECTED`. When no group has access, a submitted draft is approved at once.
+- **Rollback and forward** create a request (a rollback or forward draft with the original, unchangeable scripts) that goes through the same review.
+- **Batch actions**: resume, abort with rollback, and mark as stopped of a `PARTIAL` batch migration each open a **batch action request** with one approval per group. The monitor on the detail page shows the request and its approvals; leaders approve it there or on **Persetujuan Migrasi** (`/migration/reviews`). Once it is approved, an editor runs it with the same button. One request per migration can be open at a time; a rejected request is final and a new one can be made. An approved request that was not run is cancelled when a request for another action replaces it.
+- **Fail closed**: if the groups with access cannot be read (for example, the platform database is unavailable), nothing is executed.
+- Platform Admins see every pending review but approve only for groups they lead.
 
 #### Asynchronous Execution
 
@@ -495,7 +509,8 @@ A migration can run in **batch mode** (*Mode Eksekusi → Per-batch* in the edit
 - **Checkpoint in the same transaction**: each batch writes its checkpoint (batch number, key range, rows changed) to `_dbplatform_batch_checkpoints` **on the target, in the same transaction as its data change**, then commits. A batch is either committed with its checkpoint or not at all. The platform keeps a copy in `migration_batches` and re-reads the target's checkpoints at the start of every run, so a batch that committed just before a crash is never run again. The checkpoint table is hidden from the Database Viewer.
 - **The database's lock is held for the whole run**, across all batches, and the worker's heartbeat keeps the lease. Every batch has its own lock and statement timeouts.
 - **When a batch fails** (an SQL error), its transaction is rolled back and the run stops: the migration is **`PARTIAL`** (or `FAILED` if no batch was ever committed). The monitor on the detail page shows committed/total batches, the checkpoint cursor and the error. A `PARTIAL` migration **holds every other migration of its database** until it is finished or aborted. Then:
-  - **Resume** (*Lanjutkan dari Checkpoint*) runs the remaining batches, starting after the last checkpoint; no new approval is needed;
+  Each of these actions first needs the approval of every group's leader (see [Review and Approval](#review-and-approval)):
+  - **Resume** (*Lanjutkan dari Checkpoint*) runs the remaining batches, starting after the last checkpoint;
   - **Abort with rollback** (*Batalkan & Rollback Batch*) runs SQL Down over the same key ranges, **newest batch first**. When every batch is undone the migration is `ABORTED`; if it stops early it reads as **`PARTIALLY_REVERTED`** and can only be aborted again;
   - **Mark as stopped** (*Tandai Dihentikan*) sets `ABORTED` and leaves the committed batches in place.
 - **Restarts are safe**: on `SIGTERM` a batch run stops at the next batch boundary and its job goes back to the queue without using an attempt; when a worker dies mid-run, the job is put back in the queue instead of becoming `UNCERTAIN`. In both cases the next run continues after the last checkpoint.
@@ -522,11 +537,11 @@ The single statement is already close to the default `MIGRATION_STATEMENT_TIMEOU
 
   | Event | Written when |
   |---|---|
-  | `audit.submit`, `audit.approve`, `audit.reject` | A draft is sent for review, approved or rejected |
-  | `audit.enqueue` | Execute, rollback or forward is requested (`request`, plus `job_id` or `requires_approval`) |
+  | `audit.submit`, `audit.approve`, `audit.reject` | A draft is sent for review, approved or rejected; `audit.approve`/`audit.reject` with `batch_request_id` for a batch action request |
+  | `audit.enqueue` | Execute, rollback, forward, resume or abort is requested (`request`, plus `job_id` or `requires_approval`; `batch_request_id` for batch actions) |
   | `audit.grant` | A group's access level on a database changes (`group_id`, `database_id`, `access_level`) |
   | `audit.execute`, `audit.rollback`, `audit.forward` | An execution is recorded (`execution_id`, `attempt`, `sql_sent`, `reverts_execution_id`); outcome `partial` for a batch run that stopped |
-  | `audit.abort` | A `PARTIAL` batch migration is marked `ABORTED` without rollback (resume and abort with rollback are `audit.enqueue` with `request: resume / abort`) |
+  | `audit.abort` | A `PARTIAL` batch migration is marked `ABORTED` without rollback (resume and abort with rollback are `audit.enqueue` with `request: resume / abort`; a mark-stopped request waiting for approval is `audit.enqueue` with `request: abort_mark`) |
 
   Audit events never contain SQL; it is in the execution history, found through `execution_id`.
 
