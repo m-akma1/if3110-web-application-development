@@ -66,6 +66,11 @@ type apiLoginRequest struct {
 func (s *Server) handleAPIAuthLogin(w http.ResponseWriter, r *http.Request) {
 	token, _ := s.ensureCSRFToken(w, r)
 
+	if passwordInURL(r) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Password dilarang dikirim melalui URL", "csrf_token": token})
+		return
+	}
+
 	var req apiLoginRequest
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		if err := readJSONBody(r, &req); err != nil {
@@ -73,8 +78,8 @@ func (s *Server) handleAPIAuthLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		req.Identifier = r.FormValue("identifier")
-		req.Password = r.FormValue("password")
+		req.Identifier = r.PostFormValue("identifier")
+		req.Password = r.PostFormValue("password")
 	}
 
 	req.Identifier = strings.TrimSpace(req.Identifier)
@@ -139,6 +144,11 @@ type apiSignupRequest struct {
 func (s *Server) handleAPIAuthSignup(w http.ResponseWriter, r *http.Request) {
 	token, _ := s.ensureCSRFToken(w, r)
 
+	if passwordInURL(r) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Password dilarang dikirim melalui URL", "csrf_token": token})
+		return
+	}
+
 	var req apiSignupRequest
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
 		if err := readJSONBody(r, &req); err != nil {
@@ -146,10 +156,10 @@ func (s *Server) handleAPIAuthSignup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		req.Username = r.FormValue("username")
-		req.Email = r.FormValue("email")
-		req.Password = r.FormValue("password")
-		req.InviteCode = r.FormValue("invite_code")
+		req.Username = r.PostFormValue("username")
+		req.Email = r.PostFormValue("email")
+		req.Password = r.PostFormValue("password")
+		req.InviteCode = r.PostFormValue("invite_code")
 	}
 
 	username := authn.NormalizeUsername(req.Username)
@@ -251,4 +261,11 @@ func (s *Server) handleAPIAuthLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	clearSessionCookie(w)
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// passwordInURL reports a password sent in the query string, where it would end up in browser
+// history, proxy logs and Referer headers. Login and signup refuse such requests; the form
+// branches read the body only (PostFormValue), so a query-string value is never used either.
+func passwordInURL(r *http.Request) bool {
+	return r.URL.Query().Has("password")
 }

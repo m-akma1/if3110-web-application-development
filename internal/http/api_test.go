@@ -3,6 +3,7 @@ package http_test
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"testing"
 )
 
@@ -69,6 +70,30 @@ func TestAPI_AuthFlow(t *testing.T) {
 	rec = c.get("/api/auth/me")
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("GET /api/auth/me after logout: status %d, want 401", rec.Code)
+	}
+}
+
+// A password in the query string is refused, even next to a valid body, and never used.
+func TestAPI_AuthRefusesPasswordInURL(t *testing.T) {
+	srv := newTestServer(t, nil)
+	c := newClient(t, srv)
+
+	rec := c.postJSON("/api/auth/login?password=PasswordBob123!", `{"identifier":"bob","password":"PasswordBob123!"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("login with ?password=: status %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	rec = c.postJSON("/api/auth/signup?password=x", `{"username":"urlpass","password":"PasswordUrl123!"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("signup with ?password=: status %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if rec := c.get("/api/auth/me"); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no session may be created: /api/auth/me status %d", rec.Code)
+	}
+
+	// The form branch reads the body only: a password in the URL alone is not a password.
+	rec = c.post("/api/auth/login?identifier=bob", url.Values{"password": {"PasswordBob123!"}})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("form login with identifier only in the URL: status %d, want 422: %s", rec.Code, rec.Body.String())
 	}
 }
 
