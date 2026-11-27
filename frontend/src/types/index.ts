@@ -94,6 +94,27 @@ export interface MigrationApproval {
   note?: string
 }
 
+export type BatchAction = 'RESUME' | 'ABORT_ROLLBACK' | 'ABORT_MARK'
+
+// A request for the group leaders to approve a resume/abort of a PARTIAL batch migration.
+export interface BatchRequestView {
+  id: string
+  migration_id: string
+  migration_name: string
+  database_id: string
+  database_name: string
+  action: BatchAction | string
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'DONE' | 'CANCELLED' | string
+  requested_by_name: string
+  rejection_reason?: string
+  job_id?: string
+  created_at: string
+  decided_at?: string
+  done_at?: string
+  approvals: MigrationApproval[]
+  can_approve?: boolean
+}
+
 export interface MigrationView {
   id: string
   database_id: string
@@ -125,6 +146,7 @@ export interface MigrationView {
   can_approve?: boolean
   rejection_reason?: string
   approvals?: MigrationApproval[]
+  batch_request?: BatchRequestView
   created_by_name: string
   created_at: string
   updated_at: string
@@ -193,6 +215,8 @@ export interface GroupItem {
   is_system: boolean
   leader_id?: string
   leader_name?: string
+  // The group has database access but no active leader: changes cannot be approved.
+  needs_leader?: boolean
   member_count: number
   members: MemberItem[]
   grants: Record<string, string>

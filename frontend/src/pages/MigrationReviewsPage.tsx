@@ -1,12 +1,17 @@
 import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
-import { MigrationView } from '../types'
+import { BatchRequestView, MigrationView } from '../types'
 import { useAuth } from '../context/AuthContext'
+import { BatchRequestApprovals, batchActionLabels } from '../components/BatchProgressMonitor'
+
+// What the approve/reject modal acts on: a migration review or a batch action request.
+type ReviewTarget = { kind: 'migration' | 'batch'; id: string; name: string }
 
 export const MigrationReviewsPage: React.FC = () => {
   const { user } = useAuth()
   const [reviews, setReviews] = useState<MigrationView[]>([])
+  const [batchRequests, setBatchRequests] = useState<BatchRequestView[]>([])
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<boolean>(false)
@@ -14,7 +19,7 @@ export const MigrationReviewsPage: React.FC = () => {
   const [expandedSQL, setExpandedSQL] = useState<Record<string, boolean>>({})
 
   // Modal State for Approve/Reject
-  const [selectedReview, setSelectedReview] = useState<MigrationView | null>(null)
+  const [selectedReview, setSelectedReview] = useState<ReviewTarget | null>(null)
   const [modalMode, setModalMode] = useState<'APPROVE' | 'REJECT' | null>(null)
   const [modalInput, setModalInput] = useState<string>('')
 
@@ -24,6 +29,7 @@ export const MigrationReviewsPage: React.FC = () => {
     try {
       const res = await api.listPendingReviews()
       setReviews(res.reviews || [])
+      setBatchRequests(res.batch_requests || [])
     } catch (err: any) {
       setError(err.data?.error || err.message || 'Gagal memuat daftar review migrasi')
     } finally {
@@ -39,17 +45,19 @@ export const MigrationReviewsPage: React.FC = () => {
     setExpandedSQL((prev) => ({ ...prev, [id]: !prev[id] }))
   }
 
-  const openApproveModal = (m: MigrationView) => {
-    setSelectedReview(m)
-    setModalMode('APPROVE')
+  const openModal = (target: ReviewTarget, mode: 'APPROVE' | 'REJECT') => {
+    setSelectedReview(target)
+    setModalMode(mode)
     setModalInput('')
   }
-
-  const openRejectModal = (m: MigrationView) => {
-    setSelectedReview(m)
-    setModalMode('REJECT')
-    setModalInput('')
-  }
+  const openApproveModal = (m: MigrationView) => openModal({ kind: 'migration', id: m.id, name: m.name }, 'APPROVE')
+  const openRejectModal = (m: MigrationView) => openModal({ kind: 'migration', id: m.id, name: m.name }, 'REJECT')
+  const batchTarget = (r: BatchRequestView): ReviewTarget => ({
+    kind: 'batch',
+    id: r.id,
+    name: `${batchActionLabels[r.action] || r.action}: ${r.migration_name}`,
+  })
+  const pendingCount = reviews.length + batchRequests.length
 
   const closeModal = () => {
     setSelectedReview(null)
@@ -69,7 +77,17 @@ export const MigrationReviewsPage: React.FC = () => {
     setActionLoading(true)
     setFeedback(null)
     try {
-      if (modalMode === 'APPROVE') {
+      if (selectedReview.kind === 'batch') {
+        if (modalMode === 'APPROVE') {
+          await api.approveBatchRequest(selectedReview.id, modalInput.trim() || undefined)
+        } else {
+          await api.rejectBatchRequest(selectedReview.id, modalInput.trim())
+        }
+        setFeedback({
+          success: true,
+          message: `Pengajuan "${selectedReview.name}" berhasil ${modalMode === 'APPROVE' ? 'disetujui' : 'ditolak'}.`,
+        })
+      } else if (modalMode === 'APPROVE') {
         await api.approveMigration(selectedReview.id, modalInput.trim() || undefined)
         setFeedback({
           success: true,
@@ -102,7 +120,7 @@ export const MigrationReviewsPage: React.FC = () => {
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold text-zinc-100 tracking-tight">Persetujuan Migrasi</h1>
             <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30">
-              {reviews.length} Menunggu
+              {pendingCount} Menunggu
             </span>
           </div>
           <p className="text-zinc-400 text-xs mt-1">
@@ -142,11 +160,82 @@ export const MigrationReviewsPage: React.FC = () => {
       )}
 
       {/* Content */}
-      {loading && reviews.length === 0 ? (
+      {batchRequests.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Aksi Migrasi Per-Batch</h2>
+          {batchRequests.map((r) => {
+            const approved = (r.approvals || []).filter((a) => a.status === 'APPROVED').length
+            return (
+              <div
+                key={r.id}
+                className="bg-app-surface border border-app-border hover:border-app-border-strong rounded-2xl p-5 space-y-3 transition"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold bg-brand-primary/10 text-brand-primary border border-brand-primary/20">
+                        {r.database_name || 'Database Target'}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30">
+                        {batchActionLabels[r.action] || r.action}
+                      </span>
+                    </div>
+                    <h3 className="text-base font-bold text-zinc-100 tracking-tight break-words">{r.migration_name}</h3>
+                    <div className="text-[11px] text-zinc-400 flex flex-wrap items-center gap-3">
+                      <span>
+                        Diajukan oleh: <strong className="text-zinc-300 font-medium">{r.requested_by_name}</strong>
+                      </span>
+                      <span className="font-mono">{new Date(r.created_at).toLocaleString()}</span>
+                      <span>
+                        {approved}/{(r.approvals || []).length} disetujui
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    {r.can_approve ? (
+                      <>
+                        <button
+                          type="button"
+                          disabled={actionLoading}
+                          onClick={() => openModal(batchTarget(r), 'APPROVE')}
+                          className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-sem-success text-app-bg hover:opacity-90 transition cursor-pointer disabled:opacity-50"
+                        >
+                          Setujui
+                        </button>
+                        <button
+                          type="button"
+                          disabled={actionLoading}
+                          onClick={() => openModal(batchTarget(r), 'REJECT')}
+                          className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-sem-danger/15 text-sem-danger hover:bg-sem-danger/25 border border-sem-danger/30 transition cursor-pointer disabled:opacity-50"
+                        >
+                          Tolak
+                        </button>
+                      </>
+                    ) : (
+                      <span className="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-app-hover text-zinc-400 border border-app-border">
+                        {user?.is_platform_admin ? 'Sebagai Admin (Hanya Melihat)' : 'Menunggu review grup lain'}
+                      </span>
+                    )}
+                    <Link
+                      to={`/migration/${r.migration_id}`}
+                      className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-app-hover hover:bg-app-active text-zinc-300 border border-app-border transition"
+                    >
+                      Buka Detail
+                    </Link>
+                  </div>
+                </div>
+                <BatchRequestApprovals request={r} />
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {loading && pendingCount === 0 ? (
         <div className="p-12 text-center text-xs text-zinc-400 bg-app-surface rounded-2xl border border-app-border">
           Memuat antrean review migrasi...
         </div>
-      ) : reviews.length === 0 ? (
+      ) : pendingCount === 0 ? (
         <div className="p-12 text-center bg-app-surface rounded-2xl border border-app-border space-y-3">
           <div className="w-12 h-12 rounded-2xl bg-app-hover text-zinc-400 flex items-center justify-center mx-auto text-xl">
             <svg className="w-6 h-6 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -318,8 +407,8 @@ export const MigrationReviewsPage: React.FC = () => {
               </div>
               <p className="text-zinc-400 text-xs mt-1">
                 {modalMode === 'APPROVE'
-                  ? `Konfirmasi persetujuan untuk migrasi "${selectedReview.name}".`
-                  : `Berikan alasan penolakan untuk migrasi "${selectedReview.name}".`}
+                  ? `Konfirmasi persetujuan untuk ${selectedReview.kind === 'batch' ? 'pengajuan' : 'migrasi'} "${selectedReview.name}".`
+                  : `Berikan alasan penolakan untuk ${selectedReview.kind === 'batch' ? 'pengajuan' : 'migrasi'} "${selectedReview.name}".`}
               </p>
             </div>
 

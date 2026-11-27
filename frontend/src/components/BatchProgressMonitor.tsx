@@ -1,7 +1,38 @@
 import React, { useState } from 'react'
-import { MigrationView } from '../types'
-import { api } from '../api/client'
+import { BatchAction, BatchRequestView, MigrationView } from '../types'
+import { api, BatchActionResponse } from '../api/client'
 import { features } from '../config/features'
+
+export const batchActionLabels: Record<string, string> = {
+  RESUME: 'Lanjutkan dari Checkpoint',
+  ABORT_ROLLBACK: 'Batalkan & Rollback Batch',
+  ABORT_MARK: 'Tandai Dihentikan',
+}
+
+const approvalBadge = (status: string) =>
+  status === 'APPROVED'
+    ? 'bg-sem-success/10 border-sem-success/30 text-sem-success'
+    : status === 'REJECTED'
+    ? 'bg-sem-danger/10 border-sem-danger/30 text-sem-danger'
+    : 'bg-sem-warning/10 border-sem-warning/30 text-sem-warning'
+
+const approvalText = (status: string) =>
+  status === 'APPROVED' ? 'Disetujui' : status === 'REJECTED' ? 'Ditolak' : 'Menunggu'
+
+// The approvals of a batch action request, one badge per group.
+export const BatchRequestApprovals: React.FC<{ request: BatchRequestView }> = ({ request }) => (
+  <div className="flex flex-wrap gap-2">
+    {(request.approvals || []).map((a) => (
+      <span
+        key={a.id || a.group_id}
+        className={`px-2.5 py-1 rounded-lg text-[11px] border inline-flex items-center gap-1.5 ${approvalBadge(a.status)}`}
+      >
+        <span className="font-semibold">{a.group_name}</span>
+        <span className="text-[10px] opacity-75">({approvalText(a.status)})</span>
+      </span>
+    ))}
+  </div>
+)
 
 
 interface BatchProgressMonitorProps {
@@ -31,6 +62,42 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
   const isFailed = migration.status === 'FAILED'
   const isAborted = migration.status === 'ABORTED'
 
+  // Resume/abort need the approval of every group with access (when any group has access).
+  const request = isPartial ? migration.batch_request : undefined
+  const pendingRequest = request?.status === 'PENDING' ? request : undefined
+  const approvedAction = request?.status === 'APPROVED' ? request.action : undefined
+  const rejectedRequest = request?.status === 'REJECTED' ? request : undefined
+
+  // Shows what happened: a request sent to the leaders, or the action that ran.
+  const report = (res: BatchActionResponse, ranMessage: string) => {
+    setActionSuccess(res.requires_approval ? res.message || 'Pengajuan dikirim ke Group Leader.' : ranMessage)
+  }
+
+  const reviewRequest = async (approve: boolean) => {
+    if (!request) return
+    let reason = ''
+    if (!approve) {
+      reason = (window.prompt('Alasan penolakan (wajib):') || '').trim()
+      if (!reason) return
+    }
+    setActionLoading(true)
+    setActionError(null)
+    setActionSuccess(null)
+    try {
+      const res = approve ? await api.approveBatchRequest(request.id) : await api.rejectBatchRequest(request.id, reason)
+      setActionSuccess(res.message)
+      if (onUpdated) onUpdated()
+    } catch (err: any) {
+      setActionError(err.data?.error || err.message || 'Gagal memproses persetujuan')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // Label of an action button: running an approved request reads differently.
+  const actionLabel = (action: BatchAction, label: string) =>
+    approvedAction === action ? `Jalankan: ${label} (disetujui)` : label
+
   const handleResume = async () => {
     const cursor = migration.checkpoint_cursor ?? committed
     const confirmed = window.confirm(
@@ -42,8 +109,8 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
     setActionError(null)
     setActionSuccess(null)
     try {
-      await api.resumeMigration(migration.id)
-      setActionSuccess('Perintah resume berhasil dikirim. Melanjutkan eksekusi batch...')
+      const res = await api.resumeMigration(migration.id)
+      report(res, 'Perintah resume berhasil dikirim. Melanjutkan eksekusi batch...')
       if (onUpdated) onUpdated()
     } catch (err: any) {
       setActionError(err.data?.error || err.message || 'Gagal melanjutkan migrasi dari checkpoint')
@@ -63,11 +130,10 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
     setActionError(null)
     setActionSuccess(null)
     try {
-      await api.abortPartialMigration(migration.id, { rollback: withRollback })
-      setActionSuccess(
-        withRollback
-          ? 'Perintah pembatalan dan rollback berhasil dikirim.'
-          : 'Migrasi berhasil ditandai sebagai dihentikan.'
+      const res = await api.abortPartialMigration(migration.id, { rollback: withRollback })
+      report(
+        res,
+        withRollback ? 'Perintah pembatalan dan rollback berhasil dikirim.' : 'Migrasi berhasil ditandai sebagai dihentikan.'
       )
       if (onUpdated) onUpdated()
     } catch (err: any) {
@@ -239,6 +305,8 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
           {features.batchActions ? (
             <div className="text-xs text-zinc-400">
               Anda dapat melanjutkan eksekusi dari checkpoint terakhir atau membatalkan batch yang telah tersimpan.
+              Jika ada group yang punya akses ke database ini, aksi tersebut perlu disetujui Group Leader setiap
+              group terlebih dahulu.
             </div>
 
           ): (
@@ -248,7 +316,61 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
             )
           }
 
-          {canEdit && features.batchActions && (
+          {request && (pendingRequest || approvedAction || rejectedRequest) && (
+            <div className="p-3 rounded-lg bg-app-bg/60 border border-app-border space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs text-zinc-300">
+                  Pengajuan <strong>{batchActionLabels[request.action] || request.action}</strong> oleh{' '}
+                  {request.requested_by_name}:{' '}
+                  <strong
+                    className={
+                      pendingRequest ? 'text-sem-warning' : approvedAction ? 'text-sem-success' : 'text-sem-danger'
+                    }
+                  >
+                    {pendingRequest
+                      ? 'menunggu persetujuan Group Leader'
+                      : approvedAction
+                      ? 'disetujui, siap dijalankan'
+                      : 'ditolak'}
+                  </strong>
+                </div>
+                {pendingRequest?.can_approve && (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={actionLoading}
+                      onClick={() => reviewRequest(true)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-sem-success text-app-bg hover:opacity-90 transition cursor-pointer disabled:opacity-50"
+                    >
+                      Setujui
+                    </button>
+                    <button
+                      type="button"
+                      disabled={actionLoading}
+                      onClick={() => reviewRequest(false)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-sem-danger/15 text-sem-danger hover:bg-sem-danger/25 border border-sem-danger/30 transition cursor-pointer disabled:opacity-50"
+                    >
+                      Tolak
+                    </button>
+                  </div>
+                )}
+              </div>
+              <BatchRequestApprovals request={request} />
+              {rejectedRequest?.rejection_reason && (
+                <div className="text-[11px] text-zinc-400">
+                  Alasan penolakan: <span className="text-sem-danger">{rejectedRequest.rejection_reason}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {canEdit && features.batchActions && pendingRequest && (
+            <div className="text-xs text-zinc-500">
+              Aksi lain dapat diajukan setelah pengajuan ini disetujui atau ditolak.
+            </div>
+          )}
+
+          {canEdit && features.batchActions && !pendingRequest && (
             <div className="flex flex-wrap items-center gap-2 pt-1">
               {!isReverting && (
                 <button
@@ -257,7 +379,7 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
                   onClick={handleResume}
                   className="px-4 py-2 rounded-lg text-xs font-bold bg-brand-primary text-app-bg hover:bg-brand-primary-hover transition cursor-pointer disabled:opacity-50 shadow-md"
                 >
-                  {actionLoading ? 'Memproses...' : 'Lanjutkan dari Checkpoint'}
+                  {actionLoading ? 'Memproses...' : actionLabel('RESUME', 'Lanjutkan dari Checkpoint')}
                 </button>
               )}
 
@@ -267,7 +389,7 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
                 onClick={() => handleAbort(true)}
                 className="px-3.5 py-2 rounded-lg text-xs font-bold bg-sem-danger/15 text-sem-danger hover:bg-sem-danger/25 border border-sem-danger/30 transition cursor-pointer disabled:opacity-50"
               >
-                Batalkan & Rollback Batch
+                {actionLabel('ABORT_ROLLBACK', 'Batalkan & Rollback Batch')}
               </button>
 
               <button
@@ -276,7 +398,7 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
                 onClick={() => handleAbort(false)}
                 className="px-3.5 py-2 rounded-lg text-xs font-semibold text-zinc-400 hover:text-zinc-200 hover:bg-app-active/40 border border-app-border transition cursor-pointer disabled:opacity-50"
               >
-                Tandai Dihentikan
+                {actionLabel('ABORT_MARK', 'Tandai Dihentikan')}
               </button>
             </div>
 

@@ -258,44 +258,49 @@ export const AdminGroupsTab: React.FC<AdminGroupsTabProps> = ({
                 </div>
               </details>
 
-              {/* Group Leader Selector */}
-              {!g.is_system && (
-                <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-app-input border border-app-border">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
-                      Group Leader:
-                    </span>
-                    {currentLeader ? (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-brand-primary text-app-bg uppercase tracking-wider">
-                        LEADER: {currentLeader.username}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-zinc-500 italic">Belum ada leader</span>
-                    )}
-                  </div>
-
-                  {members.length > 0 && (
-                    <div className="flex items-center gap-1.5">
-                      <select
-                        value={g.leader_id || ''}
-                        onChange={(e) => {
-                          const selectedId = e.target.value
-                          const selectedMember = members.find((m) => m.id === selectedId)
-                          handleSetLeader(g.id, selectedId, selectedMember?.username)
-                        }}
-                        className="text-xs bg-app-card border border-app-border rounded-lg px-2.5 py-1 text-zinc-200 cursor-pointer focus:ring-1 focus:ring-brand-primary"
-                      >
-                        <option value="">{g.leader_id ? 'Pilih / Ganti Leader…' : 'Tetapkan Leader…'}</option>
-                        {members.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.username}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+              {g.needs_leader && (
+                <div className="p-2.5 rounded-xl text-[11px] bg-sem-danger/10 border border-sem-danger/30 text-sem-danger">
+                  Group ini punya akses database tetapi belum punya Group Leader aktif. Perubahan pada database
+                  tersebut tidak dapat disetujui sampai leader ditetapkan.
                 </div>
               )}
+
+              {/* Group Leader Selector (Public too: its leader approves changes when Public has access) */}
+              <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-app-input border border-app-border">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                    Group Leader:
+                  </span>
+                  {currentLeader ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-brand-primary text-app-bg uppercase tracking-wider">
+                      LEADER: {currentLeader.username}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-zinc-500 italic">Belum ada leader</span>
+                  )}
+                </div>
+
+                {members.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={g.leader_id || ''}
+                      onChange={(e) => {
+                        const selectedId = e.target.value
+                        const selectedMember = members.find((m) => m.id === selectedId)
+                        handleSetLeader(g.id, selectedId, selectedMember?.username)
+                      }}
+                      className="text-xs bg-app-card border border-app-border rounded-lg px-2.5 py-1 text-zinc-200 cursor-pointer focus:ring-1 focus:ring-brand-primary"
+                    >
+                      <option value="">{g.leader_id ? 'Pilih / Ganti Leader…' : 'Tetapkan Leader…'}</option>
+                      {members.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.username}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
 
               {/* Anggota Section */}
               <div className="pt-2 border-t border-app-border space-y-2">

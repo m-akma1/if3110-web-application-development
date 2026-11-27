@@ -1,4 +1,12 @@
-import { MigrationExecutionView, MigrationJobView, MigrationView } from '../types'
+import { BatchRequestView, MigrationExecutionView, MigrationJobView, MigrationView } from '../types'
+
+export interface BatchActionResponse {
+  migration: MigrationView
+  batch_request?: BatchRequestView
+  requires_approval?: boolean
+  job?: MigrationJobView
+  message?: string
+}
 
 let csrfToken: string = ''
 
@@ -117,17 +125,23 @@ export const api = {
   duplicateMigration: (id: string) =>
     request(`/api/migration/${encodeURIComponent(id)}/duplicate`, { method: 'POST' }),
   listPendingReviews: () =>
-    request<{ reviews: MigrationView[] }>('/api/migration/pending-reviews'),
+    request<{ reviews: MigrationView[]; batch_requests?: BatchRequestView[] }>('/api/migration/pending-reviews'),
   submitMigrationForReview: (id: string) =>
     request(`/api/migration/${encodeURIComponent(id)}/submit-review`, { method: 'POST' }),
   approveMigration: (id: string, note?: string) =>
     request(`/api/migration/${encodeURIComponent(id)}/approve`, { method: 'POST', body: JSON.stringify({ note }) }),
   rejectMigration: (id: string, reason: string) =>
     request(`/api/migration/${encodeURIComponent(id)}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  // Resume/abort answer 202 with a job when they ran, or 200 with requires_approval when a
+  // request for the group leaders was opened instead.
   resumeMigration: (id: string) =>
-    request(`/api/migration/${encodeURIComponent(id)}/resume`, { method: 'POST' }),
+    request<BatchActionResponse>(`/api/migration/${encodeURIComponent(id)}/resume`, { method: 'POST' }),
   abortPartialMigration: (id: string, data?: { rollback?: boolean }) =>
-    request(`/api/migration/${encodeURIComponent(id)}/abort`, { method: 'POST', body: JSON.stringify(data || {}) }),
+    request<BatchActionResponse>(`/api/migration/${encodeURIComponent(id)}/abort`, { method: 'POST', body: JSON.stringify(data || {}) }),
+  approveBatchRequest: (id: string, note?: string) =>
+    request<{ batch_request: BatchRequestView; message: string }>(`/api/batch-requests/${encodeURIComponent(id)}/approve`, { method: 'POST', body: JSON.stringify({ note }) }),
+  rejectBatchRequest: (id: string, reason: string) =>
+    request<{ batch_request: BatchRequestView; message: string }>(`/api/batch-requests/${encodeURIComponent(id)}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
   getMigrationStatus: (id: string) =>
     request<{ migration: MigrationView; job: MigrationJobView | null }>(`/api/migration/${encodeURIComponent(id)}/status`),
   getJob: (id: string) =>
