@@ -5,10 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 	"unicode/utf8"
 
+	"dbplatform/internal/tracing"
 	"github.com/jackc/pgx/v5/pgconn"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // MaxQueryLogLen bounds the SQL text written to one log record
@@ -58,14 +63,77 @@ func (q SQLLog) attrs() []any {
 	return attrs
 }
 
-// SQLStart logs sql.start and returns the start time for sqlResult
-func SQLStart(ctx context.Context, l *slog.Logger, q SQLLog) time.Time {
+// StartSQL starts one SQL execution: it opens a span named "sql <kind>" (a child of the span
+// in ctx) and logs sql.start inside it. Run the statement with the returned context, then call
+// end with the row count (-1 when unknown) and the error: it logs sql.result and ends the span.
+func StartSQL(ctx context.Context, l *slog.Logger, q SQLLog) (context.Context, func(rows int64, err error)) {
+	ctx, span := tracing.Tracer().Start(ctx, "sql "+q.Kind,
+		trace.WithSpanKind(trace.SpanKindClient), trace.WithAttributes(q.spanAttrs()...))
 	l.InfoContext(ctx, "sql.start", q.attrs()...)
-	return time.Now()
+	start := time.Now()
+	return ctx, func(rows int64, err error) {
+		sqlResult(ctx, l, q, start, rows, err)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			if code := SQLState(err); code != "" {
+				span.SetAttributes(attribute.String("db.response.status_code", code))
+			}
+		} else if rows >= 0 {
+			span.SetAttributes(attribute.Int64("db.response.returned_rows", rows))
+		}
+		span.End()
+	}
 }
 
-// SQLResult log sql.result. rows < 0 means the row count is unknown
-func SQLResult(ctx context.Context, l *slog.Logger, q SQLLog, start time.Time, rows int64, err error) {
+// spanAttrs describes the statement on its span. Parameter values are left out, as in the log.
+func (q SQLLog) spanAttrs() []attribute.KeyValue {
+	attrs := []attribute.KeyValue{
+		attribute.String("db.system", "postgresql"),
+		attribute.String("db.operation", operation(q.Query)),
+		attribute.String("db.statement", truncate(q.Query)),
+		attribute.String("sql_kind", q.Kind),
+		attribute.String("database_id", q.DatabaseID),
+	}
+	for _, a := range q.Extra {
+		attrs = append(attrs, attribute.String(a.Key, a.Value.String()))
+	}
+	return attrs
+}
+
+// operation is the first keyword of the statement (SELECT, UPDATE, ...), after leading
+// whitespace, comments and parentheses.
+func operation(query string) string {
+	s := query
+	for {
+		s = strings.TrimLeft(s, " \t\r\n(")
+		switch {
+		case strings.HasPrefix(s, "--"):
+			if i := strings.IndexByte(s, '\n'); i >= 0 {
+				s = s[i+1:]
+				continue
+			}
+			return ""
+		case strings.HasPrefix(s, "/*"):
+			if i := strings.Index(s, "*/"); i >= 0 {
+				s = s[i+2:]
+				continue
+			}
+			return ""
+		}
+		break
+	}
+	end := strings.IndexFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r == '_')
+	})
+	if end < 0 {
+		end = len(s)
+	}
+	return strings.ToUpper(s[:end])
+}
+
+// sqlResult logs sql.result. rows < 0 means the row count is unknown.
+func sqlResult(ctx context.Context, l *slog.Logger, q SQLLog, start time.Time, rows int64, err error) {
 	attrs := append(q.attrs(), slog.Int64("duration_ms", time.Since(start).Milliseconds()))
 	if err != nil {
 		attrs = append(attrs, slog.String("status", "FAILED"), slog.String("error", err.Error()))

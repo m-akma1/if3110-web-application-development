@@ -1,5 +1,6 @@
 // Package logging builds the platform's structured JSON logger (log/slog) and carries
-// per-request data (correlation ID, actor) through context.Context.
+// per-request data (correlation ID, actor) through context.Context. Records written inside an
+// OpenTelemetry span also get its trace_id and span_id.
 package logging
 
 import (
@@ -8,6 +9,8 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // ParseLevel turns "debug", "info", "warn" or "error" into a slog.Level.
@@ -81,10 +84,14 @@ func SetActor(ctx context.Context, userID string) {
 	}
 }
 
-// contextHandler add correlation_id and actor from the context ot every records
+// contextHandler adds correlation_id and actor from the context, and trace_id/span_id of the
+// current span, to every record.
 type contextHandler struct{ slog.Handler }
 
 func (h *contextHandler) Handle(ctx context.Context, r slog.Record) error {
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		r.AddAttrs(slog.String("trace_id", sc.TraceID().String()), slog.String("span_id", sc.SpanID().String()))
+	}
 	if info := Info(ctx); info != nil {
 		if info.CorrelationID != "" {
 			r.AddAttrs(slog.String("correlation_id", info.CorrelationID))

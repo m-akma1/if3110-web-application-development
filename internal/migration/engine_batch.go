@@ -8,7 +8,10 @@ import (
 	"log/slog"
 	"time"
 
+	"dbplatform/internal/logging"
 	"github.com/jackc/pgx/v5/pgconn"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Batch directions: UP runs the migration's script, DOWN runs its SQL Down over the same key
@@ -115,10 +118,10 @@ func (e *Engine) executeBatch(ctx context.Context, migrationID, executorID, dir 
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := e.ensureCheckpointTable(runCtx, pool); err != nil {
+	if err := e.ensureCheckpointTable(runCtx, pool, m.DatabaseID); err != nil {
 		return nil, nil, err
 	}
-	if err := e.syncCheckpoints(runCtx, pool, lockConn, m.ID); err != nil {
+	if err := e.syncCheckpoints(runCtx, pool, lockConn, m.DatabaseID, m.ID); err != nil {
 		return nil, nil, err
 	}
 	batches, err := listBatches(runCtx, lockConn, m.ID)
@@ -271,7 +274,23 @@ func batchScript(m *Migration, dir string) (string, ExecKind, error) {
 
 // runBatch runs one batch in its own transaction on the target: find the key range (UP), run
 // the statement over it, write the checkpoint, commit. done is true when UP has no keys left.
+// The batch is one migration.batch span; each of its statements is a child "sql <kind>" span.
 func (e *Engine) runBatch(ctx context.Context, pool *sql.DB, plan *BatchPlan, m *Migration, b *Batch) (done bool, err error) {
+	ctx, span := startSpan(ctx, spanBatch, trace.SpanKindInternal,
+		attribute.String("migration_id", m.ID), attribute.String("database_id", m.DatabaseID),
+		attribute.String("direction", b.Direction), attribute.Int("batch_no", b.No))
+	defer func() {
+		span.SetAttributes(attribute.Int64("rows", b.Rows), attribute.Bool("done", done))
+		if b.From != nil {
+			span.SetAttributes(attribute.Int64("cursor_from", *b.From))
+		}
+		if b.To != 0 {
+			span.SetAttributes(attribute.Int64("cursor_to", b.To))
+		}
+		failSpan(span, err)
+		span.End()
+	}()
+
 	bctx, cancel := context.WithTimeout(ctx, e.runTimeout())
 	defer cancel()
 	conn, tx, err := e.begin(bctx, pool)
@@ -279,39 +298,87 @@ func (e *Engine) runBatch(ctx context.Context, pool *sql.DB, plan *BatchPlan, m 
 		return false, err
 	}
 	defer conn.Close()
-	defer func() { _ = tx.Rollback() }()
+	committed := false
+	defer func() {
+		_ = tx.Rollback()
+		if !committed && !done {
+			span.AddEvent("tx.rollback")
+			e.logger.WarnContext(ctx, "tx.rollback", e.batchTxAttrs(m, b, slog.String("error", errString(err)))...)
+		}
+	}()
 
 	from := nullInt(b.From)
 	if b.Direction == DirUp {
 		var count int64
-		err := tx.QueryRowContext(bctx, plan.Bounds, from, m.BatchSize).Scan(&b.To, &count)
-		if errors.Is(err, sql.ErrNoRows) {
-			return true, nil
-		}
+		err := e.batchSQL(bctx, m, b, "batch_bounds", plan.Bounds, []any{from, m.BatchSize}, func(ctx context.Context) (int64, error) {
+			err := tx.QueryRowContext(ctx, plan.Bounds, from, m.BatchSize).Scan(&b.To, &count)
+			if errors.Is(err, sql.ErrNoRows) {
+				return 0, nil
+			}
+			return count, err
+		})
 		if err != nil {
 			return false, err
+		}
+		if count == 0 {
+			return true, nil
 		}
 	}
 
 	started := time.Now()
-	r, err := tx.ExecContext(bctx, plan.Statement, from, b.To)
+	err = e.batchSQL(bctx, m, b, "migration_batch", plan.Statement, []any{from, b.To}, func(ctx context.Context) (int64, error) {
+		r, err := tx.ExecContext(ctx, plan.Statement, from, b.To)
+		if err != nil {
+			return -1, err
+		}
+		b.Rows, _ = r.RowsAffected()
+		return b.Rows, nil
+	})
 	if err != nil {
 		e.logger.ErrorContext(ctx, "migration.batch_failed", e.batchAttrs(m, b, started, slog.String("error", err.Error()))...)
 		return false, err
 	}
-	b.Rows, _ = r.RowsAffected()
-	if _, err := tx.ExecContext(bctx, `INSERT INTO `+checkpointTable+`
-		(migration_id, direction, batch_no, cursor_from, cursor_to, rows_affected) VALUES ($1, $2, $3, $4, $5, $6)`,
-		m.ID, b.Direction, b.No, from, b.To, b.Rows); err != nil {
+	const insertCheckpoint = `INSERT INTO ` + checkpointTable + `
+		(migration_id, direction, batch_no, cursor_from, cursor_to, rows_affected) VALUES ($1, $2, $3, $4, $5, $6)`
+	params := []any{m.ID, b.Direction, b.No, from, b.To, b.Rows}
+	if err := e.batchSQL(bctx, m, b, "checkpoint", insertCheckpoint, params, func(ctx context.Context) (int64, error) {
+		_, err := tx.ExecContext(ctx, insertCheckpoint, params...)
+		return 1, err
+	}); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
 		// The commit may or may not have happened; the next run reads the checkpoint to know.
 		return false, err
 	}
+	committed = true
 	b.CommittedAt = time.Now()
+	span.AddEvent("tx.commit")
+	e.logger.InfoContext(ctx, "tx.commit", e.batchTxAttrs(m, b)...)
 	e.logger.InfoContext(ctx, "migration.batch", e.batchAttrs(m, b, started)...)
 	return false, nil
+}
+
+// batchSQL runs fn between sql.start and sql.result records (in an "sql <kind>" span) for one
+// statement of batch b on the target.
+func (e *Engine) batchSQL(ctx context.Context, m *Migration, b *Batch, kind, query string, params []any, fn func(ctx context.Context) (int64, error)) error {
+	ctx, end := logging.StartSQL(ctx, e.logger, logging.SQLLog{
+		DatabaseID: m.DatabaseID, Kind: kind, Query: query, Params: params,
+		Extra: []slog.Attr{
+			slog.String("migration_id", m.ID), slog.String("direction", b.Direction), slog.Int("batch_no", b.No),
+		},
+	})
+	rows, err := fn(ctx)
+	end(rows, err)
+	return err
+}
+
+// batchTxAttrs are the attributes of a batch's tx.commit / tx.rollback record.
+func (e *Engine) batchTxAttrs(m *Migration, b *Batch, extra ...any) []any {
+	return append([]any{
+		slog.String("database_id", m.DatabaseID), slog.String("migration_id", m.ID),
+		slog.String("execution_type", "BATCH_"+b.Direction), slog.Int("batch_no", b.No),
+	}, extra...)
 }
 
 func (e *Engine) batchAttrs(m *Migration, b *Batch, started time.Time, extra ...any) []any {
@@ -325,7 +392,7 @@ func (e *Engine) batchAttrs(m *Migration, b *Batch, started time.Time, extra ...
 }
 
 // ensureCheckpointTable creates the checkpoint table on the target if it does not exist.
-func (e *Engine) ensureCheckpointTable(ctx context.Context, pool *sql.DB) error {
+func (e *Engine) ensureCheckpointTable(ctx context.Context, pool *sql.DB, databaseID string) error {
 	bctx, cancel := context.WithTimeout(ctx, e.runTimeout())
 	defer cancel()
 	conn, tx, err := e.begin(bctx, pool)
@@ -334,7 +401,10 @@ func (e *Engine) ensureCheckpointTable(ctx context.Context, pool *sql.DB) error 
 	}
 	defer conn.Close()
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(bctx, checkpointDDL); err != nil {
+	sqlCtx, end := logging.StartSQL(bctx, e.logger, logging.SQLLog{DatabaseID: databaseID, Kind: "checkpoint", Query: checkpointDDL})
+	_, err = tx.ExecContext(sqlCtx, checkpointDDL)
+	end(-1, err)
+	if err != nil {
 		return fmt.Errorf("membuat tabel checkpoint di database target: %w", err)
 	}
 	return tx.Commit()
@@ -343,31 +413,20 @@ func (e *Engine) ensureCheckpointTable(ctx context.Context, pool *sql.DB) error 
 // syncCheckpoints copies target checkpoints that the platform does not have yet: batches that
 // committed right before the process died, before their platform row was written. This is
 // what makes a crash safe: those batches are never run again.
-func (e *Engine) syncCheckpoints(ctx context.Context, pool *sql.DB, q querier, migrationID string) error {
+func (e *Engine) syncCheckpoints(ctx context.Context, pool *sql.DB, q querier, databaseID, migrationID string) error {
 	bctx, cancel := context.WithTimeout(ctx, e.runTimeout())
 	defer cancel()
-	rows, err := pool.QueryContext(bctx, `
+	const readCheckpoints = `
 		SELECT direction, batch_no, cursor_from, cursor_to, rows_affected, committed_at
-		FROM `+checkpointTable+` WHERE migration_id = $1`, migrationID)
+		FROM ` + checkpointTable + ` WHERE migration_id = $1`
+	sqlCtx, end := logging.StartSQL(bctx, e.logger, logging.SQLLog{
+		DatabaseID: databaseID, Kind: "checkpoint", Query: readCheckpoints, Params: []any{migrationID},
+		Extra: []slog.Attr{slog.String("migration_id", migrationID)},
+	})
+	found, err := readTargetCheckpoints(sqlCtx, pool, readCheckpoints, migrationID)
+	end(int64(len(found)), err)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrTargetUnavailable, err)
-	}
-	var found []Batch
-	for rows.Next() {
-		var b Batch
-		var from sql.NullInt64
-		if err := rows.Scan(&b.Direction, &b.No, &from, &b.To, &b.Rows, &b.CommittedAt); err != nil {
-			rows.Close()
-			return err
-		}
-		if from.Valid {
-			b.From = &from.Int64
-		}
-		found = append(found, b)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
 	}
 	recovered := 0
 	for _, b := range found {
@@ -388,6 +447,28 @@ func (e *Engine) syncCheckpoints(ctx context.Context, pool *sql.DB, q querier, m
 	return nil
 }
 
+// readTargetCheckpoints reads the checkpoints one migration wrote on the target.
+func readTargetCheckpoints(ctx context.Context, pool *sql.DB, query, migrationID string) ([]Batch, error) {
+	rows, err := pool.QueryContext(ctx, query, migrationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var found []Batch
+	for rows.Next() {
+		var b Batch
+		var from sql.NullInt64
+		if err := rows.Scan(&b.Direction, &b.No, &from, &b.To, &b.Rows, &b.CommittedAt); err != nil {
+			return nil, err
+		}
+		if from.Valid {
+			b.From = &from.Int64
+		}
+		found = append(found, b)
+	}
+	return found, rows.Err()
+}
+
 // updateBatchTotal estimates the number of batches (committed + remaining) for the progress bar.
 func (e *Engine) updateBatchTotal(ctx context.Context, pool *sql.DB, q querier, m *Migration, plan *BatchPlan, up []Batch) error {
 	var from *int64
@@ -397,7 +478,13 @@ func (e *Engine) updateBatchTotal(ctx context.Context, pool *sql.DB, q querier, 
 	bctx, cancel := context.WithTimeout(ctx, e.runTimeout())
 	defer cancel()
 	var remaining int64
-	if err := pool.QueryRowContext(bctx, plan.Remaining, nullInt(from)).Scan(&remaining); err != nil {
+	sqlCtx, end := logging.StartSQL(bctx, e.logger, logging.SQLLog{
+		DatabaseID: m.DatabaseID, Kind: "batch_estimate", Query: plan.Remaining, Params: []any{nullInt(from)},
+		Extra: []slog.Attr{slog.String("migration_id", m.ID)},
+	})
+	err := pool.QueryRowContext(sqlCtx, plan.Remaining, nullInt(from)).Scan(&remaining)
+	end(1, err)
+	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
 			// e.g. the cursor column does not exist: reported when the first batch runs
@@ -407,7 +494,7 @@ func (e *Engine) updateBatchTotal(ctx context.Context, pool *sql.DB, q querier, 
 	}
 	size := int64(m.BatchSize)
 	total := int64(len(up)) + (remaining+size-1)/size
-	_, err := q.ExecContext(ctx, `UPDATE migrations SET batch_total = $2, updated_at = NOW()
+	_, err = q.ExecContext(ctx, `UPDATE migrations SET batch_total = $2, updated_at = NOW()
 		WHERE id = $1 AND status IN ('DRAFT', 'APPROVED', 'QUEUED', 'RUNNING', 'PARTIAL')`, m.ID, total)
 	return err
 }

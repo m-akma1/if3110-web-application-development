@@ -63,12 +63,12 @@ func (r *ConnectionRegistry) log() *slog.Logger {
 	return slog.Default()
 }
 
-// logged runs fn between a sql.start and a sql.result record. fn returns the row count
-// (-1 when unknown).
-func (r *ConnectionRegistry) logged(ctx context.Context, q logging.SQLLog, fn func() (int64, error)) error {
-	start := logging.SQLStart(ctx, r.log(), q)
-	rows, err := fn()
-	logging.SQLResult(ctx, r.log(), q, start, rows, err)
+// logged runs fn between a sql.start and a sql.result record, inside the statement's span.
+// fn gets the span's context and returns the row count (-1 when unknown).
+func (r *ConnectionRegistry) logged(ctx context.Context, q logging.SQLLog, fn func(ctx context.Context) (int64, error)) error {
+	ctx, end := logging.StartSQL(ctx, r.log(), q)
+	rows, err := fn(ctx)
+	end(rows, err)
 	return err
 }
 
@@ -144,14 +144,14 @@ func (r *ConnectionRegistry) ExecuteQueryOnDB(ctx context.Context, dbID, rawSQL 
 	}
 
 	q := logging.SQLLog{DatabaseID: dbID, Kind: "read_only", Query: cleanedSQL}
-	start := logging.SQLStart(ctx, r.log(), q)
+	sqlCtx, end := logging.StartSQL(ctx, r.log(), q)
 
-	res, err := ExecuteReadOnlyQuery(ctx, db, cleanedSQL, r.limits)
+	res, err := ExecuteReadOnlyQuery(sqlCtx, db, cleanedSQL, r.limits)
 	rows := int64(-1)
 	if res != nil {
 		rows = res.TotalRows
 	}
-	logging.SQLResult(ctx, r.log(), q, start, rows, err)
+	end(rows, err)
 
 	if err != nil {
 		return nil, err
@@ -190,7 +190,7 @@ func (r *ConnectionRegistry) ListTables(ctx context.Context, dbID string) ([]dom
 
 	var tables []domain.TableSummary
 	q := logging.SQLLog{DatabaseID: dbID, Kind: "catalog", Query: listTablesSQL}
-	err := r.logged(ctx, q, func() (int64, error) {
+	err := r.logged(ctx, q, func(ctx context.Context) (int64, error) {
 		err := withReadOnlyTx(ctx, db, r.limits, 1, func(ctx context.Context, tx *sql.Tx) error {
 			rows, err := tx.QueryContext(ctx, listTablesSQL)
 			if err != nil {
@@ -241,7 +241,7 @@ func (r *ConnectionRegistry) InspectTableDataAndSchema(ctx context.Context, dbID
 		err := r.logged(ctx, logging.SQLLog{
 			DatabaseID: dbID, Kind: "catalog", Query: describeTableQuery,
 			Extra: []slog.Attr{tableAttr},
-		}, func() (int64, error) {
+		}, func(ctx context.Context) (int64, error) {
 			var err error
 			meta, err = describeTable(ctx, tx, schema, table)
 			return -1, err
@@ -254,7 +254,9 @@ func (r *ConnectionRegistry) InspectTableDataAndSchema(ctx context.Context, dbID
 
 		countSQL := `SELECT COUNT(*) FROM ` + qualified
 		err = r.logged(ctx, logging.SQLLog{DatabaseID: dbID, Kind: "catalog", Query: countSQL, Extra: []slog.Attr{tableAttr}},
-			func() (int64, error) { return 1, tx.QueryRowContext(ctx, countSQL).Scan(&res.TotalRows) })
+			func(ctx context.Context) (int64, error) {
+				return 1, tx.QueryRowContext(ctx, countSQL).Scan(&res.TotalRows)
+			})
 		if err != nil {
 			return fmt.Errorf("menghitung baris: %w", err)
 		}
@@ -276,7 +278,7 @@ func (r *ConnectionRegistry) InspectTableDataAndSchema(ctx context.Context, dbID
 		err = r.logged(ctx, logging.SQLLog{
 			DatabaseID: dbID, Kind: "table_browse", Query: dataSQL,
 			Extra: []slog.Attr{tableAttr, slog.Int("page", page)},
-		}, func() (int64, error) {
+		}, func(ctx context.Context) (int64, error) {
 			var err error
 			res.Columns, res.Rows, _, err = queryRows(ctx, tx, dataSQL, pageSize)
 			return int64(len(res.Rows)), err
@@ -307,7 +309,7 @@ func (r *ConnectionRegistry) DescribeTable(ctx context.Context, dbID, schema, ta
 	var res *domain.TableDataResult
 	q := logging.SQLLog{DatabaseID: dbID, Kind: "catalog", Query: describeTableQuery,
 		Extra: []slog.Attr{slog.String("table", schema+"."+table)}}
-	err := r.logged(ctx, q, func() (int64, error) {
+	err := r.logged(ctx, q, func(ctx context.Context) (int64, error) {
 		return -1, withReadOnlyTx(ctx, db, r.limits, 1, func(ctx context.Context, tx *sql.Tx) error {
 			var err error
 			res, err = describeTable(ctx, tx, schema, table)

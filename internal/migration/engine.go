@@ -11,6 +11,9 @@ import (
 
 	"dbplatform/internal/logging"
 	"github.com/jackc/pgx/v5/pgconn"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // PoolSource gives the engine the connection pool of a target database.
@@ -100,15 +103,26 @@ func (e *Engine) DryRun(ctx context.Context, databaseID, script string) (*RunRes
 	if !ok {
 		return nil, ErrTargetUnavailable
 	}
+	ctx, span := startSpan(ctx, spanDryRun, trace.SpanKindInternal,
+		attribute.String("database_id", databaseID), attribute.Int("statements", len(stmts)))
+	defer span.End()
 	ctx, cancel := context.WithTimeout(ctx, e.runTimeout())
 	defer cancel()
 	conn, tx, err := e.begin(ctx, pool)
 	if err != nil {
+		failSpan(span, err)
 		return nil, err
 	}
 	defer conn.Close()
 	defer func() { _ = tx.Rollback() }()
-	return dryRun(ctx, tx, script, stmts), nil
+	res := dryRun(ctx, e.logger, databaseID, tx, script, stmts)
+	// A dry run never commits: everything it did is undone here.
+	span.AddEvent("tx.rollback")
+	e.logger.InfoContext(ctx, "tx.rollback", slog.String("database_id", databaseID), slog.String("reason", "dry_run"))
+	if res.Err != nil {
+		span.SetStatus(codes.Error, res.Err.String())
+	}
+	return res, nil
 }
 
 // Execute runs a DRAFT on its target database in one transaction: COMMIT when every statement
@@ -269,22 +283,25 @@ func migrationSQLLog(databaseID, migrationID, execType, script string, extra ...
 // statement succeeds. It returns an error only when the transaction could not be started;
 // script failures are reported in RunResult.
 func (e *Engine) run(ctx context.Context, pool *sql.DB, q logging.SQLLog, stmts []Statement) (*RunResult, error) {
+	ctx, span := startSpan(ctx, spanRun, trace.SpanKindInternal, txSpanAttrs(q, attribute.Int("statements", len(stmts)))...)
+	defer span.End()
 	script := q.Query
 	start := time.Now()
 	conn, tx, err := e.begin(ctx, pool)
 	if err != nil {
 		e.logger.ErrorContext(ctx, "tx.begin_failed",
 			slog.String("database_id", q.DatabaseID), slog.String("error", err.Error()))
+		failSpan(span, err)
 		return nil, err
 	}
 	defer conn.Close()
 	defer func() { _ = tx.Rollback() }()
 
-	sqlStart := logging.SQLStart(ctx, e.logger, q)
+	sqlCtx, end := logging.StartSQL(ctx, e.logger, q)
 	// Without arguments pgx sends the script with the simple query protocol, so the server parses
 	// all statements itself and error positions are relative to the whole script.
-	_, execErr := tx.ExecContext(ctx, script)
-	logging.SQLResult(ctx, e.logger, q, sqlStart, -1, execErr)
+	_, execErr := tx.ExecContext(sqlCtx, script)
+	end(-1, execErr)
 
 	committed := false
 	if execErr == nil {
@@ -297,6 +314,7 @@ func (e *Engine) run(ctx context.Context, pool *sql.DB, q logging.SQLLog, stmts 
 	}
 
 	if committed {
+		span.AddEvent("tx.commit")
 		e.logger.InfoContext(ctx, "tx.commit", txAttrs(q)...)
 		// A committed script may have changed session settings (SET search_path, SET ROLE, ...).
 		// Reset them so the pooled connection is clean for the viewer and the next migration.
@@ -304,6 +322,8 @@ func (e *Engine) run(ctx context.Context, pool *sql.DB, q logging.SQLLog, stmts 
 			discardConn(conn)
 		}
 	} else {
+		span.AddEvent("tx.rollback")
+		failSpan(span, execErr)
 		e.logger.WarnContext(ctx, "tx.rollback", append(txAttrs(q), slog.String("error", errString(execErr)))...)
 	}
 	return res, nil
@@ -312,9 +332,17 @@ func (e *Engine) run(ctx context.Context, pool *sql.DB, q logging.SQLLog, stmts 
 // lock waits up to QueueTimeout for the target's advisory lock on conn.
 // It polls pg_try_advisory_lock instead of blocking, so a timeout never leaves a lock request
 // pending on the connection.
-func (e *Engine) lock(ctx context.Context, conn *sql.Conn, databaseID string) error {
+func (e *Engine) lock(ctx context.Context, conn *sql.Conn, databaseID string) (err error) {
+	ctx, span := startSpan(ctx, spanLockWait, trace.SpanKindInternal, attribute.String("database_id", databaseID))
+	tries := 0
+	defer func() {
+		span.SetAttributes(attribute.Int("lock.tries", tries), attribute.Bool("lock.acquired", err == nil))
+		failSpan(span, err)
+		span.End()
+	}()
 	deadline := time.Now().Add(e.limits.QueueTimeout)
 	for {
+		tries++
 		var got bool
 		if err := conn.QueryRowContext(ctx,
 			`SELECT pg_try_advisory_lock($1::int, hashtext($2::text))`, lockNamespace, databaseID).Scan(&got); err != nil {
@@ -370,6 +398,15 @@ func txAttrs(q logging.SQLLog) []any {
 		out = append(out, a)
 	}
 	return out
+}
+
+// txSpanAttrs is txAttrs for a span.
+func txSpanAttrs(q logging.SQLLog, extra ...attribute.KeyValue) []attribute.KeyValue {
+	out := []attribute.KeyValue{attribute.String("database_id", q.DatabaseID)}
+	for _, a := range q.Extra {
+		out = append(out, attribute.String(a.Key, a.Value.String()))
+	}
+	return append(out, extra...)
 }
 
 func errString(err error) string {

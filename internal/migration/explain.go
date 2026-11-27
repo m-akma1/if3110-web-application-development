@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 	"unicode/utf8"
 
+	"dbplatform/internal/logging"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -138,7 +140,7 @@ func parsePlan(raw string) (*Plan, error) {
 
 // dryRun runs stmts one by one on tx and reports each. It stops at the first failing statement;
 // later statements are reported as skipped. The caller rolls tx back.
-func dryRun(ctx context.Context, tx *sql.Tx, script string, stmts []Statement) *RunResult {
+func dryRun(ctx context.Context, log *slog.Logger, databaseID string, tx *sql.Tx, script string, stmts []Statement) *RunResult {
 	res := &RunResult{Statements: len(stmts), Steps: make([]Step, 0, len(stmts))}
 	start := time.Now()
 	for i, st := range stmts {
@@ -150,12 +152,18 @@ func dryRun(ctx context.Context, tx *sql.Tx, script string, stmts []Statement) *
 		}
 		t0 := time.Now()
 		prefix := ""
-		var err error
 		if explainable(st.Words) {
 			prefix = explainPrefix
+		}
+		sqlCtx, end := logging.StartSQL(ctx, log, logging.SQLLog{
+			DatabaseID: databaseID, Kind: "dry_run", Query: prefix + st.Text,
+			Extra: []slog.Attr{slog.Int("statement", i+1)},
+		})
+		var err error
+		if prefix != "" {
 			var raw string
 			// Simple protocol: no prepared statement is cached for every statement of the script.
-			if err = tx.QueryRowContext(ctx, prefix+st.Text, pgx.QueryExecModeSimpleProtocol).Scan(&raw); err == nil {
+			if err = tx.QueryRowContext(sqlCtx, prefix+st.Text, pgx.QueryExecModeSimpleProtocol).Scan(&raw); err == nil {
 				step.Kind = StepExplained
 				if step.Plan, err = parsePlan(raw); err != nil {
 					// The statement ran; only the plan is unreadable.
@@ -163,9 +171,10 @@ func dryRun(ctx context.Context, tx *sql.Tx, script string, stmts []Statement) *
 				}
 			}
 		} else {
-			_, err = tx.ExecContext(ctx, st.Text)
+			_, err = tx.ExecContext(sqlCtx, st.Text)
 			step.Kind = StepExecuted
 		}
+		end(-1, err)
 		step.Duration = time.Since(t0)
 		if err != nil {
 			step.Kind = StepFailed
