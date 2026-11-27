@@ -15,9 +15,13 @@ import (
 	"dbplatform/internal/logging"
 	"dbplatform/internal/migration"
 	"dbplatform/internal/rbac"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
-// Server is the HTML (GOTTH: Go + templ + htmx) front end of the platform.
+// Server is the HTTP side of the platform: the JSON API under /api and the host of the SPA.
 type Server struct {
 	mux        *http.ServeMux
 	handler    http.Handler
@@ -43,7 +47,8 @@ type Deps struct {
 	Migrations *migration.Service // drafts, dry runs, execution and history of target migrations
 }
 
-// NewServer builds the routes and the middleware chain: logger -> CSRF guard -> routes.
+// NewServer builds the routes and the middleware chain:
+// tracing -> request context -> access log -> CSRF guard -> span name -> routes.
 func NewServer(logOutput io.Writer, deps Deps) *Server {
 	if logOutput == nil {
 		logOutput = os.Stdout
@@ -70,11 +75,32 @@ func NewServer(logOutput io.Writer, deps Deps) *Server {
 	s.registerRoutes()
 
 	var h http.Handler = s.mux
+	h = spanNameMiddleware(s.mux, h)
 	h = CSRFGuardMiddleware(h)
 	h = SanitizedLoggerMiddleware(s.logger)(h)
 	h = RequestContextMiddleware(h)
+	// Outermost, so every record the request logs (including http.request) is inside its span.
+	// Only API calls are traced. The API is public, so a traceparent sent by a client starts a
+	// new trace (linked to it) instead of being trusted as the parent.
+	h = otelhttp.NewHandler(h, "http.request",
+		otelhttp.WithPublicEndpointFn(func(*http.Request) bool { return true }),
+		otelhttp.WithFilter(func(r *http.Request) bool { return strings.HasPrefix(r.URL.Path, "/api/") }))
 	s.handler = h
 	return s
+}
+
+// spanNameMiddleware names the request's span after its route pattern, e.g.
+// "POST /api/migration/{id}/execute". otelhttp only reads the pattern from its own copy of the
+// request, which the middlewares in between replace, so the name is set here.
+func spanNameMiddleware(mux *http.ServeMux, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, pattern := mux.Handler(r); pattern != "" {
+			span := trace.SpanFromContext(r.Context())
+			span.SetName(pattern)
+			span.SetAttributes(attribute.String("http.route", pattern))
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Sessions returns the server's session store.

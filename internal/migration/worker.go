@@ -12,6 +12,11 @@ import (
 
 	"dbplatform/internal/ids"
 	"dbplatform/internal/logging"
+	"dbplatform/internal/tracing"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // WorkerConfig tunes the worker pool. Zero fields take the DefaultWorkerConfig value.
@@ -138,6 +143,10 @@ func (w *Worker) process(ctx context.Context, workerID string, j *Job) {
 	ctx = WithInterrupt(context.WithoutCancel(ctx), shutdown)
 	// The job keeps the request's correlation ID and actor, so its logs join the HTTP request's.
 	ctx = logging.WithRequestInfo(ctx, &logging.RequestInfo{CorrelationID: j.CorrelationID, Actor: j.ExecutorID})
+	// Continue the trace of the request that queued the job: job.process is a child of its
+	// job.enqueue span. Every attempt is its own job.process span in that trace.
+	ctx, span := startSpan(tracing.Extract(ctx, j.TraceParent), spanProcess, trace.SpanKindConsumer, jobSpanAttrs(j, workerID)...)
+	defer span.End()
 	// The engine stores the job and attempt on the execution row it writes.
 	ctx = WithRun(ctx, j.ID, j.Attempt)
 	log := w.logger.With(
@@ -264,6 +273,11 @@ func (w *Worker) recordAttempt(ctx context.Context, log *slog.Logger, j *Job, st
 }
 
 func (w *Worker) finish(ctx context.Context, log *slog.Logger, j *Job, status JobStatus, msg string) {
+	span := trace.SpanFromContext(ctx)
+	span.SetAttributes(attribute.String("job.status", string(status)))
+	if status != JobSuccess {
+		span.SetStatus(codes.Error, msg)
+	}
 	if err := w.repo.FinishJob(ctx, j.ID, status, msg); err != nil {
 		log.ErrorContext(ctx, "job.update_failed", slog.String("error", err.Error()))
 		return
@@ -284,6 +298,13 @@ func (w *Worker) finish(ctx context.Context, log *slog.Logger, j *Job, status Jo
 }
 
 func (w *Worker) requeue(ctx context.Context, log *slog.Logger, j *Job, cause error, delay time.Duration, countAttempt bool) {
+	span := trace.SpanFromContext(ctx)
+	span.SetAttributes(attribute.String("job.status", string(JobQueued)),
+		attribute.Int64("job.retry_delay_ms", delay.Milliseconds()), attribute.Bool("job.counts_as_attempt", countAttempt))
+	if countAttempt {
+		span.RecordError(cause)
+		span.SetStatus(codes.Error, cause.Error())
+	}
 	if err := w.repo.RequeueJob(ctx, j.ID, cause.Error(), delay, countAttempt); err != nil {
 		log.ErrorContext(ctx, "job.update_failed", slog.String("error", err.Error()))
 		return
@@ -356,41 +377,65 @@ func (w *Worker) RecoverStaleJobs(ctx context.Context) (int, error) {
 			continue // its worker extended the lease in the meantime
 		}
 		jctx := logging.WithRequestInfo(ctx, &logging.RequestInfo{CorrelationID: j.CorrelationID, Actor: j.ExecutorID})
+		// The recovery belongs to the job's trace too, next to the job.process span that died.
+		jctx, span := startSpan(tracing.Extract(jctx, j.TraceParent), spanRecover, trace.SpanKindConsumer, jobSpanAttrs(j, reaperID)...)
 		log := w.logger.With(slog.String("job_id", j.ID), slog.String("migration_id", j.MigrationID),
 			slog.String("database_id", j.DatabaseID), slog.String("job_type", string(j.Type)), slog.Int("attempt", j.Attempt))
-		done, err := w.repo.OutcomeRecorded(jctx, j)
-		switch {
-		case err != nil:
+		err = w.recoverJob(jctx, log, j)
+		failSpan(span, err)
+		span.End()
+		if err != nil {
 			return n, err
-		case done:
-			w.finish(jctx, log, j, JobSuccess, "dipulihkan: hasil sudah tercatat sebelum worker berhenti")
-		case j.SQLStartedAt != nil && w.isBatchJob(jctx, j):
-			// Every batch commits together with its checkpoint, so nothing is uncertain: run the
-			// job again and it continues after the last checkpoint.
-			const cause = "worker berhenti di tengah batch; dilanjutkan dari checkpoint"
-			w.recordAttempt(jctx, log, j, ExecPartial, true, cause)
-			if j.Attempt < j.MaxAttempts {
-				w.requeue(jctx, log, j, errors.New(cause), 0, true)
-			} else if status, err := w.repo.StopBatchJob(jctx, j); err != nil {
-				log.ErrorContext(jctx, "job.update_failed", slog.String("error", err.Error()))
-			} else {
-				w.finish(jctx, log, j, status, cause)
-			}
-		case j.SQLStartedAt == nil && j.Attempt < j.MaxAttempts:
-			const cause = "lease worker habis sebelum SQL dijalankan"
-			w.recordAttempt(jctx, log, j, ExecFailed, false, cause)
-			w.requeue(jctx, log, j, errors.New(cause), 0, true)
-		case j.SQLStartedAt == nil:
-			const cause = "lease worker habis setelah percobaan terakhir"
-			w.recordAttempt(jctx, log, j, ExecFailed, false, cause)
-			w.finish(jctx, log, j, JobFailed, cause)
-			_ = w.repo.RestoreMigrationStatus(jctx, j)
-		default:
-			const cause = "worker berhenti setelah SQL dikirim; hasil di database target belum pasti"
-			w.recordAttempt(jctx, log, j, ExecUncertain, true, cause)
-			w.finish(jctx, log, j, JobUncertain, cause)
 		}
 		n++
 	}
 	return n, nil
+}
+
+// recoverJob settles one job whose lease expired (see RecoverStaleJobs).
+func (w *Worker) recoverJob(jctx context.Context, log *slog.Logger, j *Job) error {
+	done, err := w.repo.OutcomeRecorded(jctx, j)
+	switch {
+	case err != nil:
+		return err
+	case done:
+		w.finish(jctx, log, j, JobSuccess, "dipulihkan: hasil sudah tercatat sebelum worker berhenti")
+	case j.SQLStartedAt != nil && w.isBatchJob(jctx, j):
+		// Every batch commits together with its checkpoint, so nothing is uncertain: run the
+		// job again and it continues after the last checkpoint.
+		const cause = "worker berhenti di tengah batch; dilanjutkan dari checkpoint"
+		w.recordAttempt(jctx, log, j, ExecPartial, true, cause)
+		if j.Attempt < j.MaxAttempts {
+			w.requeue(jctx, log, j, errors.New(cause), 0, true)
+		} else if status, err := w.repo.StopBatchJob(jctx, j); err != nil {
+			log.ErrorContext(jctx, "job.update_failed", slog.String("error", err.Error()))
+		} else {
+			w.finish(jctx, log, j, status, cause)
+		}
+	case j.SQLStartedAt == nil && j.Attempt < j.MaxAttempts:
+		const cause = "lease worker habis sebelum SQL dijalankan"
+		w.recordAttempt(jctx, log, j, ExecFailed, false, cause)
+		w.requeue(jctx, log, j, errors.New(cause), 0, true)
+	case j.SQLStartedAt == nil:
+		const cause = "lease worker habis setelah percobaan terakhir"
+		w.recordAttempt(jctx, log, j, ExecFailed, false, cause)
+		w.finish(jctx, log, j, JobFailed, cause)
+		_ = w.repo.RestoreMigrationStatus(jctx, j)
+	default:
+		const cause = "worker berhenti setelah SQL dikirim; hasil di database target belum pasti"
+		w.recordAttempt(jctx, log, j, ExecUncertain, true, cause)
+		w.finish(jctx, log, j, JobUncertain, cause)
+	}
+	return nil
+}
+
+// jobSpanAttrs describe a job on its job.process / job.recover span.
+func jobSpanAttrs(j *Job, workerID string) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.String("job_id", j.ID), attribute.String("job_type", string(j.Type)),
+		attribute.String("migration_id", j.MigrationID), attribute.String("database_id", j.DatabaseID),
+		attribute.Int("attempt", j.Attempt), attribute.String("worker_id", workerID),
+		// How long the job waited in the queue since it became due (first run or retry).
+		attribute.Int64("job.queue_wait_ms", max(0, time.Since(j.NextRunAt).Milliseconds())),
+	}
 }

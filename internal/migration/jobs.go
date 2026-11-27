@@ -7,8 +7,11 @@ import (
 	"time"
 
 	"dbplatform/internal/ids"
+	"dbplatform/internal/tracing"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // JobType is what a job asks the engine to do.
@@ -58,6 +61,7 @@ type Job struct {
 	SQLStartedAt   *time.Time
 	LastError      string
 	CorrelationID  string
+	TraceParent    string // W3C traceparent of the job.enqueue span; the worker continues the trace
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	FinishedAt     *time.Time
@@ -90,7 +94,20 @@ type EnqueueInput struct {
 // EnqueueJob stores a QUEUED job. With MarkQueued the migration moves to QUEUED in the same
 // transaction, so the job and the status change are saved together or not at all.
 // ErrJobActive means the migration already has an unfinished job.
-func (r *Repository) EnqueueJob(ctx context.Context, in EnqueueInput) (*Job, error) {
+//
+// The insert is the job.enqueue span (kind producer). Its traceparent is stored on the job, so
+// the worker's job.process span becomes its child and the request, queue and run share a trace.
+func (r *Repository) EnqueueJob(ctx context.Context, in EnqueueInput) (job *Job, err error) {
+	ctx, span := startSpan(ctx, spanEnqueue, trace.SpanKindProducer,
+		attribute.String("migration_id", in.MigrationID), attribute.String("database_id", in.DatabaseID),
+		attribute.String("job_type", string(in.Type)))
+	defer func() {
+		if job != nil {
+			span.SetAttributes(attribute.String("job_id", job.ID))
+		}
+		failSpan(span, err)
+		span.End()
+	}()
 	if !ids.IsValid(in.MigrationID) || !ids.IsValid(in.DatabaseID) {
 		return nil, ErrNotFound
 	}
@@ -137,9 +154,10 @@ func (r *Repository) EnqueueJob(ctx context.Context, in EnqueueInput) (*Job, err
 	id := ids.New()
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO migration_jobs (id, migration_id, database_id, job_type, executor_id,
-		                            from_status, max_attempts, correlation_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		id, in.MigrationID, in.DatabaseID, string(in.Type), executor, from, in.MaxAttempts, in.CorrelationID)
+		                            from_status, max_attempts, correlation_id, trace_parent)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		id, in.MigrationID, in.DatabaseID, string(in.Type), executor, from, in.MaxAttempts, in.CorrelationID,
+		tracing.Inject(ctx))
 	if isUniqueViolation(err) {
 		return nil, ErrJobActive
 	}
@@ -445,7 +463,7 @@ func (r *Repository) LatestJobForMigration(ctx context.Context, migrationID stri
 const selectJob = `
 	SELECT id, migration_id, database_id, job_type, COALESCE(executor_id::text, ''), status, from_status,
 	       attempt, max_attempts, next_run_at, locked_by, lease_expires_at, sql_started_at,
-	       last_error, correlation_id, created_at, updated_at, finished_at
+	       last_error, correlation_id, trace_parent, created_at, updated_at, finished_at
 	FROM migration_jobs`
 
 func scanJob(row rowScanner) (*Job, error) {
@@ -454,7 +472,7 @@ func scanJob(row rowScanner) (*Job, error) {
 	var lease, started, finished sql.NullTime
 	err := row.Scan(&j.ID, &j.MigrationID, &j.DatabaseID, &jobType, &j.ExecutorID, &status, &from,
 		&j.Attempt, &j.MaxAttempts, &j.NextRunAt, &j.LockedBy, &lease, &started,
-		&j.LastError, &j.CorrelationID, &j.CreatedAt, &j.UpdatedAt, &finished)
+		&j.LastError, &j.CorrelationID, &j.TraceParent, &j.CreatedAt, &j.UpdatedAt, &finished)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

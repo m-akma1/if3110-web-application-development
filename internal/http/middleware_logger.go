@@ -10,6 +10,9 @@ import (
 
 	"dbplatform/internal/ids"
 	"dbplatform/internal/logging"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Daftar kata sensitif yang muncul di URL query log
@@ -93,6 +96,8 @@ func RequestContextMiddleware(next http.Handler) http.Handler {
 			id = ids.New()
 		}
 		w.Header().Set("X-Request-ID", id)
+		// The correlation ID is also on the request's span, so a trace can be found from a log line.
+		trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("correlation_id", id))
 		ctx := logging.WithRequestInfo(r.Context(), &logging.RequestInfo{CorrelationID: id})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
