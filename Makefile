@@ -1,7 +1,7 @@
 # Developer shortcuts. Run from the repository root.
 TEST_DB_URL    ?= postgres://test:test@localhost:5433/dbplatform_test?sslmode=disable
 
-.PHONY: help build frontend-build frontend-dev dev vet test test-integration test-db-up test-db-down seed-large observability observability-down loadtest
+.PHONY: help build frontend-build frontend-dev dev vet test test-integration test-db-up test-db-down seed-large observability observability-down loadtest loadtest-local
 
 help:
 	@echo "make build             build frontend SPA and verify Go binary"
@@ -16,6 +16,7 @@ help:
 	@echo "make observability     start the stack with the collector, Tempo, Loki, Prometheus and Grafana (http://localhost:3000)"
 	@echo "make observability-down stop it again"
 	@echo "make loadtest          run the k6 stress test against the running stack (results in loadtest/results)"
+	@echo "make loadtest-local    the same with CUSTOM LOCAL database from demo/ (LOCAL ONLY)"
 
 build: frontend-build
 	go build .
@@ -60,3 +61,6 @@ observability-down:
 
 loadtest:
 	loadtest/run.sh
+
+loadtest-local:
+	loadtest/local-run.sh
