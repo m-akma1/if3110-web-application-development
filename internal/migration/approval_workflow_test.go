@@ -100,7 +100,8 @@ func TestMigrationApprovalWorkflow_Robustness_Integration(t *testing.T) {
 	}
 
 	// 6. Charlie creates a draft
-	draft, err := svc.CreateDraft(ctx, charlie.ID, dbID, "tambah_tabel_produk", "CREATE TABLE products (id int PRIMARY KEY, name text);")
+	draft, err := svc.CreateDraftFull(ctx, migration.NewDraft{DatabaseID: dbID, Name: "tambah_tabel_produk", CreatedBy: charlie.ID,
+		SQL: "CREATE TABLE products (id int PRIMARY KEY, name text);", SQLDown: "DROP TABLE products;"})
 	if err != nil {
 		t.Fatalf("CreateDraft failed: %v", err)
 	}
@@ -109,7 +110,7 @@ func TestMigrationApprovalWorkflow_Robustness_Integration(t *testing.T) {
 	}
 
 	// 7. Security Check: Charlie attempts to execute prematurely -> MUST FAIL
-	if _, _, err := svc.Execute(ctx, charlie.ID, draft.ID); !errors.Is(err, migration.ErrNotApproved) {
+	if _, _, err := svc.EnqueueExecute(ctx, charlie.ID, draft.ID); !errors.Is(err, migration.ErrNotApproved) {
 		t.Fatalf("executing unapproved draft must fail with ErrNotApproved, got %v", err)
 	}
 
@@ -123,7 +124,7 @@ func TestMigrationApprovalWorkflow_Robustness_Integration(t *testing.T) {
 	}
 
 	// 9. Security Check: Charlie attempts to execute while PENDING_REVIEW -> MUST FAIL
-	if _, _, err := svc.Execute(ctx, charlie.ID, draft.ID); !errors.Is(err, migration.ErrNotApproved) {
+	if _, _, err := svc.EnqueueExecute(ctx, charlie.ID, draft.ID); !errors.Is(err, migration.ErrNotApproved) {
 		t.Fatalf("executing draft in PENDING_REVIEW must fail with ErrNotApproved, got %v", err)
 	}
 
@@ -168,13 +169,13 @@ func TestMigrationApprovalWorkflow_Robustness_Integration(t *testing.T) {
 	}
 
 	// 14. Charlie attempts to execute REJECTED migration -> MUST FAIL
-	if _, _, err := svc.Execute(ctx, charlie.ID, draft.ID); !errors.Is(err, migration.ErrNotApproved) {
+	if _, _, err := svc.EnqueueExecute(ctx, charlie.ID, draft.ID); !errors.Is(err, migration.ErrNotApproved) {
 		t.Fatalf("executing REJECTED migration must fail with ErrNotApproved, got %v", err)
 	}
 
 	// 15. Charlie revises the draft
 	revisedSQL := "CREATE TABLE products (id int PRIMARY KEY, name text, price numeric);"
-	revised, err := svc.SaveDraft(ctx, charlie.ID, draft.ID, "tambah_tabel_produk_v2", revisedSQL)
+	revised, err := svc.SaveDraftFull(ctx, charlie.ID, draft.ID, migration.UpdateDraftInput{Name: "tambah_tabel_produk_v2", SQL: revisedSQL, SQLDown: "DROP TABLE products;"})
 	if err != nil {
 		t.Fatalf("SaveDraft on rejected migration failed: %v", err)
 	}
@@ -217,12 +218,9 @@ func TestMigrationApprovalWorkflow_Robustness_Integration(t *testing.T) {
 	}
 
 	// 20. Charlie executes the APPROVED migration -> MUST SUCCEED
-	executed, runRes, err := svc.Execute(ctx, charlie.ID, draft.ID)
+	executed, err := migration.ExecuteNow(t, svc, charlie.ID, draft.ID)
 	if err != nil {
 		t.Fatalf("Execute on APPROVED migration failed: %v", err)
-	}
-	if !runRes.OK {
-		t.Fatalf("Execute run result not OK: %+v", runRes)
 	}
 	if executed.Status != migration.StatusSuccess {
 		t.Fatalf("executed status should be SUCCESS, got %q", executed.Status)
@@ -240,7 +238,7 @@ func TestMigrationApprovalWorkflow_Robustness_Integration(t *testing.T) {
 
 	// 22. Immutability & Re-execution Protection:
 	// A) Cannot execute again
-	if _, _, err := svc.Execute(ctx, charlie.ID, draft.ID); !errors.Is(err, migration.ErrNotDraft) {
+	if _, _, err := svc.EnqueueExecute(ctx, charlie.ID, draft.ID); !errors.Is(err, migration.ErrNotDraft) {
 		t.Fatalf("re-executing completed migration must fail with ErrNotDraft, got %v", err)
 	}
 	// B) Cannot edit draft
@@ -318,7 +316,8 @@ func TestMigrationApproval_LeaderSuccessionDuringReview_Integration(t *testing.T
 	}
 
 	// Dave creates draft & submits review
-	draft, err := svc.CreateDraft(ctx, dave.ID, dbID, "audit_log_table", "CREATE TABLE audit_logs (id int);")
+	draft, err := svc.CreateDraftFull(ctx, migration.NewDraft{DatabaseID: dbID, Name: "audit_log_table", CreatedBy: dave.ID,
+		SQL: "CREATE TABLE audit_logs (id int);", SQLDown: "DROP TABLE audit_logs;"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,9 +352,9 @@ func TestMigrationApproval_LeaderSuccessionDuringReview_Integration(t *testing.T
 	}
 
 	// Execute approved migration
-	execM, res, err := svc.Execute(ctx, dave.ID, draft.ID)
-	if err != nil || !res.OK || execM.Status != migration.StatusSuccess {
-		t.Fatalf("Execute failed: %v, res: %+v", err, res)
+	execM, err := migration.ExecuteNow(t, svc, dave.ID, draft.ID)
+	if err != nil || execM.Status != migration.StatusSuccess {
+		t.Fatalf("Execute failed: %v, m: %+v", err, execM)
 	}
 }
 
@@ -412,25 +411,25 @@ func TestRollbackAndForwardRequireGroupApproval_Integration(t *testing.T) {
 	if _, err := svc.Approve(ctx, bob.ID, draft.ID, "ok edit"); err != nil {
 		t.Fatal(err)
 	}
-	execM, res, err := svc.Execute(ctx, charlie.ID, draft.ID)
-	if err != nil || !res.OK || execM.Status != migration.StatusSuccess {
-		t.Fatalf("Execute initial migration failed: err=%v, res=%+v", err, res)
+	execM, err := migration.ExecuteNow(t, svc, charlie.ID, draft.ID)
+	if err != nil || execM.Status != migration.StatusSuccess {
+		t.Fatalf("Execute initial migration failed: err=%v, m=%+v", err, execM)
 	}
 
 	// 2. Charlie requests Rollback -> must enter PENDING_REVIEW (not execute immediately!)
-	rbDraft, rbRes, err := svc.Rollback(ctx, charlie.ID, execM.ID)
+	rbDraft, rbJob, err := svc.EnqueueRollback(ctx, charlie.ID, execM.ID)
 	if err != nil {
 		t.Fatalf("Rollback request failed: %v", err)
 	}
-	if rbRes != nil {
-		t.Fatalf("expected rbRes to be nil because group approvals are required")
+	if rbJob != nil {
+		t.Fatalf("expected no job because group approvals are required")
 	}
 	if rbDraft.Status != migration.StatusPendingReview || rbDraft.ExecutionType != "ROLLBACK" || rbDraft.RollbackTargetID != execM.ID {
 		t.Fatalf("unexpected rbDraft state: %+v", rbDraft)
 	}
 
 	// Duplicate rollback request while pending must be rejected
-	if _, _, err := svc.Rollback(ctx, charlie.ID, execM.ID); !errors.Is(err, migration.ErrPendingRollbackExists) {
+	if _, _, err := svc.EnqueueRollback(ctx, charlie.ID, execM.ID); !errors.Is(err, migration.ErrPendingRollbackExists) {
 		t.Fatalf("duplicate rollback = %v, want ErrPendingRollbackExists", err)
 	}
 
@@ -440,7 +439,7 @@ func TestRollbackAndForwardRequireGroupApproval_Integration(t *testing.T) {
 	}
 
 	// Executing unapproved rollback must fail
-	if _, _, err := svc.Execute(ctx, charlie.ID, rbDraft.ID); !errors.Is(err, migration.ErrNotApproved) {
+	if _, _, err := svc.EnqueueExecute(ctx, charlie.ID, rbDraft.ID); !errors.Is(err, migration.ErrNotApproved) {
 		t.Fatalf("execute unapproved rollback = %v, want ErrNotApproved", err)
 	}
 
@@ -457,9 +456,9 @@ func TestRollbackAndForwardRequireGroupApproval_Integration(t *testing.T) {
 	}
 
 	// Charlie executes approved rollback -> drops table, E2 becomes ROLLED_BACK, E3 becomes SUCCESS
-	rbExec, rbRunRes, err := svc.Execute(ctx, charlie.ID, rbDraft.ID)
-	if err != nil || rbRunRes == nil || !rbRunRes.OK || rbExec.Status != migration.StatusSuccess {
-		t.Fatalf("Execute approved rollback failed: err=%v, res=%+v, m=%+v", err, rbRunRes, rbExec)
+	rbExec, err := migration.ExecuteNow(t, svc, charlie.ID, rbDraft.ID)
+	if err != nil || rbExec.Status != migration.StatusSuccess {
+		t.Fatalf("Execute approved rollback failed: err=%v, m=%+v", err, rbExec)
 	}
 
 	// Check E2 status
@@ -469,12 +468,12 @@ func TestRollbackAndForwardRequireGroupApproval_Integration(t *testing.T) {
 	}
 
 	// 3. Charlie requests Forward -> must enter PENDING_REVIEW
-	fwdDraft, fwdRes, err := svc.Forward(ctx, charlie.ID, execM.ID)
+	fwdDraft, fwdJob, err := svc.EnqueueForward(ctx, charlie.ID, execM.ID)
 	if err != nil {
 		t.Fatalf("Forward request failed: %v", err)
 	}
-	if fwdRes != nil {
-		t.Fatalf("expected fwdRes nil while pending review")
+	if fwdJob != nil {
+		t.Fatalf("expected no job while pending review")
 	}
 	if fwdDraft.Status != migration.StatusPendingReview || fwdDraft.ExecutionType != "FORWARD" || fwdDraft.SourceMigrationID != execM.ID {
 		t.Fatalf("unexpected fwdDraft: %+v", fwdDraft)
@@ -487,8 +486,8 @@ func TestRollbackAndForwardRequireGroupApproval_Integration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fwdExec, fwdRunRes, err := svc.Execute(ctx, charlie.ID, fwdDraft.ID)
-	if err != nil || !fwdRunRes.OK || fwdExec.Status != migration.StatusSuccess || fwdExec.SourceMigrationID != execM.ID {
+	fwdExec, err := migration.ExecuteNow(t, svc, charlie.ID, fwdDraft.ID)
+	if err != nil || fwdExec.Status != migration.StatusSuccess || fwdExec.SourceMigrationID != execM.ID {
 		t.Fatalf("Execute approved forward failed: err=%v, fwd=%+v", err, fwdExec)
 	}
 
