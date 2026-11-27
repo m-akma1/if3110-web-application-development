@@ -1,7 +1,7 @@
 # Developer shortcuts. Run from the repository root.
 TEST_DB_URL    ?= postgres://test:test@localhost:5433/dbplatform_test?sslmode=disable
 
-.PHONY: help build frontend-build frontend-dev dev vet test test-integration test-db-up test-db-down
+.PHONY: help build frontend-build frontend-dev dev vet test test-integration test-db-up test-db-down seed-large
 
 help:
 	@echo "make build             build frontend SPA and verify Go binary"
@@ -12,6 +12,7 @@ help:
 	@echo "make test              unit tests (integration tests skip without TEST_DATABASE_URL)"
 	@echo "make test-integration  start the test PostgreSQL and run every test against it"
 	@echo "make test-db-down      stop the test PostgreSQL"
+	@echo "make seed-large        create the 2,000,000-row events table on the demo target (batch mode demo)"
 
 build: frontend-build
 	go build .
@@ -42,3 +43,7 @@ test-integration: test-db-up
 	@until docker compose --profile test exec -T postgres-test pg_isready -U test -d dbplatform_test >/dev/null 2>&1; do sleep 0.2; done
 	@TEST_DATABASE_URL="$(TEST_DB_URL)" go test -v -race ./...
 	@$(MAKE) test-db-down
+
+# Runs as the app role, so the platform (which connects as that role) owns the table.
+seed-large:
+	docker compose exec -T target-postgres sh -c 'PGPASSWORD="$$TARGET_APP_PASSWORD" psql -h 127.0.0.1 -U "$$TARGET_APP_USER" -d "$$POSTGRES_DB"' < docker/seed/large_events.sql
