@@ -29,6 +29,7 @@ import (
 type Config struct {
 	DatabaseURL string // platform PostgreSQL, built from POSTGRES_*
 	ListenAddr  string // LISTEN_ADDR, default ":8080"
+	MetricsAddr string // METRICS_ADDR, default ":9091"; "off" disables the Prometheus endpoint
 
 	// TargetCredentialsKey seals target database passwords (AES-256-GCM, base64 of 32 bytes).
 	TargetCredentialsKey string
@@ -56,6 +57,7 @@ func load(getenv func(string) string) (Config, error) {
 	r := &reader{getenv: getenv}
 	cfg := Config{
 		ListenAddr:           r.optional("LISTEN_ADDR", ":8080"),
+		MetricsAddr:          r.optional("METRICS_ADDR", ":9091"),
 		TargetCredentialsKey: r.required("TARGET_CREDENTIALS_KEY"),
 		Session:              authn.DefaultSessionConfig(),
 		Query:                dbmanager.DefaultQueryLimits(),
@@ -81,8 +83,9 @@ func load(getenv func(string) string) (Config, error) {
 	r.duration("MIGRATION_STATEMENT_TIMEOUT_MS", time.Millisecond, &cfg.Migration.StatementTimeout)
 	r.duration("MIGRATION_QUEUE_TIMEOUT_MS", time.Millisecond, &cfg.Migration.QueueTimeout)
 	cfg.Tracing = tracing.Config{
-		Exporter:    r.oneOf("OTEL_TRACES_EXPORTER", tracing.ExporterConsole, tracing.ExporterConsole, tracing.ExporterNone),
-		ServiceName: r.optional("OTEL_SERVICE_NAME", tracing.InstrumentationName),
+		Exporter:     r.oneOf("OTEL_TRACES_EXPORTER", tracing.ExporterConsole, tracing.ExporterConsole, tracing.ExporterOTLP, tracing.ExporterNone),
+		LogsExporter: r.oneOf("OTEL_LOGS_EXPORTER", tracing.ExporterNone, tracing.ExporterNone, tracing.ExporterOTLP),
+		ServiceName:  r.optional("OTEL_SERVICE_NAME", tracing.InstrumentationName),
 	}
 
 	r.jsonList("BOOTSTRAP_ADMINS", false, &cfg.BootstrapAdmins)

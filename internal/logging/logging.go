@@ -41,7 +41,11 @@ func isSensitive(key string) bool {
 
 // New returns a JSON logger writing to w. The message key is renamed to "event", sensitive
 // attributes are redacted, and correlation_id/actor are added from the context.
-func New(w io.Writer, level slog.Level) *slog.Logger {
+//
+// Every record also goes to each handler in export (for example the OpenTelemetry log bridge,
+// see tracing.SetupLogs), at the same level, with the same context attributes and the same
+// redaction, so nothing reaches an exporter that stdout would not show.
+func New(w io.Writer, level slog.Level, export ...slog.Handler) *slog.Logger {
 	opts := &slog.HandlerOptions{
 		Level: level,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
@@ -54,7 +58,108 @@ func New(w io.Writer, level slog.Level) *slog.Logger {
 			return a
 		},
 	}
-	return slog.New(&contextHandler{Handler: slog.NewJSONHandler(w, opts)})
+	var h slog.Handler = slog.NewJSONHandler(w, opts)
+	if len(export) > 0 {
+		f := &fanout{handlers: []slog.Handler{h}}
+		for _, e := range export {
+			f.handlers = append(f.handlers, &redactHandler{Handler: e, level: level})
+		}
+		h = f
+	}
+	return slog.New(&contextHandler{Handler: h})
+}
+
+// fanout sends each record to every handler that accepts its level.
+type fanout struct{ handlers []slog.Handler }
+
+func (f *fanout) Enabled(ctx context.Context, l slog.Level) bool {
+	for _, h := range f.handlers {
+		if h.Enabled(ctx, l) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *fanout) Handle(ctx context.Context, r slog.Record) error {
+	var first error
+	for _, h := range f.handlers {
+		if !h.Enabled(ctx, r.Level) {
+			continue
+		}
+		// An exporter that fails must not stop the stdout log (or the other way round).
+		if err := h.Handle(ctx, r.Clone()); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+func (f *fanout) WithAttrs(attrs []slog.Attr) slog.Handler {
+	out := &fanout{handlers: make([]slog.Handler, len(f.handlers))}
+	for i, h := range f.handlers {
+		out.handlers[i] = h.WithAttrs(attrs)
+	}
+	return out
+}
+
+func (f *fanout) WithGroup(name string) slog.Handler {
+	out := &fanout{handlers: make([]slog.Handler, len(f.handlers))}
+	for i, h := range f.handlers {
+		out.handlers[i] = h.WithGroup(name)
+	}
+	return out
+}
+
+// redactHandler applies the JSON logger's level and redaction to a handler that has neither.
+type redactHandler struct {
+	slog.Handler
+	level slog.Level
+}
+
+func (h *redactHandler) Enabled(ctx context.Context, l slog.Level) bool {
+	return l >= h.level && h.Handler.Enabled(ctx, l)
+}
+
+func (h *redactHandler) Handle(ctx context.Context, r slog.Record) error {
+	out := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
+	r.Attrs(func(a slog.Attr) bool {
+		// An OpenTelemetry log record carries the trace and span of ctx in its own fields; the
+		// copies contextHandler adds for stdout would only be duplicates there.
+		if a.Key != "trace_id" && a.Key != "span_id" {
+			out.AddAttrs(redact(a))
+		}
+		return true
+	})
+	return h.Handler.Handle(ctx, out)
+}
+
+func (h *redactHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	clean := make([]slog.Attr, len(attrs))
+	for i, a := range attrs {
+		clean[i] = redact(a)
+	}
+	return &redactHandler{Handler: h.Handler.WithAttrs(clean), level: h.level}
+}
+
+func (h *redactHandler) WithGroup(name string) slog.Handler {
+	return &redactHandler{Handler: h.Handler.WithGroup(name), level: h.level}
+}
+
+// redact replaces the value of a sensitive attribute, also inside groups.
+func redact(a slog.Attr) slog.Attr {
+	if isSensitive(a.Key) {
+		return slog.String(a.Key, "[REDACTED]")
+	}
+	if a.Value.Kind() == slog.KindGroup {
+		group := a.Value.Group()
+		clean := make([]any, len(group))
+		for i, g := range group {
+			clean[i] = redact(g)
+		}
+		return slog.Group(a.Key, clean...)
+	}
+	return a
 }
 
 type ctxkey struct{}

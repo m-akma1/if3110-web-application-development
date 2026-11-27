@@ -18,6 +18,7 @@ import (
 	"dbplatform/internal/groups"
 	apphttp "dbplatform/internal/http"
 	"dbplatform/internal/logging"
+	"dbplatform/internal/metrics"
 	"dbplatform/internal/migration"
 	"dbplatform/internal/platformdb"
 	"dbplatform/internal/rbac"
@@ -36,6 +37,15 @@ func main() {
 	shutdownTracing, err := tracing.Setup(context.Background(), cfg.Tracing)
 	if err != nil {
 		fatal("tracing.setup_failed", err)
+	}
+	// With OTEL_LOGS_EXPORTER=otlp every record also goes to the collector (stdout stays).
+	logExport, shutdownLogs, err := tracing.SetupLogs(context.Background(), cfg.Tracing)
+	if err != nil {
+		fatal("logs.setup_failed", err)
+	}
+	if logExport != nil {
+		logger = logging.New(os.Stdout, logging.ParseLevel(os.Getenv("LOG_LEVEL")), logExport)
+		slog.SetDefault(logger)
 	}
 
 	db, err := sql.Open("pgx", cfg.DatabaseURL)
@@ -74,6 +84,8 @@ func main() {
 	defer registry.Close()
 
 	targets := dbmanager.NewManager(dbmanager.NewTargetRepository(db), cipher, registry)
+	metrics.RegisterJobGauge(db)
+	metrics.RegisterPools(func() []metrics.Pool { return poolStats(db, targets, registry) })
 	adminService := admin.NewService(sessionStore, groupRepo, grantStore, targets)
 	migrationEngine := migration.NewEngine(db, registry, cfg.Migration)
 	migrationEngine.SetLogger(logger.With("component", "migration"))
@@ -157,6 +169,15 @@ func main() {
 	runCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if cfg.MetricsAddr != "off" {
+		go func() {
+			if err := metrics.Serve(runCtx, cfg.MetricsAddr); err != nil {
+				slog.Error("metrics.server_failed", slog.String("error", err.Error()))
+			}
+		}()
+		slog.Info("metrics.started", slog.String("addr", cfg.MetricsAddr))
+	}
+
 	workerDone := make(chan struct{})
 	go func() {
 		worker.Run(runCtx)
@@ -191,6 +212,31 @@ func main() {
 		slog.Warn("tracing.shutdown_failed", slog.String("error", err.Error()))
 	}
 	slog.Info("server.stopped")
+	if err := shutdownLogs(flushCtx); err != nil {
+		slog.Warn("logs.shutdown_failed", slog.String("error", err.Error()))
+	}
+}
+
+// poolStats lists the platform pool and every target pool, labelled by target name, for the
+// pool metrics. Target names are read on each scrape (a short query), so renames show up.
+func poolStats(platform *sql.DB, targets *dbmanager.Manager, registry *dbmanager.ConnectionRegistry) []metrics.Pool {
+	out := []metrics.Pool{{Name: "platform", Stats: platform.Stats()}}
+	names := map[string]string{}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if list, err := targets.List(ctx); err == nil {
+		for _, t := range list {
+			names[t.ID] = t.Name
+		}
+	}
+	for id, st := range registry.Stats() {
+		name := names[id]
+		if name == "" {
+			name = id
+		}
+		out = append(out, metrics.Pool{Name: "target:" + name, Stats: st})
+	}
+	return out
 }
 
 // fatal logs an error event and stops the process. Like log.Fatal, deferred calls do not run.

@@ -156,6 +156,26 @@ func TestLoad_Tracing(t *testing.T) {
 	mustFail(t, minimal(map[string]string{"OTEL_TRACES_EXPORTER": "jaeger"}), "OTEL_TRACES_EXPORTER")
 }
 
+func TestLoad_ObservabilityExport(t *testing.T) {
+	cfg, err := load(envOf(minimal(nil)))
+	if err != nil {
+		t.Fatalf("valid configuration rejected: %v", err)
+	}
+	if cfg.Tracing.LogsExporter != "none" || cfg.MetricsAddr != ":9091" {
+		t.Fatalf("defaults wrong: logs exporter %q, metrics addr %q", cfg.Tracing.LogsExporter, cfg.MetricsAddr)
+	}
+	cfg, err = load(envOf(minimal(map[string]string{
+		"OTEL_TRACES_EXPORTER": "otlp", "OTEL_LOGS_EXPORTER": "otlp", "METRICS_ADDR": "off",
+	})))
+	if err != nil {
+		t.Fatalf("valid configuration rejected: %v", err)
+	}
+	if cfg.Tracing.Exporter != "otlp" || cfg.Tracing.LogsExporter != "otlp" || cfg.MetricsAddr != "off" {
+		t.Fatalf("settings not read: %+v, metrics %q", cfg.Tracing, cfg.MetricsAddr)
+	}
+	mustFail(t, minimal(map[string]string{"OTEL_LOGS_EXPORTER": "console"}), "OTEL_LOGS_EXPORTER")
+}
+
 func TestLoad_InvalidBool(t *testing.T) {
 	mustFail(t, minimal(map[string]string{"SEED_DEMO_DATA": "maybe"}), "SEED_DEMO_DATA")
 }
