@@ -39,7 +39,12 @@ func NewService(repo *Repository, engine *Engine, access Authorizer, grants ...G
 	if len(grants) > 0 {
 		g = grants[0]
 	}
-	return &Service{repo: repo, engine: engine, access: access, grants: g}
+	s := &Service{repo: repo, engine: engine, access: access, grants: g}
+	if engine != nil {
+		// The engine asks the service again, under the database lock, whether a run is allowed.
+		engine.SetRevalidator(s.Revalidate)
+	}
+	return s
 }
 
 // Overview is the migration page of one database.
@@ -157,18 +162,6 @@ func (s *Service) DryRun(ctx context.Context, userID, id string) (*Migration, *R
 	return m, res, err
 }
 
-// Execute runs a draft on its database (COMMIT or ROLLBACK) and records the outcome.
-func (s *Service) Execute(ctx context.Context, userID, id string) (*Migration, *RunResult, error) {
-	m, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := s.checkExecutable(ctx, m); err != nil {
-		return nil, nil, err
-	}
-	return s.engine.Execute(ctx, id, userID)
-}
-
 // checkExecutable applies the workflow rules before a run: not executed yet, not waiting for or
 // rejected in review, and approved when groups have access to the database.
 func (s *Service) checkExecutable(ctx context.Context, m *Migration) error {
@@ -180,6 +173,9 @@ func (s *Service) checkExecutable(ctx context.Context, m *Migration) error {
 	}
 	if m.Status == StatusPendingReview || m.Status == StatusRejected {
 		return ErrNotApproved
+	}
+	if err := ValidateReversibility(m); err != nil {
+		return err
 	}
 	// Fail closed: when the groups with access cannot be read, the approval rule cannot be
 	// checked, so nothing runs.
@@ -204,17 +200,6 @@ func (s *Service) requireLeaders(ctx context.Context, groupIDs []string) error {
 		return fmt.Errorf("%w: %s", ErrGroupWithoutLeader, strings.Join(names, ", "))
 	}
 	return nil
-}
-
-// Rollback initiates a rollback of an executed migration.
-// If groups have access to the database, it creates a PENDING_REVIEW rollback request for Group Leader approval.
-// If no groups have access, it executes the rollback directly.
-func (s *Service) Rollback(ctx context.Context, userID, id string) (*Migration, *RunResult, error) {
-	m, direct, err := s.rollbackRequest(ctx, userID, id)
-	if err != nil || !direct {
-		return m, nil, err
-	}
-	return s.engine.ExecuteRollback(ctx, id, userID)
 }
 
 // rollbackRequest validates a rollback of id. With groups on the database it creates the
@@ -280,17 +265,6 @@ func (s *Service) groupsWithAccess(ctx context.Context, dbID string) ([]string, 
 	return s.grants.GroupsWithAccess(ctx, dbID)
 }
 
-// Forward initiates re-application of a rolled-back migration.
-// If groups have access to the database, it creates a PENDING_REVIEW forward request for Group Leader approval.
-// If no groups have access, it executes the forward directly.
-func (s *Service) Forward(ctx context.Context, userID, id string) (*Migration, *RunResult, error) {
-	m, direct, err := s.forwardRequest(ctx, userID, id)
-	if err != nil || !direct {
-		return m, nil, err
-	}
-	return s.engine.ExecuteForward(ctx, id, userID)
-}
-
 // forwardRequest is rollbackRequest for forward: an approval draft, or the rolled-back
 // migration to re-apply with direct = true.
 func (s *Service) forwardRequest(ctx context.Context, userID, id string) (m *Migration, direct bool, err error) {
@@ -343,6 +317,9 @@ func (s *Service) SubmitReview(ctx context.Context, userID, id string) (*Migrati
 	}
 	if !m.IsDraft() {
 		return nil, ErrNotDraft
+	}
+	if err := ValidateReversibility(m); err != nil {
+		return nil, err
 	}
 	groupIDs, err := s.groupsWithAccess(ctx, m.DatabaseID)
 	if err != nil {
@@ -576,6 +553,15 @@ func (s *Service) RequestBatchAction(ctx context.Context, userID, id string, act
 	if err := checkBatchAction(m, action); err != nil {
 		return nil, nil, nil, err
 	}
+	if action == BatchAbortRollback {
+		batches, err := s.repo.ListBatches(ctx, m.ID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if !recoveryComplete(batches) {
+			return nil, nil, nil, ErrRecoveryMissing
+		}
+	}
 	open, err := s.repo.OpenBatchRequest(ctx, m.ID)
 	switch {
 	case err == nil && open.Status == BatchRequestPending:
@@ -641,6 +627,8 @@ func (s *Service) runBatchAction(ctx context.Context, userID string, m *Migratio
 		if err := s.repo.MarkAborted(ctx, m.ID, requestID, userID); err != nil {
 			return nil, nil, err
 		}
+		// ABORTED is final: the before-images are no longer needed (best effort, logged).
+		_ = s.engine.PurgeRecovery(ctx, m.DatabaseID, m.ID)
 		m, err := s.repo.Get(ctx, m.ID)
 		return m, nil, err
 	}

@@ -52,7 +52,12 @@ func migrationErrorResponse(err error) (int, string) {
 		errors.Is(err, migration.ErrBatchReverting),
 		errors.Is(err, migration.ErrGroupWithoutLeader),
 		errors.Is(err, migration.ErrBatchRequestNotPending),
-		errors.Is(err, migration.ErrRejectReasonRequired):
+		errors.Is(err, migration.ErrRejectReasonRequired),
+		errors.Is(err, migration.ErrSQLDownRequired),
+		errors.Is(err, migration.ErrIrreversibleReason),
+		errors.Is(err, migration.ErrBatchDeleteReversible),
+		errors.Is(err, migration.ErrRecoveryMissing),
+		errors.Is(err, migration.ErrRevalidation):
 		return http.StatusUnprocessableEntity, err.Error()
 	default:
 		// If error is descriptive validation or target error, return 422 with message
@@ -310,6 +315,7 @@ func toBatchViews(list []migration.Batch) []domain.MigrationBatchView {
 		out = append(out, domain.MigrationBatchView{
 			Direction: b.Direction, BatchNo: b.No, ExecutionID: b.ExecutionID,
 			CursorFrom: b.From, CursorTo: b.To, Rows: b.Rows, CommittedAt: b.CommittedAt,
+			RecoveryRows: b.RecoveryRows,
 		})
 	}
 	return out

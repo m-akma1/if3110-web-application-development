@@ -77,8 +77,12 @@ func normalizeBatch(mode, attribute string, size int, up, down string, irreversi
 	if size < 1 || size > MaxBatchSize {
 		return "", "", 0, ErrBatchConfig
 	}
-	if _, err := PrepareBatch(up, attribute); err != nil {
+	plan, err := PrepareBatch(up, attribute)
+	if err != nil {
 		return "", "", 0, err
+	}
+	if plan.Verb == "DELETE" && !irreversible {
+		return "", "", 0, ErrBatchDeleteReversible
 	}
 	if strings.TrimSpace(down) != "" && !irreversible {
 		if _, err := PrepareBatch(down, attribute); err != nil {

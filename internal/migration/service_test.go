@@ -35,15 +35,16 @@ func TestServiceEditorFlow(t *testing.T) {
 	ctx := context.Background()
 	editor := f.userID
 
-	d, err := svc.CreateDraft(ctx, editor, f.dbID, "add t", "CREATE TABLE t (x int);\nINSERT INTO missing VALUES (1);")
+	d, err := svc.CreateDraftFull(ctx, NewDraft{DatabaseID: f.dbID, Name: "add t", CreatedBy: editor,
+		SQL: "CREATE TABLE t (x int);\nINSERT INTO missing VALUES (1);", SQLDown: "DROP TABLE t;"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, res, err := svc.DryRun(ctx, editor, d.ID); err != nil || res.OK || res.Err.Statement != 2 {
 		t.Fatalf("DryRun = %+v, %v; want failure at statement 2", res, err)
 	}
-	failed, res, err := svc.Execute(ctx, editor, d.ID)
-	if err != nil || res.OK || failed.Status != StatusFailed {
+	failed, err := ExecuteNow(t, svc, editor, d.ID)
+	if err != nil || failed.Status != StatusFailed {
 		t.Fatalf("Execute = %+v, %v; want FAILED", failed, err)
 	}
 	if _, _, err := svc.DryRun(ctx, editor, d.ID); !errors.Is(err, ErrNotDraft) {
@@ -54,11 +55,11 @@ func TestServiceEditorFlow(t *testing.T) {
 	if err != nil || copied.Status != StatusDraft || copied.SQL != failed.SQL || copied.Name != "add t (salinan)" {
 		t.Fatalf("Duplicate = %+v, %v", copied, err)
 	}
-	fixed, err := svc.SaveDraft(ctx, editor, copied.ID, "add t", "CREATE TABLE t (x int);")
+	fixed, err := svc.SaveDraftFull(ctx, editor, copied.ID, UpdateDraftInput{Name: "add t", SQL: "CREATE TABLE t (x int);", SQLDown: "DROP TABLE t;"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	done, _, err := svc.Execute(ctx, editor, fixed.ID)
+	done, err := ExecuteNow(t, svc, editor, fixed.ID)
 	if err != nil || done.Status != StatusSuccess || done.Version != 1 {
 		t.Fatalf("Execute fixed = %+v, %v; want SUCCESS v1", done, err)
 	}
@@ -79,8 +80,8 @@ func TestServiceViewOnlySeesHistoryOnly(t *testing.T) {
 	editor := f.userID
 
 	draft, _ := svc.CreateDraft(ctx, editor, f.dbID, "draft", "CREATE TABLE a (x int)")
-	runID, _ := svc.CreateDraft(ctx, editor, f.dbID, "run", "CREATE TABLE b (x int)")
-	run, _, err := svc.Execute(ctx, editor, runID.ID)
+	runID, _ := svc.CreateDraftFull(ctx, NewDraft{DatabaseID: f.dbID, Name: "run", SQL: "CREATE TABLE b (x int)", SQLDown: "DROP TABLE b", CreatedBy: editor})
+	run, err := ExecuteNow(t, svc, editor, runID.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +101,7 @@ func TestServiceViewOnlySeesHistoryOnly(t *testing.T) {
 	_, denied["delete"] = svc.DeleteDraft(ctx, viewer, draft.ID)
 	_, denied["duplicate"] = svc.Duplicate(ctx, viewer, run.ID)
 	_, _, denied["dry run"] = svc.DryRun(ctx, viewer, draft.ID)
-	_, _, denied["execute"] = svc.Execute(ctx, viewer, draft.ID)
+	_, _, denied["execute"] = svc.EnqueueExecute(ctx, viewer, draft.ID)
 	for what, err := range denied {
 		if !errors.Is(err, rbac.ErrForbidden) {
 			t.Errorf("viewer %s = %v, want rbac.ErrForbidden", what, err)
@@ -125,8 +126,8 @@ func TestServiceNoAccessAndUnknownIDsLookTheSame(t *testing.T) {
 		}
 	}
 	// Even an editor gets ErrForbidden (not ErrNotFound) for an id that does not exist.
-	if _, _, err := svc.Execute(ctx, f.userID, "00000000-0000-0000-0000-00000000ffff"); !errors.Is(err, rbac.ErrForbidden) {
-		t.Errorf("editor Execute(unknown) = %v, want ErrForbidden", err)
+	if _, _, err := svc.EnqueueExecute(ctx, f.userID, "00000000-0000-0000-0000-00000000ffff"); !errors.Is(err, rbac.ErrForbidden) {
+		t.Errorf("editor EnqueueExecute(unknown) = %v, want ErrForbidden", err)
 	}
 }
 
@@ -140,5 +141,46 @@ func TestCopyName(t *testing.T) {
 	}
 	if _, _, err := NormalizeDraft(long, "SELECT 1"); err != nil {
 		t.Errorf("copied name must stay valid: %v", err)
+	}
+}
+
+func TestReversibilityIsRequiredToSubmitAndRun(t *testing.T) {
+	f, svc, _, _ := newServiceFixture(t)
+	ctx := context.Background()
+	editor := f.userID
+
+	// Saving stays lenient: a draft without SQL Down can be stored.
+	noDown, err := svc.CreateDraft(ctx, editor, f.dbID, "no down", "CREATE TABLE r1 (x int)")
+	if err != nil {
+		t.Fatalf("saving a draft without SQL Down must work: %v", err)
+	}
+	if _, err := svc.SubmitReview(ctx, editor, noDown.ID); !errors.Is(err, ErrSQLDownRequired) {
+		t.Errorf("SubmitReview without SQL Down = %v, want ErrSQLDownRequired", err)
+	}
+	if _, _, err := svc.EnqueueExecute(ctx, editor, noDown.ID); !errors.Is(err, ErrSQLDownRequired) {
+		t.Errorf("EnqueueExecute without SQL Down = %v, want ErrSQLDownRequired", err)
+	}
+
+	noReason, _ := svc.CreateDraftFull(ctx, NewDraft{DatabaseID: f.dbID, Name: "no reason", SQL: "DROP TABLE IF EXISTS gone", IsIrreversible: true, IrreversibleReason: "  ", CreatedBy: editor})
+	if _, _, err := svc.EnqueueExecute(ctx, editor, noReason.ID); !errors.Is(err, ErrIrreversibleReason) {
+		t.Errorf("irreversible without a reason = %v, want ErrIrreversibleReason", err)
+	}
+
+	withReason, _ := svc.CreateDraftFull(ctx, NewDraft{DatabaseID: f.dbID, Name: "reason", SQL: "DROP TABLE IF EXISTS gone", IsIrreversible: true, IrreversibleReason: "data lama, tidak dipakai", CreatedBy: editor})
+	if m, err := ExecuteNow(t, svc, editor, withReason.ID); err != nil || m.Status != StatusSuccess {
+		t.Errorf("irreversible with a reason = %+v, %v; want SUCCESS", m, err)
+	}
+
+	// A batch DELETE cannot be undone by SQL Down, so it must be irreversible.
+	_, err = svc.CreateDraftFull(ctx, NewDraft{DatabaseID: f.dbID, Name: "batch delete", CreatedBy: editor,
+		SQL: "DELETE FROM events WHERE kind = 'tmp'", SQLDown: "UPDATE events SET kind = kind",
+		ExecutionMode: ModeBatch, BatchAttribute: "id", BatchSize: 10})
+	if !errors.Is(err, ErrBatchDeleteReversible) {
+		t.Errorf("reversible batch DELETE = %v, want ErrBatchDeleteReversible", err)
+	}
+	if _, err := svc.CreateDraftFull(ctx, NewDraft{DatabaseID: f.dbID, Name: "batch delete", CreatedBy: editor,
+		SQL: "DELETE FROM events WHERE kind = 'tmp'", IsIrreversible: true, IrreversibleReason: "baris sementara",
+		ExecutionMode: ModeBatch, BatchAttribute: "id", BatchSize: 10}); err != nil {
+		t.Errorf("irreversible batch DELETE = %v, want it saved", err)
 	}
 }

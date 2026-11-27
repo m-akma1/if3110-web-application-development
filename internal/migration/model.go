@@ -69,7 +69,31 @@ var (
 	ErrBatchRequestNotPending   = errors.New("pengajuan aksi batch ini tidak sedang menunggu persetujuan")
 	ErrBatchRequestNotApproved  = errors.New("pengajuan aksi batch ini belum disetujui atau sudah dijalankan")
 	ErrRejectReasonRequired     = errors.New("alasan penolakan wajib diisi")
+	ErrSQLDownRequired          = errors.New("SQL Down wajib diisi; jika perubahan ini tidak dapat dibatalkan, tandai migration sebagai irreversible dan tulis alasannya")
+	ErrIrreversibleReason       = errors.New("migration yang ditandai irreversible wajib menyertakan alasan")
+	ErrBatchDeleteReversible    = errors.New("DELETE dalam mode batch tidak dapat dibatalkan dengan SQL Down (baris yang terhapus tidak bisa dikembalikan dengan UPDATE/DELETE); tandai migration sebagai irreversible dan tulis alasannya")
+	ErrRecoveryMissing          = errors.New("data pemulihan batch tidak lengkap (batch dijalankan sebelum fitur ini ada), sehingga pembatalan dengan rollback tidak aman; gunakan \"hentikan tanpa rollback\"")
 )
+
+// ValidateReversibility enforces "SQL Down, or irreversible with a reason" on a migration the
+// user wrote. It runs when a draft is submitted for review and before it is queued; saving a
+// draft stays lenient so work in progress can be stored. Rollback and forward requests are
+// exempt: their scripts are copied from the executed migration and cannot be edited.
+func ValidateReversibility(m *Migration) error {
+	if m == nil || m.ExecutionType == "ROLLBACK" || m.RollbackTargetID != "" || m.SourceMigrationID != "" {
+		return nil
+	}
+	if m.IsIrreversible {
+		if strings.TrimSpace(m.IrreversibleReason) == "" {
+			return ErrIrreversibleReason
+		}
+		return nil
+	}
+	if strings.TrimSpace(m.SQLDown) == "" {
+		return ErrSQLDownRequired
+	}
+	return nil
+}
 
 // BatchAction is an action on a batch migration that stopped half-way (PARTIAL). Each one changes
 // what the database looks like to every team using it, so it needs the same leader approvals as

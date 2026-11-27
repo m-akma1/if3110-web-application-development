@@ -86,7 +86,7 @@ func TestAuthorizationMatrix_Integration(t *testing.T) {
 		form   url.Values
 	}
 	routesFor := func(draft string) []route {
-		script := url.Values{"name": {"matrix"}, "sql_script": {"SELECT 1"}}
+		script := url.Values{"name": {"matrix"}, "sql_script": {"SELECT 1"}, "sql_down": {"SELECT 1"}}
 		return []route{
 			{"viewer overview", http.MethodGet, "/api/viewer?db_id=" + target, nil},
 			{"table data", http.MethodGet, "/api/viewer/table?db_id=" + target + "&name=customers", nil},

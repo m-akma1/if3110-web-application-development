@@ -52,7 +52,7 @@ func TestAuditEventsForRequests_Integration(t *testing.T) {
 		t.Fatalf("set grant = %d %s", rec.Code, rec.Body)
 	}
 
-	d, err := env.migrations.CreateDraft(ctx, migration.NewDraft{DatabaseID: target, Name: "orders", SQL: "CREATE TABLE orders (id int)", CreatedBy: bob})
+	d, err := env.migrations.CreateDraft(ctx, migration.NewDraft{DatabaseID: target, Name: "orders", SQL: "CREATE TABLE orders (id int)", SQLDown: "DROP TABLE orders", CreatedBy: bob})
 	if err != nil {
 		t.Fatal(err)
 	}

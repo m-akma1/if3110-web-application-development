@@ -70,8 +70,25 @@ export const MigrationEditor: React.FC<MigrationEditorProps> = ({
   onSubmitReview,
   onExecute,
 }) => {
+  // The same rule the server applies on submit and execute (ValidateReversibility): SQL Down,
+  // or irreversible with a reason. Rollback/forward requests copy their scripts and are exempt.
+  const isRequestCopy =
+    !!selectedDraft &&
+    (selectedDraft.execution_type === 'ROLLBACK' || !!selectedDraft.rollback_target_id || !!selectedDraft.source_migration_id)
+  const batchDelete = executionMode === 'BATCH' && /^\s*(--[^\n]*\n\s*)*delete\b/i.test(sqlUp)
+  const reasonError = isIrreversible && !irreversibleReason.trim() ? 'Alasan irreversible wajib diisi.' : null
+  const downError = isIrreversible
+    ? null
+    : batchDelete
+    ? 'DELETE dalam mode batch tidak dapat dibatalkan dengan SQL Down (baris terhapus tidak bisa dikembalikan). Tandai sebagai irreversible dan tulis alasannya.'
+    : !sqlDown.trim()
+    ? 'SQL Down wajib diisi, atau tandai migration sebagai irreversible dan tulis alasannya.'
+    : null
+  const reversibilityError = isLocked || isRequestCopy ? null : reasonError || downError
+  const notReadyTitle = reversibilityError ? `Belum bisa diajukan atau dieksekusi: ${reversibilityError}` : undefined
+
   return (
-    <div id="migration-editor" className="bg-app-card border border-app-border rounded-xl p-5 space-y-4 shadow-xl">
+    <div id="migration-editor" className="min-w-0 bg-app-card border border-app-border rounded-xl p-4 sm:p-5 space-y-4 shadow-xl">
       <form onSubmit={(e) => e.preventDefault()} className="space-y-4">
         {/* Migration Name & File Upload */}
         <div className="flex flex-wrap items-center gap-3">
@@ -102,17 +119,17 @@ export const MigrationEditor: React.FC<MigrationEditorProps> = ({
         {/* Dual SQL Tabs */}
         <div className="space-y-0">
           <div className="flex items-center justify-between border-b border-app-border">
-            <div className="flex space-x-1">
+            <div className="flex space-x-1 max-w-full shrink-0 overflow-x-auto whitespace-nowrap">
               <button
                 type="button"
                 onClick={() => setSqlTab('up')}
-                className={`px-4 py-2 text-xs font-semibold rounded-t-lg transition flex items-center gap-1.5 cursor-pointer ${
+                className={`shrink-0 px-3 sm:px-4 py-2 text-xs font-semibold rounded-t-lg transition flex items-center gap-1.5 cursor-pointer ${
                   sqlTab === 'up'
                     ? 'bg-app-bg text-brand-primary border-t-2 border-brand-primary border-x border-app-border'
                     : 'text-zinc-400 hover:text-zinc-200 hover:bg-app-active/40'
                 }`}
               >
-                <span>SQL Up (Apply)</span>
+                <span>SQL Up<span className="hidden lg:inline"> (Apply)</span></span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded bg-sem-info/10 text-sem-info font-mono">
                   {sqlUp.trim() ? `${sqlUp.trim().split('\n').length} baris` : 'kosong'}
                 </span>
@@ -120,16 +137,20 @@ export const MigrationEditor: React.FC<MigrationEditorProps> = ({
               <button
                 type="button"
                 onClick={() => setSqlTab('down')}
-                className={`px-4 py-2 text-xs font-semibold rounded-t-lg transition flex items-center gap-1.5 cursor-pointer ${
+                className={`shrink-0 px-3 sm:px-4 py-2 text-xs font-semibold rounded-t-lg transition flex items-center gap-1.5 cursor-pointer ${
                   sqlTab === 'down'
                     ? 'bg-app-bg text-brand-primary border-t-2 border-brand-primary border-x border-app-border'
                     : 'text-zinc-400 hover:text-zinc-200 hover:bg-app-active/40'
                 }`}
               >
-                <span>SQL Down (Rollback)</span>
+                <span>SQL Down<span className="hidden lg:inline"> (Rollback)</span></span>
                 {isIrreversible ? (
                   <span className="text-[10px] px-1.5 py-0.2 rounded bg-sem-warning/15 text-sem-warning font-semibold">
                     Irreversible
+                  </span>
+                ) : !isLocked && !isRequestCopy && downError ? (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-sem-danger/15 text-sem-danger font-semibold">
+                    wajib
                   </span>
                 ) : (
                   <span className="text-[10px] px-1.5 py-0.2 rounded bg-sem-info/10 text-sem-info font-mono">
@@ -138,7 +159,7 @@ export const MigrationEditor: React.FC<MigrationEditorProps> = ({
                 )}
               </button>
             </div>
-            <div className="text-[11px] text-zinc-400 hidden sm:block px-2">
+            <div className="text-[11px] text-zinc-400 hidden xl:block px-2 min-w-0 truncate">
               {sqlTab === 'up'
                 ? 'Perubahan skema yang diaplikasikan'
                 : isIrreversible
@@ -187,8 +208,17 @@ export const MigrationEditor: React.FC<MigrationEditorProps> = ({
               value={sqlDown}
               onChange={(e) => setSqlDown(e.target.value)}
               placeholder="-- Tulis perintah SQL untuk mengembalikan perubahan (SQL Down). Misal: DROP TABLE users; ALTER TABLE orders DROP COLUMN..."
-              className="w-full p-4 bg-app-bg border border-app-border rounded-b-lg font-mono text-xs text-sem-info focus:outline-none focus:ring-2 focus:ring-brand-primary/50 leading-relaxed resize-y read-only:opacity-85"
+              aria-invalid={!!(reversibilityError && downError)}
+              aria-describedby={reversibilityError && downError ? 'sql-down-error' : undefined}
+              className={`w-full p-4 bg-app-bg border rounded-b-lg font-mono text-xs text-sem-info focus:outline-none focus:ring-2 focus:ring-brand-primary/50 leading-relaxed resize-y read-only:opacity-85 ${
+                reversibilityError && downError ? 'border-sem-danger/60' : 'border-app-border'
+              }`}
             />
+          )}
+          {reversibilityError && downError && (
+            <p id="sql-down-error" className="pt-1.5 text-[11px] text-sem-danger">
+              {downError}
+            </p>
           )}
         </div>
 
@@ -228,8 +258,17 @@ export const MigrationEditor: React.FC<MigrationEditorProps> = ({
                   value={irreversibleReason}
                   onChange={(e) => setIrreversibleReason(e.target.value)}
                   placeholder="Jelaskan mengapa migrasi ini tidak dapat dibatalkan..."
-                  className="w-full px-3 py-2 bg-app-input border border-app-border rounded-lg text-xs text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-brand-primary/50 resize-none"
+                  aria-invalid={!!(reversibilityError && reasonError)}
+                  aria-describedby={reversibilityError && reasonError ? 'irreversible-reason-error' : undefined}
+                  className={`w-full px-3 py-2 bg-app-input border rounded-lg text-xs text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-brand-primary/50 resize-none ${
+                    reversibilityError && reasonError ? 'border-sem-danger/60' : 'border-app-border'
+                  }`}
                 />
+                {reversibilityError && reasonError && (
+                  <p id="irreversible-reason-error" className="text-[11px] text-sem-danger">
+                    {reasonError}
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -400,26 +439,31 @@ export const MigrationEditor: React.FC<MigrationEditorProps> = ({
                 {(!selectedDraft.status || selectedDraft.status === 'DRAFT' || selectedDraft.status === 'REJECTED') && (
                   <button
                     type="button"
-                    disabled={actionLoading}
+                    disabled={actionLoading || !!reversibilityError}
                     onClick={onSubmitReview}
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-sem-info/15 hover:bg-sem-info/25 text-sem-info border border-sem-info/30 transition cursor-pointer disabled:opacity-50"
-                    title="Ajukan migrasi ini untuk direview oleh Group Leader"
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-sem-info/15 hover:bg-sem-info/25 text-sem-info border border-sem-info/30 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={notReadyTitle ?? 'Ajukan migrasi ini untuk direview oleh Group Leader'}
                   >
                     Ajukan Review
                   </button>
                 )}
                 <button
                   type="button"
-                  disabled={actionLoading || selectedDraft.status === 'PENDING_REVIEW' || selectedDraft.status === 'REJECTED'}
+                  disabled={
+                    actionLoading ||
+                    !!reversibilityError ||
+                    selectedDraft.status === 'PENDING_REVIEW' ||
+                    selectedDraft.status === 'REJECTED'
+                  }
                   onClick={onExecute}
                   title={
                     selectedDraft.status === 'PENDING_REVIEW'
                       ? 'Migrasi masih menunggu persetujuan Group Leader'
                       : selectedDraft.status === 'REJECTED'
                       ? 'Migrasi ditolak. Silakan revisi lalu ajukan review ulang.'
-                      : undefined
+                      : notReadyTitle
                   }
-                  className="px-4 py-1.5 rounded-lg text-xs font-bold bg-brand-primary hover:bg-brand-primary-hover text-app-bg transition shadow-md cursor-pointer disabled:opacity-50"
+                  className="px-4 py-1.5 rounded-lg text-xs font-bold bg-brand-primary hover:bg-brand-primary-hover text-app-bg transition shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Eksekusi Migration
                 </button>

@@ -28,6 +28,7 @@ var batchAttributeRe = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
 // BatchPlan is a script prepared for per-batch execution.
 type BatchPlan struct {
+	Verb      string // UPDATE or DELETE
 	Table     string // the target table as written, e.g. orders or public."Orders"
 	Attribute string // the cursor column (an integer key)
 	// Statement is the user's statement restricted to one key range: $1 is the exclusive lower
@@ -38,6 +39,24 @@ type BatchPlan struct {
 	Bounds string
 	// Remaining counts the keys after $1, to estimate the number of batches left.
 	Remaining string
+
+	// Recovery data (see recoveryTable), UPDATE only. Every query takes $1/$2 as above, $3 the
+	// migration ID and $4 the batch number.
+	//
+	// Capture stores the before-image of the rows the batch is about to change and locks them
+	// (FOR UPDATE), in the batch's transaction, right before Returning, and returns their keys.
+	// It filters on the statement's WHERE; with UPDATE ... FROM (whose WHERE joins other tables)
+	// it takes every row of the key range instead, a superset.
+	Capture string
+	// Returning is Statement returning the key of every row it changed ($1/$2 only). The engine
+	// refuses the batch when one of them is not among the keys Capture returned (a row that
+	// started to match in between). The comparison is done in Go, so it never depends on the
+	// planner's view of the recovery table, which grows by a whole batch at a time.
+	Returning string
+	// Verify compares, after SQL Down ran over the key range, the stored before-images with the
+	// rows now in the range: it returns the number of stored rows and how many of them are not
+	// found unchanged (EXCEPT ALL, so a non-unique cursor column works too).
+	Verify string
 }
 
 // PrepareBatch checks that script can run per batch over attribute and builds the SQL for it.
@@ -73,7 +92,9 @@ func PrepareBatch(script, attribute string) (*BatchPlan, error) {
 	default:
 		return nil, ErrBatchScript
 	}
+	only := ""
 	if i < len(toks) && toks[i].word == "ONLY" {
+		only = "ONLY "
 		i++
 	}
 	tableStart := i
@@ -98,8 +119,13 @@ func PrepareBatch(script, attribute string) (*BatchPlan, error) {
 	}
 
 	where := -1
+	joins := false // UPDATE ... FROM / DELETE ... USING: the WHERE may refer to other tables
 	for j := i; j < len(toks); j++ {
 		switch toks[j].word {
+		case "FROM", "USING":
+			if where < 0 {
+				joins = true
+			}
 		case "WHERE":
 			if where >= 0 {
 				return nil, ErrBatchScript
@@ -113,13 +139,16 @@ func PrepareBatch(script, attribute string) (*BatchPlan, error) {
 		}
 	}
 
-	pred := fmt.Sprintf("($1::bigint IS NULL OR %[1]s.%[2]s > $1) AND %[1]s.%[2]s <= $2::bigint", ref, attribute)
+	pred := rangePredicate(ref, attribute)
 	stmt := text + "\nWHERE " + pred
+	userWhere := ""
 	if where >= 0 {
 		cut := toks[where].end
-		stmt = text[:cut] + " (" + strings.TrimSpace(text[cut:]) + ")\n  AND " + pred
+		userWhere = strings.TrimSpace(text[cut:])
+		stmt = text[:cut] + " (" + userWhere + ")\n  AND " + pred
 	}
-	return &BatchPlan{
+	plan := &BatchPlan{
+		Verb:      first.word,
 		Table:     table,
 		Attribute: attribute,
 		Statement: stmt,
@@ -127,7 +156,47 @@ func PrepareBatch(script, attribute string) (*BatchPlan, error) {
 	SELECT %[1]s FROM %[2]s WHERE ($1::bigint IS NULL OR %[1]s > $1) ORDER BY %[1]s LIMIT $2) b
 HAVING count(*) > 0`, attribute, table),
 		Remaining: fmt.Sprintf(`SELECT count(*) FROM %[2]s WHERE ($1::bigint IS NULL OR %[1]s > $1)`, attribute, table),
-	}, nil
+	}
+	if plan.Verb == "UPDATE" {
+		plan.addRecovery(only, ref, userWhere, joins)
+	}
+	return plan, nil
+}
+
+// recoveryRow is the alias the recovery queries give the target table.
+const recoveryRow = "_dbplatform_row"
+
+// rangePredicate restricts ref to one batch: keys after $1 (all keys when NULL) up to $2.
+func rangePredicate(ref, attribute string) string {
+	return fmt.Sprintf("($1::bigint IS NULL OR %[1]s.%[2]s > $1) AND %[1]s.%[2]s <= $2::bigint", ref, attribute)
+}
+
+// addRecovery builds Capture, Changed and Verify (see BatchPlan).
+func (p *BatchPlan) addRecovery(only, ref, userWhere string, joins bool) {
+	rng := rangePredicate(recoveryRow, p.Attribute)
+	filter := rng
+	if userWhere != "" && !joins {
+		// The user's WHERE uses the user's names for the table, so it is applied in a subquery
+		// that reads the table the way the statement does.
+		from := only + p.Table
+		if ref != p.Table {
+			from += " " + ref
+		}
+		filter = fmt.Sprintf("%s\n  AND %s.%s IN (SELECT %s.%s FROM %s WHERE (%s) AND %s)",
+			rng, recoveryRow, p.Attribute, ref, p.Attribute, from, userWhere, rangePredicate(ref, p.Attribute))
+	}
+	p.Capture = fmt.Sprintf(`INSERT INTO %[1]s (migration_id, batch_no, row_key, before)
+SELECT $3::uuid, $4::int, %[2]s.%[3]s, to_jsonb(%[2]s) FROM %[4]s%[5]s %[2]s
+WHERE %[6]s
+FOR UPDATE OF %[2]s
+RETURNING row_key`, recoveryTable, recoveryRow, p.Attribute, only, p.Table, filter)
+	p.Returning = fmt.Sprintf("%s\nRETURNING %s.%s", p.Statement, ref, p.Attribute)
+	p.Verify = fmt.Sprintf(`SELECT (SELECT count(*) FROM %[1]s WHERE migration_id = $3::uuid AND batch_no = $4::int),
+	(SELECT count(*) FROM (
+		SELECT before FROM %[1]s WHERE migration_id = $3::uuid AND batch_no = $4::int
+		EXCEPT ALL
+		SELECT to_jsonb(%[2]s) FROM %[3]s%[4]s %[2]s WHERE %[5]s) d)`,
+		recoveryTable, recoveryRow, only, p.Table, rng)
 }
 
 // clauseWords end the table reference; any other identifier after the table is its alias.
