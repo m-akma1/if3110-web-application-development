@@ -192,6 +192,21 @@ func (w *Worker) process(ctx context.Context, workerID string, j *Job) {
 		}
 		w.recordAttempt(ctx, log, j, ExecUncertain, true, err.Error())
 		w.finish(ctx, log, j, JobUncertain, err.Error())
+	case errors.Is(err, ErrRevalidation):
+		// Refused under the lock before any SQL: final for this job. A migration that groups
+		// got access to after its approval goes back to review for them; otherwise (only the
+		// executor lost access, or a resume/abort/direct rollback) it returns to its earlier
+		// status and can be run again by someone allowed to, or requested again.
+		w.recordAttempt(ctx, log, j, ExecFailed, false, err.Error())
+		w.finish(ctx, log, j, JobFailed, err.Error())
+		var rv *RevalidationError
+		if errors.As(err, &rv) && len(rv.MissingGroups) > 0 && j.Type == JobExecute {
+			if rerr := w.repo.ReopenReview(ctx, j.MigrationID, rv.MissingGroups); rerr != nil {
+				log.ErrorContext(ctx, "job.restore_failed", slog.String("error", rerr.Error()))
+			}
+		} else if rerr := w.repo.RestoreMigrationStatus(ctx, j); rerr != nil {
+			log.ErrorContext(ctx, "job.restore_failed", slog.String("error", rerr.Error()))
+		}
 	case errors.Is(err, ErrTargetBusy):
 		// Not the job's fault and not an attempt: give it back and try again soon. No execution
 		// row either: the job only waited (job.retry_scheduled is logged).

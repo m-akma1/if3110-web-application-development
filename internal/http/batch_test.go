@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -251,5 +252,43 @@ func TestBatchResumeNeedsLeaderApproval_Integration(t *testing.T) {
 	}
 	if !sawRequest || !sawApprove {
 		t.Fatalf("audit events for the request: request %v, approve %v", sawRequest, sawApprove)
+	}
+}
+
+// Removing a group's grant through the admin API resyncs open reviews: the group's pending
+// approval goes away and a review that only waited for it becomes APPROVED.
+func TestGrantChangeResyncsOpenReviews_Integration(t *testing.T) {
+	env := newApprovalTestEnv(t, io.Discard)
+	ctx := context.Background()
+	target := accesstest.InsertTarget(t, env.db, "grant-sync")
+	bob, carol := userID(t, env.srv, "bob"), userID(t, env.srv, "carol")
+	editors, _ := env.groups.Create(ctx, "Editors", "")
+	analysts, _ := env.groups.Create(ctx, "Analysts", "")
+	_ = env.groups.AddMember(ctx, editors.ID, bob)
+	_ = env.groups.AddMember(ctx, analysts.ID, carol)
+	accesstest.Grant(t, env.db, editors.ID, target, "VIEW_EDIT")
+	accesstest.Grant(t, env.db, analysts.ID, target, "VIEW_ONLY")
+
+	d, err := env.migrations.CreateDraft(ctx, migration.NewDraft{DatabaseID: target, Name: "orders", SQL: "CREATE TABLE orders (id int)", SQLDown: "DROP TABLE orders", CreatedBy: bob})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobC := newClient(t, env.srv)
+	bobC.login("bob", testPasswords["bob"])
+	if rec := bobC.post("/api/migration/"+d.ID+"/submit-review", nil); rec.Code != http.StatusOK {
+		t.Fatalf("submit = %d %s", rec.Code, rec.Body)
+	}
+	if rec := bobC.post("/api/migration/"+d.ID+"/approve", nil); rec.Code != http.StatusOK {
+		t.Fatalf("approve = %d %s", rec.Code, rec.Body)
+	}
+
+	admin := newClient(t, env.srv)
+	admin.login("admin", testPasswords["admin"])
+	if rec := admin.postJSON("/api/admin/grants",
+		`{"group_id":"`+analysts.ID+`","database_id":"`+target+`","level":"NONE"}`); rec.Code != http.StatusOK {
+		t.Fatalf("remove grant = %d %s", rec.Code, rec.Body)
+	}
+	if m, _ := env.migrations.Get(ctx, d.ID); m.Status != migration.StatusApproved {
+		t.Fatalf("after Analysts lost access = %s, want APPROVED", m.Status)
 	}
 }

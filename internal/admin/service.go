@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"dbplatform/domain"
 	"dbplatform/internal/authn"
@@ -32,10 +33,27 @@ type Service struct {
 	groups   *groups.Repository
 	grants   *rbac.PostgresGrantStore
 	targets  *dbmanager.Manager
+	// onAccessChange runs after a grant changed or a group was deleted (see OnAccessChange).
+	onAccessChange func(ctx context.Context) error
 }
 
 func NewService(sessions *authn.SessionStore, groupRepo *groups.Repository, grants *rbac.PostgresGrantStore, targets *dbmanager.Manager) *Service {
 	return &Service{sessions: sessions, groups: groupRepo, grants: grants, targets: targets}
+}
+
+// OnAccessChange registers fn to run after the set of groups with access to a database may have
+// changed. main.go passes migration.Service.SyncApprovals, so open reviews follow the grants. A
+// failure is logged, not returned: the grant change itself succeeded, and the worker checks
+// approvals again before any run.
+func (s *Service) OnAccessChange(fn func(ctx context.Context) error) { s.onAccessChange = fn }
+
+func (s *Service) accessChanged(ctx context.Context) {
+	if s.onAccessChange == nil {
+		return
+	}
+	if err := s.onAccessChange(ctx); err != nil {
+		slog.WarnContext(ctx, "migration.approvals_sync_failed", slog.String("error", err.Error()))
+	}
 }
 
 // ---------- users ----------
@@ -119,7 +137,11 @@ func (s *Service) RenameGroup(ctx context.Context, groupID, name, description st
 }
 
 func (s *Service) DeleteGroup(ctx context.Context, groupID string) error {
-	return s.groups.Delete(ctx, groupID)
+	if err := s.groups.Delete(ctx, groupID); err != nil {
+		return err
+	}
+	s.accessChanged(ctx)
+	return nil
 }
 
 // AddMember adds a user to a group; joining a group can only add access, so their sessions rotate.
@@ -169,6 +191,9 @@ func (s *Service) SetGrant(ctx context.Context, groupID, databaseID, level strin
 	previous, err := s.grants.SetGroupGrant(ctx, groupID, databaseID, lvl)
 	if err != nil {
 		return err
+	}
+	if (previous == rbac.AccessNone) != (lvl == rbac.AccessNone) {
+		s.accessChanged(ctx) // a group got or lost access: approvals needed change
 	}
 	if !rbac.Raises(previous, lvl) {
 		return nil

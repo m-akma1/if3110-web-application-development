@@ -60,11 +60,24 @@ func (e *approvalEnv) partialBatch(t *testing.T) *Migration {
 	t.Helper()
 	e.items(t, 2500)
 	m := e.batchDraft(t, 1000)
+	e.approveAll(t, m.ID) // the first run went through review
 	e.partial(t, m, 1500)
 	if _, err := e.target.Exec(`ALTER TABLE items DROP CONSTRAINT stop_here`); err != nil {
 		t.Fatal(err)
 	}
 	return e.migration(t, m.ID)
+}
+
+// approveAll records an APPROVED review of migrationID by every group with access, as if each
+// leader had approved it.
+func (e *approvalEnv) approveAll(t *testing.T, migrationID string) {
+	t.Helper()
+	if _, err := e.platform.Exec(`
+		INSERT INTO migration_approvals (id, migration_id, group_id, status, reviewed_at)
+		SELECT gen_random_uuid(), $1, g.group_id, 'APPROVED', NOW()
+		FROM group_db_grants g WHERE g.database_id = $2 AND g.access_level <> 'NONE'`, migrationID, e.dbID); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestResumeNeedsEveryLeaderBeforeItRuns(t *testing.T) {
@@ -198,7 +211,10 @@ func TestReviewIsRefusedWhenAGroupHasNoActiveLeader(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d := e.draft(t, "orders", "CREATE TABLE orders (id int)")
+	d, err := e.repo.CreateDraft(ctx, NewDraft{DatabaseID: e.dbID, Name: "orders", SQL: "CREATE TABLE orders (id int)", SQLDown: "DROP TABLE orders", CreatedBy: e.userID})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := e.svc.SubmitReview(ctx, e.userID, d.ID); !errors.Is(err, ErrGroupWithoutLeader) {
 		t.Fatalf("submit with a leaderless group = %v, want ErrGroupWithoutLeader", err)
 	}

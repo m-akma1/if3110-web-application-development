@@ -183,6 +183,9 @@ func (e *Engine) ExecuteRollback(ctx context.Context, migrationID, executorID st
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := e.revalidate(runCtx, m, executorID, ApprovalsNone); err != nil {
+		return nil, nil, err
+	}
 
 	stmts, err := CheckScript(downScript)
 	if err != nil {
@@ -266,6 +269,9 @@ func (e *Engine) executeApprovedRollback(ctx context.Context, rollbackDraftID, e
 	if strings.TrimSpace(rb.SQL) != "" {
 		downScript = rb.SQL
 	}
+	if err := e.revalidate(runCtx, rb, executorID, ApprovalsOfMigration); err != nil {
+		return nil, nil, err
+	}
 
 	stmts, err := CheckScript(downScript)
 	if err != nil {
@@ -342,6 +348,9 @@ func (e *Engine) ExecuteForward(ctx context.Context, migrationID, executorID str
 	}
 	upScript, err := validateForwardSource(runCtx, lockConn, m)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := e.revalidate(runCtx, m, executorID, ApprovalsNone); err != nil {
 		return nil, nil, err
 	}
 
@@ -440,6 +449,9 @@ func (e *Engine) executeApprovedForward(ctx context.Context, forwardDraftID, exe
 	}
 	if strings.TrimSpace(fwd.SQL) != "" {
 		upScript = fwd.SQL
+	}
+	if err := e.revalidate(runCtx, fwd, executorID, ApprovalsOfMigration); err != nil {
+		return nil, nil, err
 	}
 
 	stmts, err := CheckScript(upScript)

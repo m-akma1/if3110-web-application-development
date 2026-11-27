@@ -79,6 +79,9 @@ func main() {
 	migrationEngine.SetLogger(logger.With("component", "migration"))
 	migrationRepo := migration.NewRepository(db)
 	migrations := migration.NewService(migrationRepo, migrationEngine, authorizer, grantStore)
+	// Open reviews follow the grants: a group that gets access must approve, one that loses it
+	// no longer blocks.
+	adminService.OnAccessChange(migrations.SyncApprovals)
 	worker := migration.NewWorker(migrationRepo, migrationEngine, migration.DefaultWorkerConfig())
 	worker.SetLogger(logger.With("component", "worker"))
 
@@ -115,6 +118,10 @@ func main() {
 		slog.Warn("groups.public_leader_failed", slog.String("error", err.Error()))
 	} else if leader != "" {
 		slog.Info("groups.public_leader_set", slog.String("leader", leader))
+	}
+	// Grants changed by an older version (or directly in SQL) are picked up at startup.
+	if err := migrations.SyncApprovals(ctx); err != nil {
+		slog.Warn("migration.approvals_sync_failed", slog.String("error", err.Error()))
 	}
 	if leaderless, err := groupRepo.LeaderlessWithGrants(ctx); err == nil && len(leaderless) > 0 {
 		names := make([]string, 0, len(leaderless))

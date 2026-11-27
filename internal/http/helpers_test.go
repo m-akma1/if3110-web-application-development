@@ -85,13 +85,16 @@ func buildTestEnv(t *testing.T, logOutput io.Writer, approvals bool) *testEnv {
 	if approvals {
 		inspectors = append(inspectors, grants)
 	}
+	migrationService := migration.NewService(migrations, migration.NewEngine(db, registry, migration.Limits{}), authorizer, inspectors...)
+	adminService := admin.NewService(store, gr, grants, targets)
+	adminService.OnAccessChange(migrationService.SyncApprovals)
 	srv := apphttp.NewServer(logOutput, apphttp.Deps{
 		Sessions:   store,
 		Groups:     gr,
 		Access:     authorizer,
-		Admin:      admin.NewService(store, gr, grants, targets),
+		Admin:      adminService,
 		Registry:   registry,
-		Migrations: migration.NewService(migrations, migration.NewEngine(db, registry, migration.Limits{}), authorizer, inspectors...),
+		Migrations: migrationService,
 	})
 	return &testEnv{srv: srv, db: db, sessions: store, groups: gr, grants: grants, targets: targets, registry: registry, migrations: migrations}
 }

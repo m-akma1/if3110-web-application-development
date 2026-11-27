@@ -57,12 +57,13 @@ const lockPollInterval = 100 * time.Millisecond
 
 // Engine runs scripts on target databases and records executions in the platform database.
 type Engine struct {
-	platform   *sql.DB
-	pools      PoolSource
-	limits     Limits
-	now        func() time.Time
-	logger     *slog.Logger
-	onRunStart func(ctx context.Context, migrationID string) error
+	platform    *sql.DB
+	pools       PoolSource
+	limits      Limits
+	now         func() time.Time
+	logger      *slog.Logger
+	onRunStart  func(ctx context.Context, migrationID string) error
+	revalidator Revalidator
 }
 
 func NewEngine(platform *sql.DB, pools PoolSource, limits Limits) *Engine {
@@ -182,6 +183,9 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	}
 	if !m.IsExecutable() {
 		return nil, nil, ErrNotDraft
+	}
+	if err := e.revalidate(runCtx, m, executorID, ApprovalsOfMigration); err != nil {
+		return nil, nil, err
 	}
 	stmts, err := CheckScript(m.SQL)
 	if err != nil {
