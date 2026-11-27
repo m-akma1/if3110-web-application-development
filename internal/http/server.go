@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"dbplatform/internal/admin"
 	"dbplatform/internal/authn"
 	"dbplatform/internal/dbmanager"
 	"dbplatform/internal/groups"
 	"dbplatform/internal/logging"
+	"dbplatform/internal/metrics"
 	"dbplatform/internal/migration"
 	"dbplatform/internal/rbac"
 
@@ -91,15 +93,25 @@ func NewServer(logOutput io.Writer, deps Deps) *Server {
 
 // spanNameMiddleware names the request's span after its route pattern, e.g.
 // "POST /api/migration/{id}/execute". otelhttp only reads the pattern from its own copy of the
-// request, which the middlewares in between replace, so the name is set here.
+// request, which the middlewares in between replace, so the name is set here. API requests are
+// also counted and timed per route pattern (metrics.HTTPRequests), never per raw path.
 func spanNameMiddleware(mux *http.ServeMux, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, pattern := mux.Handler(r); pattern != "" {
+		_, pattern := mux.Handler(r)
+		if pattern != "" {
 			span := trace.SpanFromContext(r.Context())
 			span.SetName(pattern)
 			span.SetAttributes(attribute.String("http.route", pattern))
 		}
-		next.ServeHTTP(w, r)
+		if pattern == "" || !strings.HasPrefix(r.URL.Path, "/api/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		metrics.HTTPRequests.WithLabelValues(pattern, r.Method, metrics.CodeClass(rec.statusCode)).Inc()
+		metrics.HTTPDuration.WithLabelValues(pattern, r.Method).Observe(time.Since(start).Seconds())
 	})
 }
 

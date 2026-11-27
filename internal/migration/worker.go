@@ -12,6 +12,7 @@ import (
 
 	"dbplatform/internal/ids"
 	"dbplatform/internal/logging"
+	"dbplatform/internal/metrics"
 	"dbplatform/internal/tracing"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -154,6 +155,7 @@ func (w *Worker) process(ctx context.Context, workerID string, j *Job) {
 		slog.String("database_id", j.DatabaseID), slog.String("job_type", string(j.Type)),
 		slog.Int("attempt", j.Attempt), slog.String("worker_id", workerID))
 	log.InfoContext(ctx, "job.claimed")
+	metrics.QueueWait.WithLabelValues(string(j.Type)).Observe(max(0, time.Since(j.NextRunAt).Seconds()))
 
 	stop := w.heartbeat(ctx, log, j.ID, workerID)
 	defer stop()
@@ -165,14 +167,16 @@ func (w *Worker) process(ctx context.Context, workerID string, j *Job) {
 		return
 	}
 
+	started := time.Now()
 	res, err := w.execute(ctx, j)
+	metrics.RunDuration.WithLabelValues(string(j.Type), runOutcome(res, err)).Observe(time.Since(started).Seconds())
 	switch {
 	case res != nil && res.OK && err == nil:
 		w.finish(ctx, log, j, JobSuccess, "")
 	case res != nil && res.Interrupted:
 		// Shutdown between batches: committed batches are checkpointed, so the next run of this
 		// job continues after them. Waiting is not an attempt.
-		w.requeue(ctx, log, j, errors.New("worker berhenti di antara batch; dilanjutkan dari checkpoint"), 0, false)
+		w.requeue(ctx, log, j, errors.New("worker berhenti di antara batch; dilanjutkan dari checkpoint"), 0, false, "interrupted")
 	case res != nil && res.Partial:
 		// Batches were committed, then one failed: the migration is PARTIAL until a user resumes
 		// or aborts it. Not retried automatically: the failure is usually in the data or script.
@@ -210,10 +214,10 @@ func (w *Worker) process(ctx context.Context, workerID string, j *Job) {
 	case errors.Is(err, ErrTargetBusy):
 		// Not the job's fault and not an attempt: give it back and try again soon. No execution
 		// row either: the job only waited (job.retry_scheduled is logged).
-		w.requeue(ctx, log, j, err, w.cfg.PollInterval, false)
+		w.requeue(ctx, log, j, err, w.cfg.PollInterval, false, "busy")
 	case isTransient(err) && j.Attempt < j.MaxAttempts:
 		w.recordAttempt(ctx, log, j, ExecFailed, false, err.Error())
-		w.requeue(ctx, log, j, err, w.backoff(j.Attempt), true)
+		w.requeue(ctx, log, j, err, w.backoff(j.Attempt), true, "transient")
 	default:
 		// Validation errors (no longer the latest migration, not approved, ...) and transient
 		// errors after the last attempt. No SQL ran, so the migration can be tried again later.
@@ -246,6 +250,30 @@ func (w *Worker) execute(ctx context.Context, j *Job) (*RunResult, error) {
 		err = fmt.Errorf("job_type tidak dikenal: %s", j.Type)
 	}
 	return res, err
+}
+
+// runOutcome is the outcome label of one attempt for metrics.RunDuration.
+func runOutcome(res *RunResult, err error) string {
+	switch {
+	case res != nil && res.OK && err == nil:
+		return "success"
+	case res != nil && res.Interrupted:
+		return "interrupted"
+	case res != nil && res.Partial:
+		return "partial"
+	case res != nil && !res.OK:
+		return "script_failed"
+	case res != nil:
+		return "uncertain"
+	case errors.Is(err, ErrTargetBusy):
+		return "busy"
+	case errors.Is(err, ErrRevalidation):
+		return "revalidation_failed"
+	case isTransient(err):
+		return "transient_error"
+	default:
+		return "refused"
+	}
 }
 
 // heartbeat extends the job's lease every Lease/3 until stop is called, so a long migration is
@@ -297,6 +325,7 @@ func (w *Worker) finish(ctx context.Context, log *slog.Logger, j *Job, status Jo
 		log.ErrorContext(ctx, "job.update_failed", slog.String("error", err.Error()))
 		return
 	}
+	metrics.JobsFinished.WithLabelValues(string(j.Type), string(status)).Inc()
 	attrs := []any{slog.String("status", string(status))}
 	if msg != "" {
 		attrs = append(attrs, slog.String("error", msg))
@@ -312,7 +341,7 @@ func (w *Worker) finish(ctx context.Context, log *slog.Logger, j *Job, status Jo
 	}
 }
 
-func (w *Worker) requeue(ctx context.Context, log *slog.Logger, j *Job, cause error, delay time.Duration, countAttempt bool) {
+func (w *Worker) requeue(ctx context.Context, log *slog.Logger, j *Job, cause error, delay time.Duration, countAttempt bool, reason string) {
 	span := trace.SpanFromContext(ctx)
 	span.SetAttributes(attribute.String("job.status", string(JobQueued)),
 		attribute.Int64("job.retry_delay_ms", delay.Milliseconds()), attribute.Bool("job.counts_as_attempt", countAttempt))
@@ -324,6 +353,7 @@ func (w *Worker) requeue(ctx context.Context, log *slog.Logger, j *Job, cause er
 		log.ErrorContext(ctx, "job.update_failed", slog.String("error", err.Error()))
 		return
 	}
+	metrics.JobRetries.WithLabelValues(string(j.Type), reason).Inc()
 	log.WarnContext(ctx, "job.retry_scheduled",
 		slog.Int64("delay_ms", delay.Milliseconds()), slog.Bool("counts_as_attempt", countAttempt),
 		slog.String("error", cause.Error()))
@@ -421,7 +451,7 @@ func (w *Worker) recoverJob(jctx context.Context, log *slog.Logger, j *Job) erro
 		const cause = "worker berhenti di tengah batch; dilanjutkan dari checkpoint"
 		w.recordAttempt(jctx, log, j, ExecPartial, true, cause)
 		if j.Attempt < j.MaxAttempts {
-			w.requeue(jctx, log, j, errors.New(cause), 0, true)
+			w.requeue(jctx, log, j, errors.New(cause), 0, true, "recovered")
 		} else if status, err := w.repo.StopBatchJob(jctx, j); err != nil {
 			log.ErrorContext(jctx, "job.update_failed", slog.String("error", err.Error()))
 		} else {
@@ -430,7 +460,7 @@ func (w *Worker) recoverJob(jctx context.Context, log *slog.Logger, j *Job) erro
 	case j.SQLStartedAt == nil && j.Attempt < j.MaxAttempts:
 		const cause = "lease worker habis sebelum SQL dijalankan"
 		w.recordAttempt(jctx, log, j, ExecFailed, false, cause)
-		w.requeue(jctx, log, j, errors.New(cause), 0, true)
+		w.requeue(jctx, log, j, errors.New(cause), 0, true, "recovered")
 	case j.SQLStartedAt == nil:
 		const cause = "lease worker habis setelah percobaan terakhir"
 		w.recordAttempt(jctx, log, j, ExecFailed, false, cause)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"dbplatform/internal/ids"
+	"dbplatform/internal/metrics"
 	"dbplatform/internal/tracing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -175,6 +176,7 @@ func (r *Repository) EnqueueJob(ctx context.Context, in EnqueueInput) (job *Job,
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	metrics.JobsEnqueued.WithLabelValues(string(in.Type)).Inc()
 	return r.GetJob(ctx, id)
 }
 

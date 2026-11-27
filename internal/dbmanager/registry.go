@@ -108,6 +108,17 @@ func (r *ConnectionRegistry) Close() {
 	}
 }
 
+// Stats returns sql.DB.Stats() of every registered pool, by database ID (for metrics).
+func (r *ConnectionRegistry) Stats() map[string]sql.DBStats {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string]sql.DBStats, len(r.pools))
+	for id, db := range r.pools {
+		out[id] = db.Stats()
+	}
+	return out
+}
+
 func (r *ConnectionRegistry) GetPool(dbID string) (*sql.DB, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

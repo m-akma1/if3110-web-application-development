@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"dbplatform/internal/logging"
+	"dbplatform/internal/metrics"
 	"github.com/jackc/pgx/v5/pgconn"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -339,7 +340,16 @@ func (e *Engine) run(ctx context.Context, pool *sql.DB, q logging.SQLLog, stmts 
 func (e *Engine) lock(ctx context.Context, conn *sql.Conn, databaseID string) (err error) {
 	ctx, span := startSpan(ctx, spanLockWait, trace.SpanKindInternal, attribute.String("database_id", databaseID))
 	tries := 0
+	start := time.Now()
 	defer func() {
+		outcome := "acquired"
+		switch {
+		case errors.Is(err, ErrTargetBusy):
+			outcome = "busy"
+		case err != nil:
+			outcome = "error"
+		}
+		metrics.LockWait.WithLabelValues(outcome).Observe(time.Since(start).Seconds())
 		span.SetAttributes(attribute.Int("lock.tries", tries), attribute.Bool("lock.acquired", err == nil))
 		failSpan(span, err)
 		span.End()

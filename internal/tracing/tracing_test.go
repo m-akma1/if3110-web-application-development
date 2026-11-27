@@ -3,6 +3,7 @@ package tracing
 import (
 	"context"
 	"testing"
+	"time"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
@@ -45,4 +46,22 @@ func TestSetupRejectsUnknownExporter(t *testing.T) {
 	if _, err := Setup(context.Background(), Config{Exporter: "zipkin"}); err == nil {
 		t.Fatal("Setup accepted an unknown exporter")
 	}
+}
+
+func TestSetupLogs(t *testing.T) {
+	ctx := context.Background()
+	if h, _, err := SetupLogs(ctx, Config{}); err != nil || h != nil {
+		t.Fatalf("default = %v, %v; want no handler (stdout only)", h, err)
+	}
+	if _, _, err := SetupLogs(ctx, Config{LogsExporter: "loki"}); err == nil {
+		t.Fatal("SetupLogs accepted an unknown exporter")
+	}
+	// Creating the OTLP exporter does not connect; records are sent in the background.
+	h, shutdown, err := SetupLogs(ctx, Config{LogsExporter: ExporterOTLP})
+	if err != nil || h == nil {
+		t.Fatalf("otlp = %v, %v; want a handler", h, err)
+	}
+	sctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	_ = shutdown(sctx)
 }

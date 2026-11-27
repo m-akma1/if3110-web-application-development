@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"dbplatform/internal/logging"
+	"dbplatform/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -81,5 +83,27 @@ func TestOnlyAPIRequestsAreTraced(t *testing.T) {
 	}
 	if n := len(rec.Ended()); n != 0 {
 		t.Fatalf("non-API requests produced %d spans", n)
+	}
+}
+
+func TestAPIRequestsAreCountedByRoutePattern(t *testing.T) {
+	var buf bytes.Buffer
+	srv := NewServer(&buf, Deps{Logger: logging.New(&buf, slog.LevelInfo)})
+	ok := metrics.HTTPRequests.WithLabelValues("GET /api/health", "GET", "2xx")
+	before := testutil.ToFloat64(ok)
+	srv.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	if got := testutil.ToFloat64(ok) - before; got != 1 {
+		t.Fatalf("GET /api/health counted %v times, want 1", got)
+	}
+	// A raw path never becomes a label: the series is per route pattern.
+	if n := testutil.CollectAndCount(metrics.HTTPRequests); n == 0 {
+		t.Fatal("no http_requests_total series")
+	}
+	for _, path := range []string{"/", "/dashboard"} {
+		before := testutil.CollectAndCount(metrics.HTTPRequests)
+		srv.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+		if after := testutil.CollectAndCount(metrics.HTTPRequests); after != before {
+			t.Fatalf("page request %s added a metrics series", path)
+		}
 	}
 }

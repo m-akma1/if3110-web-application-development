@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dbplatform/internal/logging"
+	"dbplatform/internal/metrics"
 	"github.com/jackc/pgx/v5/pgconn"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -356,6 +357,7 @@ func (e *Engine) runBatch(ctx context.Context, pool *sql.DB, plan, rec *BatchPla
 
 	bctx, cancel := context.WithTimeout(ctx, e.runTimeout())
 	defer cancel()
+	txStart := time.Now()
 	conn, tx, err := e.begin(bctx, pool)
 	if err != nil {
 		return false, err
@@ -424,6 +426,9 @@ func (e *Engine) runBatch(ctx context.Context, pool *sql.DB, plan, rec *BatchPla
 	}
 	committed = true
 	b.CommittedAt = time.Now()
+	metrics.Batches.WithLabelValues(b.Direction).Inc()
+	metrics.BatchRows.WithLabelValues(b.Direction).Add(float64(b.Rows))
+	metrics.BatchDuration.WithLabelValues(b.Direction).Observe(b.CommittedAt.Sub(txStart).Seconds())
 	span.AddEvent("tx.commit")
 	e.logger.InfoContext(ctx, "tx.commit", e.batchTxAttrs(m, b)...)
 	e.logger.InfoContext(ctx, "migration.batch", e.batchAttrs(m, b, started)...)
