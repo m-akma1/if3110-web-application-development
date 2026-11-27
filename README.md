@@ -117,6 +117,8 @@ The `target-postgres` init scripts ([docker/target-init/](docker/target-init/)) 
 | `MIGRATION_STATEMENT_TIMEOUT_MS` | `60000` | (Optional) Maximum execution time in milliseconds for a single migration statement |
 | `MIGRATION_QUEUE_TIMEOUT_MS` | `15000` | (Optional) Maximum time in milliseconds a worker waits for a database's migration lock. When it expires the job goes back to the queue without using an attempt |
 
+The resume/abort buttons of batch migrations can be hidden with the frontend build argument `VITE_ENABLE_BATCH_ACTIONS=false` (default `true`).
+
 The worker pool itself uses fixed settings: 4 workers, a 30 s lease renewed every 10 s, at most 3 attempts per job, retry delay 2 s doubling up to 1 min, and a lease check every 10 s (`migration.DefaultWorkerConfig`).
 
 #### Logging
@@ -297,6 +299,7 @@ flowchart LR
 ├── static/                      # Images served under /static
 ├── docs/                        # Extra documentation (CodeQL SAST report)
 ├── docker/target-init/          # Init scripts for the demo target database
+├── docker/seed/                 # Optional large dataset for batch mode (make seed-large)
 ├── Dockerfile                   # SPA build (Node) -> Go build -> Alpine runtime
 ├── docker-compose.yml           # caddy, app, postgres, target-postgres, postgres-test (profile "test")
 ├── Caddyfile                    # TLS, reverse proxy, log filtering
@@ -346,6 +349,9 @@ The Go server answers every non-API `GET` with `index.html`; React Router render
 | `GET /api/migration/{id}/status` | View Only | Migration with its newest job, for polling |
 | `GET /api/migration/{id}/executions` | View Only | Every execution attempt of the migration, oldest first |
 | `GET /api/jobs/{id}` | View Only | One job, for polling after a `202` |
+| `GET /api/migration/{id}/batches` | View Only | Committed batches of a batch migration (`UP`, and `DOWN` for undone ones) |
+| `POST /api/migration/{id}/resume` | View & Edit | Continues a `PARTIAL` batch migration from its checkpoint (`202`) |
+| `POST /api/migration/{id}/abort` | View & Edit | `{"rollback": true}` undoes the committed batches (`202`); `{"rollback": false}` marks it `ABORTED` (`200`) |
 | `POST /api/migration/{id}/duplicate` | View & Edit | Copies a migration into a new draft |
 | `GET /api/admin/overview` and `/api/admin/*` | Platform Admin | Admin console data and actions |
 
@@ -437,7 +443,7 @@ The admin console (`/admin`) is only available to Platform Admins and has four t
 #### Migrations
 
 A migration is a named SQL script (SQL Up, and SQL Down for rollback) for one target database. Its status moves through
-`DRAFT → PENDING_REVIEW → APPROVED → QUEUED → RUNNING → SUCCESS | FAILED`. Once it is `SUCCESS` or `FAILED` the row never changes again; `ROLLED_BACK` is not stored but derived from the execution history (see below).
+`DRAFT → PENDING_REVIEW → APPROVED → QUEUED → RUNNING → SUCCESS | FAILED`, plus `PARTIAL` and `ABORTED` for batch migrations. Once it is `SUCCESS`, `FAILED` or `ABORTED` the row never changes again; `ROLLED_BACK` and `PARTIALLY_REVERTED` are not stored but derived from the history (see below).
 
 - **Drafts** (View & Edit): create, edit, delete, and duplicate. Names are up to 200 characters and scripts are up to 1 MiB. Duplicating copies any migration into a new draft.
 - **Script checks**: the platform wraps every script in one transaction, so statements that cannot run inside it are rejected before anything runs: transaction control (`BEGIN`, `COMMIT`, `ROLLBACK`, ...), `VACUUM`, `DISCARD`, `CREATE`/`DROP DATABASE` or `TABLESPACE`, `ALTER SYSTEM`, the `CONCURRENTLY` forms of index commands, and `COPY ... FROM STDIN / TO STDOUT`. `SAVEPOINT`, `RELEASE` and `ROLLBACK TO SAVEPOINT` are allowed.
@@ -462,6 +468,36 @@ A migration is a named SQL script (SQL Up, and SQL Down for rollback) for one ta
 - **No double commit**: before running, the worker checks whether an execution of the same job already sent SQL and finished. A job is never run twice, even when it is delivered again after a crash.
 - On `SIGINT`/`SIGTERM` (Ctrl+C, `docker stop`) the server stops taking requests and jobs, waits for running jobs to finish, then exits.
 
+#### Per-Batch Execution
+
+A migration can run in **batch mode** (*Mode Eksekusi → Per-batch* in the editor) with a cursor column (`batch_attribute`, an integer key such as `id`) and a batch size (1–100,000 rows, default 1,000). This is for changes to large tables: one transaction per batch keeps every transaction and its locks short, and a run that stops can continue where it stopped.
+
+- **Script**: exactly one `UPDATE` or `DELETE` on one table, written as for a normal run (no `WITH`, `RETURNING`, `ORDER BY`, `LIMIT`). SQL Down, if any, follows the same rule. Both are checked when the draft is saved.
+- **How a batch runs**: the platform adds the key range to the statement itself. For `UPDATE orders SET status = 'ARCHIVED' WHERE status = 'CANCELLED'` with cursor `id`, every batch runs
+  ```sql
+  UPDATE orders SET status = 'ARCHIVED' WHERE (status = 'CANCELLED')
+    AND ($1::bigint IS NULL OR orders.id > $1) AND orders.id <= $2::bigint
+  ```
+  where `$1` is the previous batch's upper bound and `$2` the largest `id` among the next `batch_size` keys (`WHERE id > $1 ORDER BY id LIMIT n`).
+- **Checkpoint in the same transaction**: each batch writes its checkpoint (batch number, key range, rows changed) to `_dbplatform_batch_checkpoints` **on the target, in the same transaction as its data change**, then commits. A batch is either committed with its checkpoint or not at all. The platform keeps a copy in `migration_batches` and re-reads the target's checkpoints at the start of every run, so a batch that committed just before a crash is never run again. The checkpoint table is hidden from the Database Viewer.
+- **The database's lock is held for the whole run**, across all batches, and the worker's heartbeat keeps the lease. Every batch has its own lock and statement timeouts.
+- **When a batch fails** (an SQL error), its transaction is rolled back and the run stops: the migration is **`PARTIAL`** (or `FAILED` if no batch was ever committed). The monitor on the detail page shows committed/total batches, the checkpoint cursor and the error. A `PARTIAL` migration **holds every other migration of its database** until it is finished or aborted. Then:
+  - **Resume** (*Lanjutkan dari Checkpoint*) runs the remaining batches, starting after the last checkpoint; no new approval is needed;
+  - **Abort with rollback** (*Batalkan & Rollback Batch*) runs SQL Down over the same key ranges, **newest batch first**. When every batch is undone the migration is `ABORTED`; if it stops early it reads as **`PARTIALLY_REVERTED`** and can only be aborted again;
+  - **Mark as stopped** (*Tandai Dihentikan*) sets `ABORTED` and leaves the committed batches in place.
+- **Restarts are safe**: on `SIGTERM` a batch run stops at the next batch boundary and its job goes back to the queue without using an attempt; when a worker dies mid-run, the job is put back in the queue instead of becoming `UNCERTAIN`. In both cases the next run continues after the last checkpoint.
+- Every run (first run, resume, abort) is one execution in the history (`PARTIAL` when it stopped with committed batches); the batches it committed point at that execution.
+
+**Large dataset.** `make seed-large` creates `events` (2,000,000 rows, 173 MB) on the demo target, owned by the app role. Measured once on a laptop against the Docker test database (data on tmpfs), so treat the numbers as rough:
+
+| Run | Total | Longest single transaction |
+|---|---|---|
+| `UPDATE events SET status = 'ARCHIVED'` in one statement | 30–49 s | the whole statement (30–49 s) |
+| Batch mode, `batch_size` 10,000 (200 batches) | 40.0 s | 621 ms (average 146 ms) |
+| Batch mode, `batch_size` 50,000 (40 batches) | 25.9 s | 1.6 s (average 583 ms) |
+
+The single statement is already close to the default `MIGRATION_STATEMENT_TIMEOUT_MS` (60 s), and it holds row locks on all 2,000,000 rows until it commits. In batch mode the total time is similar, but no transaction lasts more than a couple of seconds, and progress is never lost.
+
 #### Execution History and Audit
 
 - Every attempt to run a migration is one row in **`migration_executions`**: execution ID, attempt, job ID, the exact SQL sent, executor, status (`SUCCESS`, `FAILED`, `UNCERTAIN`), error and SQLSTATE, and `reverts_execution_id`. The migration detail page lists them under **Riwayat Eksekusi**.
@@ -476,7 +512,8 @@ A migration is a named SQL script (SQL Up, and SQL Down for rollback) for one ta
   | `audit.submit`, `audit.approve`, `audit.reject` | A draft is sent for review, approved or rejected |
   | `audit.enqueue` | Execute, rollback or forward is requested (`request`, plus `job_id` or `requires_approval`) |
   | `audit.grant` | A group's access level on a database changes (`group_id`, `database_id`, `access_level`) |
-  | `audit.execute`, `audit.rollback`, `audit.forward` | An execution is recorded (`execution_id`, `attempt`, `sql_sent`, `reverts_execution_id`) |
+  | `audit.execute`, `audit.rollback`, `audit.forward` | An execution is recorded (`execution_id`, `attempt`, `sql_sent`, `reverts_execution_id`); outcome `partial` for a batch run that stopped |
+  | `audit.abort` | A `PARTIAL` batch migration is marked `ABORTED` without rollback (resume and abort with rollback are `audit.enqueue` with `request: resume / abort`) |
 
   Audit events never contain SQL; it is in the execution history, found through `execution_id`.
 
@@ -503,6 +540,8 @@ ORDER BY e.finished_at;
 - Only PostgreSQL targets are supported.
 - If the app process dies after a migration commits on the target but before its history is saved, the job becomes `UNCERTAIN` and holds that database. There is no UI to resolve it yet: check the target, then update the job (and, for a run that did commit, the migration) in the platform database.
 - Worker settings (number of workers, lease, attempts, backoff) are fixed in code and cannot be set through environment variables yet.
+- Batch mode supports one `UPDATE` or `DELETE` with an integer cursor column. Rows inserted beyond the last key while a run is in progress are included; keys below the checkpoint that appear later are not. Rolling back a **completed** batch migration (`SUCCESS`) runs SQL Down in one transaction, like a standard migration.
+- Batch mode creates `_dbplatform_batch_checkpoints` in the target's default schema; the platform's database role must be allowed to create tables there.
 
 ### Activity Logging
 
@@ -513,6 +552,7 @@ Every log record is one JSON object on stdout, written by one `log/slog` logger 
 - **Every SQL execution is logged** as a `sql.start` and `sql.result` pair: Query Explorer queries (`sql_kind: read_only`), table browsing (`table_browse`), schema lookups (`catalog`) and migration scripts (`migration`). `sql.result` has `duration_ms`, `status`, `rows` when known, and on failure `error` and the PostgreSQL `sqlstate`.
 - **Transactions that change data** also log `tx.commit` or `tx.rollback`. A run of a migration, rollback or forward ends with one `migration.attempt` record (`execution_type`, `execution_id`, `version`, `status`).
 - **Jobs** log `job.claimed`, `job.finished`, `job.retry_scheduled` (with `delay_ms` and `counts_as_attempt`), `job.uncertain` and `worker.reaped`. A job keeps the `correlation_id` and `actor` of the request that queued it, so the worker's records join the HTTP request's.
+- **Batches** log `migration.batch` (direction, `batch_no`, `cursor_from`, `cursor_to`, `rows`, `duration_ms`), `migration.batch_failed`, and `migration.batch_recovered` when checkpoints are copied from the target after a crash.
 - **Audit** events are `audit.*` (see **Execution History and Audit**).
 - **Other events**: `http.request` (access log; `WARN` for 4xx, `ERROR` for 5xx), `authz.denied`, `authz.error`, `viewer.error`, `migration.error`, and startup events such as `server.started`.
 - **Redaction**: attributes whose name contains `password`, `secret`, `token`, `session`, `cookie`, `authorization`, `dsn` or `credential` are written as `[REDACTED]`. Bind parameter values are never logged, only their types. Query text is cut at 2000 characters.
