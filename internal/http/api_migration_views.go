@@ -43,7 +43,11 @@ func migrationErrorResponse(err error) (int, string) {
 		errors.Is(err, migration.ErrPendingRollbackExists),
 		errors.Is(err, migration.ErrPendingForwardExists),
 		errors.Is(err, migration.ErrImmutableRollbackScript),
-		errors.Is(err, migration.ErrHasHistory):
+		errors.Is(err, migration.ErrHasHistory),
+		errors.Is(err, migration.ErrBatchConfig),
+		errors.Is(err, migration.ErrBatchScript),
+		errors.Is(err, migration.ErrNotPartial),
+		errors.Is(err, migration.ErrBatchReverting):
 		return http.StatusUnprocessableEntity, err.Error()
 	default:
 		// If error is descriptive validation or target error, return 422 with message
@@ -115,6 +119,13 @@ func toMigrationView(m *migration.Migration) domain.MigrationView {
 		ExecutedAt:         m.ExecutedAt,
 		DurationMs:         m.DurationMs,
 		Error:              m.Error,
+		ExecutionMode:      m.ExecutionMode,
+		BatchAttribute:     m.BatchAttribute,
+		BatchSize:          m.BatchSize,
+		BatchCommitted:     m.BatchesUp - m.BatchesDown,
+		BatchReverted:      m.BatchesDown,
+		BatchTotal:         m.BatchTotal,
+		CheckpointCursor:   m.CheckpointCursor,
 	}
 }
 
@@ -245,6 +256,17 @@ func toExecutionViews(list []migration.Execution) []domain.MigrationExecutionVie
 			StartedAt:          ex.StartedAt,
 			FinishedAt:         ex.FinishedAt,
 			DurationMs:         ex.Duration.Milliseconds(),
+		})
+	}
+	return out
+}
+
+func toBatchViews(list []migration.Batch) []domain.MigrationBatchView {
+	out := make([]domain.MigrationBatchView, 0, len(list))
+	for _, b := range list {
+		out = append(out, domain.MigrationBatchView{
+			Direction: b.Direction, BatchNo: b.No, ExecutionID: b.ExecutionID,
+			CursorFrom: b.From, CursorTo: b.To, Rows: b.Rows, CommittedAt: b.CommittedAt,
 		})
 	}
 	return out

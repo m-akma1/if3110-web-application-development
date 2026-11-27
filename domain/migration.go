@@ -48,6 +48,26 @@ type MigrationView struct {
 	ExecutedAt         time.Time           `json:"executed_at"` // zero for drafts
 	DurationMs         int64               `json:"duration_ms"`
 	Error              string              `json:"error"`
+
+	// Per-batch execution. Counts are batches; committed excludes batches undone by an abort.
+	ExecutionMode    string `json:"execution_mode"`
+	BatchAttribute   string `json:"batch_attribute,omitempty"`
+	BatchSize        int    `json:"batch_size,omitempty"`
+	BatchCommitted   int    `json:"batch_committed_count"`
+	BatchReverted    int    `json:"batch_reverted_count"`
+	BatchTotal       int    `json:"batch_total_count"`
+	CheckpointCursor *int64 `json:"checkpoint_cursor,omitempty"`
+}
+
+// MigrationBatchView is one committed batch of a batch migration.
+type MigrationBatchView struct {
+	Direction   string    `json:"direction"` // UP, or DOWN for a batch undone by an abort
+	BatchNo     int       `json:"batch_no"`
+	ExecutionID string    `json:"execution_id,omitempty"`
+	CursorFrom  *int64    `json:"cursor_from"`
+	CursorTo    int64     `json:"cursor_to"`
+	Rows        int64     `json:"rows"`
+	CommittedAt time.Time `json:"committed_at"`
 }
 
 // VersionLabel is "v3" for executed migrations and "-" otherwise.
