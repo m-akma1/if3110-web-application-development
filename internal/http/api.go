@@ -39,6 +39,8 @@ func (s *Server) registerAPIRoutes() {
 	s.mux.HandleFunc("POST /api/migration/{id}/submit-review", s.handleAPIMigrationSubmitReview)
 	s.mux.HandleFunc("POST /api/migration/{id}/approve", s.handleAPIMigrationApprove)
 	s.mux.HandleFunc("POST /api/migration/{id}/reject", s.handleAPIMigrationReject)
+	s.mux.HandleFunc("POST /api/batch-requests/{id}/approve", s.handleAPIBatchRequestApprove)
+	s.mux.HandleFunc("POST /api/batch-requests/{id}/reject", s.handleAPIBatchRequestReject)
 
 	// Admin
 	s.mux.HandleFunc("GET /api/admin/overview", s.handleAPIAdminOverview)

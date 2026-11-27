@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -180,11 +181,27 @@ func (s *Service) checkExecutable(ctx context.Context, m *Migration) error {
 	if m.Status == StatusPendingReview || m.Status == StatusRejected {
 		return ErrNotApproved
 	}
-	if s.grants != nil {
-		groupIDs, err := s.grants.GroupsWithAccess(ctx, m.DatabaseID)
-		if err == nil && len(groupIDs) > 0 && m.Status != StatusApproved {
-			return ErrNotApproved
-		}
+	// Fail closed: when the groups with access cannot be read, the approval rule cannot be
+	// checked, so nothing runs.
+	groupIDs, err := s.groupsWithAccess(ctx, m.DatabaseID)
+	if err != nil {
+		return err
+	}
+	if len(groupIDs) > 0 && m.Status != StatusApproved {
+		return ErrNotApproved
+	}
+	return nil
+}
+
+// requireLeaders refuses to open a review that could never finish: every group in groupIDs
+// must have an active leader to approve it.
+func (s *Service) requireLeaders(ctx context.Context, groupIDs []string) error {
+	names, err := s.repo.LeaderlessGroups(ctx, groupIDs)
+	if err != nil {
+		return err
+	}
+	if len(names) > 0 {
+		return fmt.Errorf("%w: %s", ErrGroupWithoutLeader, strings.Join(names, ", "))
 	}
 	return nil
 }
@@ -193,49 +210,9 @@ func (s *Service) checkExecutable(ctx context.Context, m *Migration) error {
 // If groups have access to the database, it creates a PENDING_REVIEW rollback request for Group Leader approval.
 // If no groups have access, it executes the rollback directly.
 func (s *Service) Rollback(ctx context.Context, userID, id string) (*Migration, *RunResult, error) {
-	m, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
-	if err != nil {
-		return nil, nil, err
-	}
-	downScript, err := validateRollbackTarget(ctx, s.repo.db, m)
-	if err != nil {
-		return nil, nil, err
-	}
-	if pending, err := hasPendingActionFor(ctx, s.repo.db, m.ID, "ROLLBACK"); err != nil {
-		return nil, nil, err
-	} else if pending {
-		return nil, nil, ErrPendingRollbackExists
-	}
-
-	var groupIDs []string
-	if s.grants != nil {
-		groupIDs, err = s.grants.GroupsWithAccess(ctx, m.DatabaseID)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	if len(groupIDs) > 0 {
-		rbDraft, err := s.repo.CreateDraft(ctx, NewDraft{
-			DatabaseID:       m.DatabaseID,
-			Name:             rollbackName(m.Name),
-			SQL:              downScript,
-			SQLUp:            m.SQLUp,
-			SQLDown:          downScript,
-			ExecutionType:    "ROLLBACK",
-			RollbackTargetID: m.ID,
-			CreatedBy:        userID,
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		if err := s.repo.CreateApprovals(ctx, rbDraft.ID, groupIDs); err != nil {
-			return nil, nil, err
-		}
-		rbDraft, err = s.repo.Get(ctx, rbDraft.ID)
-		if err == nil {
-			rbDraft.Approvals, _ = s.repo.ListApprovals(ctx, rbDraft.ID)
-		}
-		return rbDraft, nil, err
+	m, direct, err := s.rollbackRequest(ctx, userID, id)
+	if err != nil || !direct {
+		return m, nil, err
 	}
 	return s.engine.ExecuteRollback(ctx, id, userID)
 }
@@ -263,6 +240,9 @@ func (s *Service) rollbackRequest(ctx context.Context, userID, id string) (m *Mi
 	}
 	if len(groupIDs) == 0 {
 		return m, true, nil
+	}
+	if err := s.requireLeaders(ctx, groupIDs); err != nil {
+		return nil, false, err
 	}
 	rb, err := s.repo.CreateDraft(ctx, NewDraft{
 		DatabaseID:       m.DatabaseID,
@@ -334,6 +314,9 @@ func (s *Service) forwardRequest(ctx context.Context, userID, id string) (m *Mig
 	if len(groupIDs) == 0 {
 		return m, true, nil
 	}
+	if err := s.requireLeaders(ctx, groupIDs); err != nil {
+		return nil, false, err
+	}
 	fwd, err := s.repo.CreateDraft(ctx, NewDraft{
 		DatabaseID:         m.DatabaseID,
 		Name:               forwardName(m.Name),
@@ -361,12 +344,12 @@ func (s *Service) SubmitReview(ctx context.Context, userID, id string) (*Migrati
 	if !m.IsDraft() {
 		return nil, ErrNotDraft
 	}
-	var groupIDs []string
-	if s.grants != nil {
-		groupIDs, err = s.grants.GroupsWithAccess(ctx, m.DatabaseID)
-		if err != nil {
-			return nil, err
-		}
+	groupIDs, err := s.groupsWithAccess(ctx, m.DatabaseID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireLeaders(ctx, groupIDs); err != nil {
+		return nil, err
 	}
 	if err := s.repo.CreateApprovals(ctx, id, groupIDs); err != nil {
 		return nil, err
@@ -398,7 +381,7 @@ func (s *Service) Approve(ctx context.Context, userID, id, note string) (*Migrat
 func (s *Service) Reject(ctx context.Context, userID, id, reason string) (*Migration, error) {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
-		return nil, errors.New("alasan penolakan wajib diisi")
+		return nil, ErrRejectReasonRequired
 	}
 	m, _, err := s.load(ctx, userID, id, rbac.ActionViewMigration)
 	if err != nil {
@@ -450,6 +433,16 @@ func (s *Service) load(ctx context.Context, userID, id string, action rbac.Actio
 	if m.Status == StatusRolledBack && m.ExecutionType != "ROLLBACK" {
 		if earliest, err := s.repo.GetEarliestUnforwardedRolledBack(ctx, m.DatabaseID); err == nil && earliest.ID == m.ID {
 			m.CanForward = true
+		}
+	}
+	if m.IsBatch() {
+		if req, err := s.repo.LatestBatchRequest(ctx, m.ID); err == nil {
+			if req.Status == BatchRequestPending {
+				if _, err := s.repo.FindPendingBatchGroupForLeader(ctx, req.ID, userID); err == nil {
+					req.CanApprove = true
+				}
+			}
+			m.BatchRequest = req
 		}
 	}
 
@@ -567,56 +560,149 @@ func (s *Service) Executions(ctx context.Context, userID, id string) ([]Executio
 	return s.repo.ListExecutions(ctx, m.ID)
 }
 
-// EnqueueResume queues a RESUME job that continues a PARTIAL batch migration after its last
-// checkpoint. The migration was approved before its first run, so no new approval is needed.
-func (s *Service) EnqueueResume(ctx context.Context, userID, id string) (*Migration, *Job, error) {
+// RequestBatchAction resumes or aborts a PARTIAL batch migration (see BatchAction). Like any
+// change to a shared database it needs one approval per group with access:
+//
+//   - no group has access: it runs now (a queued job, or ABORTED for BatchAbortMark);
+//   - otherwise it opens a request for the leaders and returns it (job nil, request PENDING);
+//   - once that request is APPROVED, calling this again with the same action runs it.
+//
+// The returned request is nil when nothing needed approval.
+func (s *Service) RequestBatchAction(ctx context.Context, userID, id string, action BatchAction) (*Migration, *BatchRequest, *Job, error) {
 	m, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
+	if err := checkBatchAction(m, action); err != nil {
+		return nil, nil, nil, err
+	}
+	open, err := s.repo.OpenBatchRequest(ctx, m.ID)
 	switch {
-	case m.Status == StatusPartiallyReverted:
-		return nil, nil, ErrBatchReverting
-	case m.Status != StatusPartial:
-		return nil, nil, ErrNotPartial
+	case err == nil && open.Status == BatchRequestPending:
+		return m, open, nil, ErrBatchRequestPending
+	case err == nil && open.Action == action:
+		// APPROVED for this action: run it.
+		m, job, err := s.runBatchAction(ctx, userID, m, action, open.ID)
+		if err == nil {
+			open, _ = s.repo.GetBatchRequest(ctx, open.ID)
+		}
+		return m, open, job, err
+	case err != nil && !errors.Is(err, ErrNotFound):
+		return nil, nil, nil, err
 	}
-	return s.enqueueBatchJob(ctx, userID, m, JobResume)
+	// No open request, or an approved one for another action, which CreateBatchRequest cancels.
+
+	groupIDs, err := s.groupsWithAccess(ctx, m.DatabaseID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(groupIDs) == 0 {
+		m, job, err := s.runBatchAction(ctx, userID, m, action, "")
+		return m, nil, job, err
+	}
+	if err := s.requireLeaders(ctx, groupIDs); err != nil {
+		return nil, nil, nil, err
+	}
+	req, err := s.repo.CreateBatchRequest(ctx, m, action, userID, groupIDs)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	m.BatchRequest = req
+	return m, req, nil, nil
 }
 
-// EnqueueAbort cancels a PARTIAL batch migration. With rollback it queues an ABORT job that
-// undoes the committed batches with SQL Down, newest first; without rollback it marks the
-// migration ABORTED right away and leaves the committed batches in place (job is nil).
-func (s *Service) EnqueueAbort(ctx context.Context, userID, id string, rollback bool) (*Migration, *Job, error) {
-	m, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
-	if err != nil {
-		return nil, nil, err
+// checkBatchAction checks that m is in a state where action makes sense.
+func checkBatchAction(m *Migration, action BatchAction) error {
+	switch action {
+	case BatchResume:
+		switch {
+		case m.Status == StatusPartiallyReverted:
+			return ErrBatchReverting
+		case m.Status != StatusPartial:
+			return ErrNotPartial
+		}
+	case BatchAbortRollback, BatchAbortMark:
+		if m.Status != StatusPartial && m.Status != StatusPartiallyReverted {
+			return ErrNotPartial
+		}
+		if action == BatchAbortRollback && (m.IsIrreversible || strings.TrimSpace(m.SQLDown) == "") {
+			return ErrNoRollbackScript
+		}
+	default:
+		return fmt.Errorf("aksi batch tidak dikenal: %s", action)
 	}
-	if m.Status != StatusPartial && m.Status != StatusPartiallyReverted {
-		return nil, nil, ErrNotPartial
-	}
-	if !rollback {
-		if err := s.repo.MarkAborted(ctx, m.ID); err != nil {
+	return nil
+}
+
+// runBatchAction runs action now: a RESUME or ABORT job, or ABORTED for BatchAbortMark (job nil).
+// requestID is the APPROVED request it fulfils ("" when no approval was needed).
+func (s *Service) runBatchAction(ctx context.Context, userID string, m *Migration, action BatchAction, requestID string) (*Migration, *Job, error) {
+	if action == BatchAbortMark {
+		if err := s.repo.MarkAborted(ctx, m.ID, requestID, userID); err != nil {
 			return nil, nil, err
 		}
-		m, err = s.repo.Get(ctx, m.ID)
+		m, err := s.repo.Get(ctx, m.ID)
 		return m, nil, err
 	}
-	if m.IsIrreversible || strings.TrimSpace(m.SQLDown) == "" {
-		return nil, nil, ErrNoRollbackScript
+	jobType := JobResume
+	if action == BatchAbortRollback {
+		jobType = JobAbort
 	}
-	return s.enqueueBatchJob(ctx, userID, m, JobAbort)
-}
-
-func (s *Service) enqueueBatchJob(ctx context.Context, userID string, m *Migration, t JobType) (*Migration, *Job, error) {
 	job, err := s.repo.EnqueueJob(ctx, EnqueueInput{
-		MigrationID: m.ID, DatabaseID: m.DatabaseID, Type: t, ExecutorID: userID,
-		CorrelationID: correlationID(ctx), MarkQueued: true,
+		MigrationID: m.ID, DatabaseID: m.DatabaseID, Type: jobType, ExecutorID: userID,
+		CorrelationID: correlationID(ctx), MarkQueued: true, BatchRequestID: requestID,
 	})
 	if err != nil {
 		return nil, nil, err
 	}
 	m, err = s.repo.Get(ctx, m.ID)
 	return m, job, err
+}
+
+// ApproveBatchAction records a leader's approval of a batch action request. The request is
+// APPROVED once every group approved; an editor then runs it with RequestBatchAction.
+func (s *Service) ApproveBatchAction(ctx context.Context, userID, requestID, note string) (*BatchRequest, error) {
+	return s.reviewBatchAction(ctx, userID, requestID, true, note)
+}
+
+// RejectBatchAction records a leader's rejection (reason required); the request is final.
+func (s *Service) RejectBatchAction(ctx context.Context, userID, requestID, reason string) (*BatchRequest, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, ErrRejectReasonRequired
+	}
+	return s.reviewBatchAction(ctx, userID, requestID, false, reason)
+}
+
+func (s *Service) reviewBatchAction(ctx context.Context, userID, requestID string, approve bool, text string) (*BatchRequest, error) {
+	req, err := s.repo.GetBatchRequest(ctx, requestID)
+	if errors.Is(err, ErrNotFound) {
+		return nil, rbac.ErrForbidden
+	}
+	if err != nil {
+		return nil, err
+	}
+	// The leader must see the database, like for a migration review.
+	if _, _, err := s.load(ctx, userID, req.MigrationID, rbac.ActionViewMigration); err != nil {
+		return nil, err
+	}
+	if req.Status != BatchRequestPending {
+		return req, ErrBatchRequestNotPending
+	}
+	groupID, err := s.repo.FindPendingBatchGroupForLeader(ctx, req.ID, userID)
+	if err != nil {
+		return req, err
+	}
+	if err := s.repo.ReviewBatchGroup(ctx, req.ID, groupID, userID, approve, text); err != nil {
+		return req, err
+	}
+	return s.repo.GetBatchRequest(ctx, req.ID)
+}
+
+// ListPendingBatchRequests returns the batch action requests waiting for the user's review
+// (every waiting request for a Platform Admin, who may only look).
+func (s *Service) ListPendingBatchRequests(ctx context.Context, userID string, isPlatformAdmin bool) ([]*BatchRequest, error) {
+	return s.repo.ListPendingBatchRequests(ctx, userID, isPlatformAdmin)
 }
 
 // Batches returns the committed batches of a migration the user may view.

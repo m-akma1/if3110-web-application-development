@@ -49,7 +49,19 @@ type testEnv struct {
 	migrations *migration.Repository
 }
 
+// newTestEnv builds a server whose migration service skips leader approvals, so tests can run
+// migrations directly. newApprovalTestEnv turns them on, as in production.
 func newTestEnv(t *testing.T, logOutput io.Writer) *testEnv {
+	t.Helper()
+	return buildTestEnv(t, logOutput, false)
+}
+
+func newApprovalTestEnv(t *testing.T, logOutput io.Writer) *testEnv {
+	t.Helper()
+	return buildTestEnv(t, logOutput, true)
+}
+
+func buildTestEnv(t *testing.T, logOutput io.Writer, approvals bool) *testEnv {
 	t.Helper()
 	db := testutil.NewPlatformDB(t)
 	store := authn.NewPostgresSessionStore(db, authn.DefaultSessionConfig())
@@ -69,13 +81,17 @@ func newTestEnv(t *testing.T, logOutput io.Writer) *testEnv {
 	t.Cleanup(registry.Close)
 	targets := dbmanager.NewManager(dbmanager.NewTargetRepository(db), cipher, registry)
 	migrations := migration.NewRepository(db)
+	var inspectors []migration.GrantInspector
+	if approvals {
+		inspectors = append(inspectors, grants)
+	}
 	srv := apphttp.NewServer(logOutput, apphttp.Deps{
 		Sessions:   store,
 		Groups:     gr,
 		Access:     authorizer,
 		Admin:      admin.NewService(store, gr, grants, targets),
 		Registry:   registry,
-		Migrations: migration.NewService(migrations, migration.NewEngine(db, registry, migration.Limits{}), authorizer),
+		Migrations: migration.NewService(migrations, migration.NewEngine(db, registry, migration.Limits{}), authorizer, inspectors...),
 	})
 	return &testEnv{srv: srv, db: db, sessions: store, groups: gr, grants: grants, targets: targets, registry: registry, migrations: migrations}
 }

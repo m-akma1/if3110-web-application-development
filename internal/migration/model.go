@@ -64,7 +64,52 @@ var (
 	ErrHasHistory               = errors.New("migration ini sudah punya riwayat eksekusi dan tidak dapat dihapus")
 	ErrNotPartial               = errors.New("hanya migration berstatus PARTIAL yang dapat dilanjutkan atau dibatalkan")
 	ErrBatchReverting           = errors.New("pembatalan batch sudah dimulai; lanjutkan pembatalannya, migration tidak dapat dilanjutkan lagi")
+	ErrGroupWithoutLeader       = errors.New("group berikut punya akses ke database ini tetapi belum punya Group Leader aktif; minta Platform Admin menetapkannya")
+	ErrBatchRequestPending      = errors.New("sudah ada pengajuan aksi batch yang menunggu persetujuan Group Leader")
+	ErrBatchRequestNotPending   = errors.New("pengajuan aksi batch ini tidak sedang menunggu persetujuan")
+	ErrBatchRequestNotApproved  = errors.New("pengajuan aksi batch ini belum disetujui atau sudah dijalankan")
+	ErrRejectReasonRequired     = errors.New("alasan penolakan wajib diisi")
 )
+
+// BatchAction is an action on a batch migration that stopped half-way (PARTIAL). Each one changes
+// what the database looks like to every team using it, so it needs the same leader approvals as
+// a migration when groups have access to the database.
+type BatchAction string
+
+const (
+	BatchResume        BatchAction = "RESUME"         // run the remaining batches after the last checkpoint
+	BatchAbortRollback BatchAction = "ABORT_ROLLBACK" // undo the committed batches with SQL Down, newest first
+	BatchAbortMark     BatchAction = "ABORT_MARK"     // stop for good and keep the committed batches
+)
+
+// Statuses of a BatchRequest.
+const (
+	BatchRequestPending   = "PENDING"   // waiting for the leaders
+	BatchRequestApproved  = "APPROVED"  // every leader approved; an editor can run it
+	BatchRequestRejected  = "REJECTED"  // a leader rejected it (final)
+	BatchRequestDone      = "DONE"      // it ran (queued, or marked ABORTED)
+	BatchRequestCancelled = "CANCELLED" // replaced by a request for another action before it ran
+)
+
+// BatchRequest asks the leaders to approve a BatchAction on a PARTIAL migration.
+type BatchRequest struct {
+	ID              string
+	MigrationID     string
+	MigrationName   string
+	DatabaseID      string
+	DatabaseName    string
+	Action          BatchAction
+	Status          string
+	RequestedBy     string
+	RequestedByName string
+	RejectionReason string
+	JobID           string // the job that ran it (DONE, except ABORT_MARK)
+	CreatedAt       time.Time
+	DecidedAt       *time.Time // when it became APPROVED or REJECTED
+	DoneAt          *time.Time
+	Approvals       []Approval // MigrationID holds the request ID
+	CanApprove      bool       // the viewer leads a group whose approval is pending
+}
 
 // Approval is one group's review and approval record for a migration.
 type Approval struct {
@@ -120,6 +165,8 @@ type Migration struct {
 	CanApprove      bool
 	RejectionReason string
 	Approvals       []Approval
+	// BatchRequest is the newest request for a resume/abort of this batch migration, if any.
+	BatchRequest *BatchRequest
 
 	CreatedBy     string // user id; empty if the user was deleted
 	CreatedByName string

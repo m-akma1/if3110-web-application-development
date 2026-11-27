@@ -398,9 +398,14 @@ func (s *Server) handleAPIMigrationPendingReviews(w http.ResponseWriter, r *http
 		writeJSONError(w, http.StatusInternalServerError, "Gagal memuat antrean review migrasi")
 		return
 	}
-	views := toMigrationViews(list)
+	batchRequests, err := s.migrations.ListPendingBatchRequests(r.Context(), user.ID, isPlatformAdmin)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Gagal memuat antrean review migrasi")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"reviews": views,
+		"reviews":        toMigrationViews(list),
+		"batch_requests": toBatchRequestViews(batchRequests),
 	})
 }
 
@@ -524,35 +529,14 @@ func (s *Server) handleAPIMigrationExecutions(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, map[string]any{"executions": toExecutionViews(list)})
 }
 
-// handleAPIMigrationResume queues a RESUME job for a PARTIAL batch migration (202).
+// handleAPIMigrationResume resumes a PARTIAL batch migration from its checkpoint.
 func (s *Server) handleAPIMigrationResume(w http.ResponseWriter, r *http.Request) {
-	user, _, ok := s.requireSession(w, r)
-	if !ok {
-		return
-	}
-	m, job, err := s.migrations.EnqueueResume(r.Context(), user.ID, r.PathValue("id"))
-	s.audit(r.Context(), audit.Enqueue, err, enqueueAttrs("resume", r.PathValue("id"), m, job)...)
-	if err != nil {
-		s.logMigrationError(r.Context(), "resume", err)
-		status, msg := migrationErrorResponse(err)
-		writeJSON(w, status, map[string]any{"error": msg})
-		return
-	}
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"migration": toMigrationView(m),
-		"job_id":    job.ID,
-		"job":       toJobView(job),
-		"message":   "Migration dilanjutkan dari checkpoint terakhir.",
-	})
+	s.batchAction(w, r, migration.BatchResume)
 }
 
-// handleAPIMigrationAbort cancels a PARTIAL batch migration. {"rollback": true} queues an ABORT
-// job that undoes the committed batches (202); without it the migration is marked ABORTED (200).
+// handleAPIMigrationAbort cancels a PARTIAL batch migration. {"rollback": true} undoes the
+// committed batches newest first; without it the migration is marked ABORTED and they stay.
 func (s *Server) handleAPIMigrationAbort(w http.ResponseWriter, r *http.Request) {
-	user, _, ok := s.requireSession(w, r)
-	if !ok {
-		return
-	}
 	var body struct {
 		Rollback bool `json:"rollback"`
 	}
@@ -561,32 +545,130 @@ func (s *Server) handleAPIMigrationAbort(w http.ResponseWriter, r *http.Request)
 	} else {
 		body.Rollback = r.FormValue("rollback") == "true"
 	}
-	id := r.PathValue("id")
-	m, job, err := s.migrations.EnqueueAbort(r.Context(), user.ID, id, body.Rollback)
+	action := migration.BatchAbortMark
 	if body.Rollback {
-		s.audit(r.Context(), audit.Enqueue, err, enqueueAttrs("abort", id, m, job)...)
-	} else {
-		s.audit(r.Context(), audit.Abort, err, migrationAttrs(id, m)...)
+		action = migration.BatchAbortRollback
 	}
+	s.batchAction(w, r, action)
+}
+
+// batchActionNames are the audit "request" names and the user-facing labels of batch actions.
+var batchActionNames = map[migration.BatchAction][2]string{
+	migration.BatchResume:        {"resume", "lanjutkan dari checkpoint"},
+	migration.BatchAbortRollback: {"abort", "batalkan & rollback batch"},
+	migration.BatchAbortMark:     {"abort_mark", "tandai dihentikan"},
+}
+
+// batchAction answers a resume/abort request:
+//   - 202 with the job when it was queued (no approval needed, or an approved request ran);
+//   - 200 with requires_approval when a request for the group leaders was opened;
+//   - 200 with the ABORTED migration for a mark-stopped that ran.
+func (s *Server) batchAction(w http.ResponseWriter, r *http.Request, action migration.BatchAction) {
+	user, _, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	names := batchActionNames[action]
+	m, req, job, err := s.migrations.RequestBatchAction(r.Context(), user.ID, id, action)
+
+	attrs := enqueueAttrs(names[0], id, m, job)
+	if req != nil {
+		attrs = append(attrs, slog.String("batch_request_id", req.ID))
+	}
+	auditAction := audit.Enqueue
+	if action == migration.BatchAbortMark && (err != nil || req == nil || req.Status != migration.BatchRequestPending) {
+		auditAction = audit.Abort
+	}
+	s.audit(r.Context(), auditAction, err, attrs...)
 	if err != nil {
-		s.logMigrationError(r.Context(), "abort", err)
+		s.logMigrationError(r.Context(), names[0], err)
 		status, msg := migrationErrorResponse(err)
 		writeJSON(w, status, map[string]any{"error": msg})
 		return
 	}
-	if job == nil {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"migration": toMigrationView(m),
-			"message":   "Migration ditandai dihentikan. Batch yang sudah tersimpan tidak diubah.",
+
+	switch {
+	case job != nil:
+		msg := "Migration dilanjutkan dari checkpoint terakhir."
+		if action == migration.BatchAbortRollback {
+			msg = "Pembatalan masuk antrean: batch yang sudah tersimpan akan di-rollback dari yang terakhir."
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"migration":     toMigrationView(m),
+			"batch_request": toBatchRequestView(req),
+			"job_id":        job.ID,
+			"job":           toJobView(job),
+			"message":       msg,
 		})
+	case req != nil && req.Status == migration.BatchRequestPending:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"migration":         toMigrationView(m),
+			"batch_request":     toBatchRequestView(req),
+			"requires_approval": true,
+			"message": "Pengajuan \"" + names[1] + "\" dikirim ke Group Leader. " +
+				"Aksi dapat dijalankan setelah semua group yang punya akses menyetujui.",
+		})
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"migration":     toMigrationView(m),
+			"batch_request": toBatchRequestView(req),
+			"message":       "Migration ditandai dihentikan. Batch yang sudah tersimpan tidak diubah.",
+		})
+	}
+}
+
+// handleAPIBatchRequestApprove records a group leader's approval of a batch action request.
+func (s *Server) handleAPIBatchRequestApprove(w http.ResponseWriter, r *http.Request) {
+	s.reviewBatchRequest(w, r, true)
+}
+
+// handleAPIBatchRequestReject records a group leader's rejection (reason required).
+func (s *Server) handleAPIBatchRequestReject(w http.ResponseWriter, r *http.Request) {
+	s.reviewBatchRequest(w, r, false)
+}
+
+func (s *Server) reviewBatchRequest(w http.ResponseWriter, r *http.Request, approve bool) {
+	user, _, ok := s.requireSession(w, r)
+	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"migration": toMigrationView(m),
-		"job_id":    job.ID,
-		"job":       toJobView(job),
-		"message":   "Pembatalan masuk antrean: batch yang sudah tersimpan akan di-rollback dari yang terakhir.",
-	})
+	var body struct {
+		Note   string `json:"note"`
+		Reason string `json:"reason"`
+	}
+	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+		_ = readJSONBody(r, &body)
+	} else {
+		body.Note, body.Reason = r.FormValue("note"), r.FormValue("reason")
+	}
+	id := r.PathValue("id")
+	var (
+		req *migration.BatchRequest
+		err error
+	)
+	action, msg := audit.Approve, "Pengajuan aksi batch berhasil disetujui."
+	if approve {
+		req, err = s.migrations.ApproveBatchAction(r.Context(), user.ID, id, strings.TrimSpace(body.Note))
+	} else {
+		action, msg = audit.Reject, "Pengajuan aksi batch berhasil ditolak."
+		req, err = s.migrations.RejectBatchAction(r.Context(), user.ID, id, body.Reason)
+	}
+	attrs := []slog.Attr{slog.String("batch_request_id", id)}
+	if req != nil {
+		attrs = append(attrs, slog.String("migration_id", req.MigrationID), slog.String("database_id", req.DatabaseID),
+			slog.String("request", batchActionNames[req.Action][0]), slog.String("status", req.Status))
+	}
+	if !approve && strings.TrimSpace(body.Reason) != "" {
+		attrs = append(attrs, slog.String("reason", strings.TrimSpace(body.Reason)))
+	}
+	s.audit(r.Context(), action, err, attrs...)
+	if err != nil {
+		status, emsg := migrationErrorResponse(err)
+		writeJSON(w, status, map[string]any{"error": emsg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"batch_request": toBatchRequestView(req), "message": msg})
 }
 
 // handleAPIMigrationBatches returns the committed batches of a migration.

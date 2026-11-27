@@ -118,3 +118,138 @@ func TestBatchMigrationEndpoints_Integration(t *testing.T) {
 		t.Fatal("no audit.abort event for the abort")
 	}
 }
+
+// With leader approvals on, resume of a PARTIAL batch migration is a request that runs only
+// after the leader of every group with access approved it.
+func TestBatchResumeNeedsLeaderApproval_Integration(t *testing.T) {
+	var logs bytes.Buffer
+	env := newApprovalTestEnv(t, &logs)
+	ctx := context.Background()
+	target := accesstest.InsertTarget(t, env.db, "batch-approval")
+	pool := env.connectTarget(t, target)
+	if _, err := pool.Exec(`CREATE TABLE items (id bigint PRIMARY KEY, v int NOT NULL DEFAULT 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(`INSERT INTO items (id) SELECT g FROM generate_series(1, 300) g`); err != nil {
+		t.Fatal(err)
+	}
+	// bob leads Editors (VIEW_EDIT), carol leads Analysts (VIEW_ONLY).
+	bob, carol := userID(t, env.srv, "bob"), userID(t, env.srv, "carol")
+	editors, _ := env.groups.Create(ctx, "Editors", "")
+	analysts, _ := env.groups.Create(ctx, "Analysts", "")
+	_ = env.groups.AddMember(ctx, editors.ID, bob)
+	_ = env.groups.AddMember(ctx, analysts.ID, carol)
+	accesstest.Grant(t, env.db, editors.ID, target, "VIEW_EDIT")
+	accesstest.Grant(t, env.db, analysts.ID, target, "VIEW_ONLY")
+	bobC, carolC := newClient(t, env.srv), newClient(t, env.srv)
+	bobC.login("bob", testPasswords["bob"])
+	carolC.login("carol", testPasswords["carol"])
+
+	rec := bobC.postJSON("/api/migration/drafts", `{"db_id":"`+target+`","name":"bump","sql_up":"UPDATE items SET v = v + 1",
+		"sql_down":"UPDATE items SET v = v - 1","execution_mode":"BATCH","batch_attribute":"id","batch_size":100}`)
+	var created struct {
+		Draft struct {
+			ID string `json:"id"`
+		} `json:"draft"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	id := created.Draft.ID
+	if rec := bobC.post("/api/migration/"+id+"/submit-review", nil); rec.Code != http.StatusOK {
+		t.Fatalf("submit = %d %s", rec.Code, rec.Body)
+	}
+	for _, c := range []*client{bobC, carolC} {
+		if rec := c.post("/api/migration/"+id+"/approve", nil); rec.Code != http.StatusOK {
+			t.Fatalf("approve = %d %s", rec.Code, rec.Body)
+		}
+	}
+	if _, err := pool.Exec(`ALTER TABLE items ADD CONSTRAINT stop_here CHECK (id <> 150 OR v = 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if rec := bobC.post("/api/migration/"+id+"/execute", nil); rec.Code != http.StatusAccepted {
+		t.Fatalf("execute = %d %s", rec.Code, rec.Body)
+	}
+	w := migration.NewWorker(env.migrations, migration.NewEngine(env.db, env.registry, migration.Limits{}),
+		migration.WorkerConfig{PollInterval: 10 * time.Millisecond})
+	if _, err := w.RunOnce(ctx, "w1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(`ALTER TABLE items DROP CONSTRAINT stop_here`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Resume opens a request instead of running.
+	rec = bobC.post("/api/migration/"+id+"/resume", nil)
+	var asked struct {
+		RequiresApproval bool `json:"requires_approval"`
+		BatchRequest     struct {
+			ID        string `json:"id"`
+			Action    string `json:"action"`
+			Status    string `json:"status"`
+			Approvals []any  `json:"approvals"`
+		} `json:"batch_request"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &asked)
+	req := asked.BatchRequest
+	if rec.Code != http.StatusOK || !asked.RequiresApproval || req.Action != "RESUME" || req.Status != "PENDING" || len(req.Approvals) != 2 {
+		t.Fatalf("resume = %d %s, want a PENDING RESUME request with 2 approvals", rec.Code, rec.Body)
+	}
+	if rec := bobC.post("/api/migration/"+id+"/resume", nil); rec.Code != http.StatusConflict {
+		t.Fatalf("resume while the request waits = %d, want 409", rec.Code)
+	}
+
+	// carol sees it in her review queue and can approve it.
+	var queue struct {
+		BatchRequests []struct {
+			ID         string `json:"id"`
+			CanApprove bool   `json:"can_approve"`
+		} `json:"batch_requests"`
+	}
+	_ = json.Unmarshal(carolC.get("/api/migration/pending-reviews").Body.Bytes(), &queue)
+	if len(queue.BatchRequests) != 1 || queue.BatchRequests[0].ID != req.ID || !queue.BatchRequests[0].CanApprove {
+		t.Fatalf("carol's queue = %+v, want the request with can_approve", queue.BatchRequests)
+	}
+	if rec := carolC.postJSON("/api/batch-requests/"+req.ID+"/reject", `{"reason":""}`); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("reject without a reason = %d, want 422", rec.Code)
+	}
+	for _, c := range []*client{bobC, carolC} {
+		if rec := c.postJSON("/api/batch-requests/"+req.ID+"/approve", `{"note":"ok"}`); rec.Code != http.StatusOK {
+			t.Fatalf("approve request = %d %s", rec.Code, rec.Body)
+		}
+	}
+	// carol (VIEW_ONLY) may approve but not run it.
+	if rec := carolC.post("/api/migration/"+id+"/resume", nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("resume by a viewer = %d, want 403", rec.Code)
+	}
+	rec = bobC.post("/api/migration/"+id+"/resume", nil)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("run approved resume = %d %s, want 202", rec.Code, rec.Body)
+	}
+	if _, err := w.RunOnce(ctx, "w1"); err != nil {
+		t.Fatal(err)
+	}
+	var detail struct {
+		Migration struct {
+			Status       string `json:"status"`
+			BatchRequest struct {
+				Status string `json:"status"`
+				JobID  string `json:"job_id"`
+			} `json:"batch_request"`
+		} `json:"migration"`
+	}
+	_ = json.Unmarshal(bobC.get("/api/migration/"+id).Body.Bytes(), &detail)
+	if m := detail.Migration; m.Status != "SUCCESS" || m.BatchRequest.Status != "DONE" || m.BatchRequest.JobID == "" {
+		t.Fatalf("detail = %+v, want SUCCESS with a DONE request", m)
+	}
+
+	var sawRequest, sawApprove bool
+	for _, e := range auditEvents(t, &logs) {
+		if e["batch_request_id"] != req.ID {
+			continue
+		}
+		sawRequest = sawRequest || (e["event"] == "audit.enqueue" && e["requires_approval"] == true && e["request"] == "resume")
+		sawApprove = sawApprove || (e["event"] == "audit.approve" && e["actor"] == carol)
+	}
+	if !sawRequest || !sawApprove {
+		t.Fatalf("audit events for the request: request %v, approve %v", sawRequest, sawApprove)
+	}
+}

@@ -89,6 +89,9 @@ type EnqueueInput struct {
 	// MarkQueued moves the migration itself to QUEUED (EXECUTE jobs). Direct rollback and
 	// forward jobs leave the executed migration's status alone.
 	MarkQueued bool
+	// BatchRequestID is the APPROVED batch action request this job runs (RESUME/ABORT). It
+	// becomes DONE in the same transaction, so an approval runs at most once.
+	BatchRequestID string
 }
 
 // EnqueueJob stores a QUEUED job. With MarkQueued the migration moves to QUEUED in the same
@@ -163,6 +166,11 @@ func (r *Repository) EnqueueJob(ctx context.Context, in EnqueueInput) (job *Job,
 	}
 	if err != nil {
 		return nil, err
+	}
+	if in.BatchRequestID != "" {
+		if err := completeBatchRequest(ctx, tx, in.BatchRequestID, id, in.ExecutorID); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -514,9 +522,15 @@ func (r *Repository) StopBatchJob(ctx context.Context, j *Job) (JobStatus, error
 	return JobFailed, r.RestoreMigrationStatus(ctx, j)
 }
 
-// MarkAborted ends a PARTIAL batch migration without undoing its committed batches.
-func (r *Repository) MarkAborted(ctx context.Context, migrationID string) error {
-	res, err := r.db.ExecContext(ctx, `
+// MarkAborted ends a PARTIAL batch migration without undoing its committed batches. A non-empty
+// requestID is the APPROVED request that asked for it; it becomes DONE in the same transaction.
+func (r *Repository) MarkAborted(ctx context.Context, migrationID, requestID, executorID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `
 		UPDATE migrations SET status = 'ABORTED', updated_at = NOW() WHERE id = $1 AND status = 'PARTIAL'`, migrationID)
 	if err != nil {
 		return err
@@ -524,5 +538,10 @@ func (r *Repository) MarkAborted(ctx context.Context, migrationID string) error 
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotPartial
 	}
-	return nil
+	if requestID != "" {
+		if err := completeBatchRequest(ctx, tx, requestID, "", executorID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

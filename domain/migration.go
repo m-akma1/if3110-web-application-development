@@ -57,6 +57,28 @@ type MigrationView struct {
 	BatchReverted    int    `json:"batch_reverted_count"`
 	BatchTotal       int    `json:"batch_total_count"`
 	CheckpointCursor *int64 `json:"checkpoint_cursor,omitempty"`
+	// BatchRequest is the newest resume/abort request of a batch migration, if any.
+	BatchRequest *BatchRequestView `json:"batch_request,omitempty"`
+}
+
+// BatchRequestView is a request for the leaders to approve a resume or abort of a PARTIAL
+// batch migration.
+type BatchRequestView struct {
+	ID              string              `json:"id"`
+	MigrationID     string              `json:"migration_id"`
+	MigrationName   string              `json:"migration_name"`
+	DatabaseID      string              `json:"database_id"`
+	DatabaseName    string              `json:"database_name"`
+	Action          string              `json:"action"` // RESUME, ABORT_ROLLBACK, ABORT_MARK
+	Status          string              `json:"status"` // PENDING, APPROVED, REJECTED, DONE, CANCELLED
+	RequestedByName string              `json:"requested_by_name"`
+	RejectionReason string              `json:"rejection_reason,omitempty"`
+	JobID           string              `json:"job_id,omitempty"`
+	CreatedAt       time.Time           `json:"created_at"`
+	DecidedAt       *time.Time          `json:"decided_at,omitempty"`
+	DoneAt          *time.Time          `json:"done_at,omitempty"`
+	Approvals       []MigrationApproval `json:"approvals"`
+	CanApprove      bool                `json:"can_approve,omitempty"`
 }
 
 // MigrationBatchView is one committed batch of a batch migration.

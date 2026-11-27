@@ -20,7 +20,9 @@ func migrationErrorResponse(err error) (int, string) {
 		return http.StatusForbidden, accessDeniedMessage(err)
 	case errors.As(err, &rejected):
 		return http.StatusUnprocessableEntity, "Script ditolak sebelum dijalankan: " + rejected.Error()
-	case errors.Is(err, migration.ErrJobActive):
+	case errors.Is(err, migration.ErrJobActive),
+		errors.Is(err, migration.ErrBatchRequestPending),
+		errors.Is(err, migration.ErrBatchRequestNotApproved):
 		return http.StatusConflict, err.Error()
 	case errors.Is(err, migration.ErrTargetUnavailable):
 		return http.StatusUnprocessableEntity, "Database target sedang tidak terhubung. Minta Platform Admin memeriksa koneksinya, lalu coba lagi."
@@ -47,7 +49,10 @@ func migrationErrorResponse(err error) (int, string) {
 		errors.Is(err, migration.ErrBatchConfig),
 		errors.Is(err, migration.ErrBatchScript),
 		errors.Is(err, migration.ErrNotPartial),
-		errors.Is(err, migration.ErrBatchReverting):
+		errors.Is(err, migration.ErrBatchReverting),
+		errors.Is(err, migration.ErrGroupWithoutLeader),
+		errors.Is(err, migration.ErrBatchRequestNotPending),
+		errors.Is(err, migration.ErrRejectReasonRequired):
 		return http.StatusUnprocessableEntity, err.Error()
 	default:
 		// If error is descriptive validation or target error, return 422 with message
@@ -71,10 +76,10 @@ func (s *Server) logMigrationError(ctx context.Context, op string, err error) {
 	)
 }
 
-func toMigrationView(m *migration.Migration) domain.MigrationView {
-	approvals := make([]domain.MigrationApproval, 0, len(m.Approvals))
-	for _, a := range m.Approvals {
-		approvals = append(approvals, domain.MigrationApproval{
+func toApprovalViews(list []migration.Approval) []domain.MigrationApproval {
+	out := make([]domain.MigrationApproval, 0, len(list))
+	for _, a := range list {
+		out = append(out, domain.MigrationApproval{
 			ID:              a.ID,
 			MigrationID:     a.MigrationID,
 			GroupID:         a.GroupID,
@@ -87,6 +92,43 @@ func toMigrationView(m *migration.Migration) domain.MigrationView {
 			RejectionReason: a.RejectionReason,
 		})
 	}
+	return out
+}
+
+// toBatchRequestView is nil for a nil request.
+func toBatchRequestView(b *migration.BatchRequest) *domain.BatchRequestView {
+	if b == nil {
+		return nil
+	}
+	return &domain.BatchRequestView{
+		ID:              b.ID,
+		MigrationID:     b.MigrationID,
+		MigrationName:   b.MigrationName,
+		DatabaseID:      b.DatabaseID,
+		DatabaseName:    b.DatabaseName,
+		Action:          string(b.Action),
+		Status:          b.Status,
+		RequestedByName: orDash(b.RequestedByName),
+		RejectionReason: b.RejectionReason,
+		JobID:           b.JobID,
+		CreatedAt:       b.CreatedAt,
+		DecidedAt:       b.DecidedAt,
+		DoneAt:          b.DoneAt,
+		Approvals:       toApprovalViews(b.Approvals),
+		CanApprove:      b.CanApprove,
+	}
+}
+
+func toBatchRequestViews(list []*migration.BatchRequest) []*domain.BatchRequestView {
+	out := make([]*domain.BatchRequestView, 0, len(list))
+	for _, b := range list {
+		out = append(out, toBatchRequestView(b))
+	}
+	return out
+}
+
+func toMigrationView(m *migration.Migration) domain.MigrationView {
+	approvals := toApprovalViews(m.Approvals)
 	sqlUp := m.SQLUp
 	if sqlUp == "" && m.SQL != "" {
 		sqlUp = m.SQL
@@ -126,6 +168,7 @@ func toMigrationView(m *migration.Migration) domain.MigrationView {
 		BatchReverted:      m.BatchesDown,
 		BatchTotal:         m.BatchTotal,
 		CheckpointCursor:   m.CheckpointCursor,
+		BatchRequest:       toBatchRequestView(m.BatchRequest),
 	}
 }
 
