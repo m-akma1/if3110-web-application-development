@@ -82,6 +82,30 @@ func EnsureAdmin(ctx context.Context, store *authn.SessionStore, admins []Admin)
 // SeedDemo inserts demo users and groups that do not exist yet and returns what it created.
 // It never re-adds anything an admin removed: memberships are only added for users created in
 // this run, and invite codes only for groups created in this run. groupRepo may be nil (users only).
+// EnsurePublicLeader makes the first BOOTSTRAP_ADMINS account the leader of the Public group
+// when Public has no active leader (for example on the first start). When that account does not
+// exist or is inactive, the earliest active Platform Admin leads Public instead. It returns the
+// username of the new leader, or "" when nothing changed.
+func EnsurePublicLeader(ctx context.Context, store *authn.SessionStore, groupRepo *groups.Repository, admins []Admin) (string, error) {
+	preferred := ""
+	if len(admins) > 0 {
+		if u, err := store.GetUserByUsername(ctx, admins[0].Username); err == nil {
+			preferred = u.ID
+		} else if !errors.Is(err, authn.ErrUserNotFound) {
+			return "", fmt.Errorf("bootstrap: find bootstrap admin %s: %w", admins[0].Username, err)
+		}
+	}
+	leaderID, err := groupRepo.EnsurePublicLeader(ctx, preferred)
+	if err != nil || leaderID == "" {
+		return "", err
+	}
+	u, err := store.GetUserByID(ctx, leaderID)
+	if err != nil {
+		return leaderID, nil
+	}
+	return u.Username, nil
+}
+
 func SeedDemo(ctx context.Context, store *authn.SessionStore, groupRepo *groups.Repository, users []DemoUser, demoGroups []DemoGroup) ([]string, error) {
 	var created []string
 	newUserIDs := map[string]string{} // username -> id, only users created now

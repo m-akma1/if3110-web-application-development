@@ -218,3 +218,30 @@ func TestSeedDemoTarget_Integration(t *testing.T) {
 		t.Fatalf("grant yang dihapus admin tidak boleh kembali, dapat %s", lvl)
 	}
 }
+
+func TestEnsurePublicLeader_IsTheFirstBootstrapAdmin_Integration(t *testing.T) {
+	db := testutil.NewPlatformDB(t)
+	ctx := context.Background()
+	store := authn.NewPostgresSessionStore(db, authn.DefaultSessionConfig())
+	repo := groups.NewRepository(db)
+	admins := []bootstrap.Admin{
+		{Username: "root.admin", Password: "RootPassword123"},
+		{Username: "ops.admin", Password: "OpsPassword123"},
+	}
+	if _, err := bootstrap.EnsureAdmin(ctx, store, admins); err != nil {
+		t.Fatal(err)
+	}
+
+	leader, err := bootstrap.EnsurePublicLeader(ctx, store, repo, admins)
+	if err != nil || leader != "root.admin" {
+		t.Fatalf("Public leader = %q, %v; want the first bootstrap admin", leader, err)
+	}
+	root, _ := store.GetUserByUsername(ctx, "root.admin")
+	if got, _ := repo.GetLeader(ctx, groups.PublicGroupID); got != root.ID {
+		t.Fatalf("Public leader_id = %q, want root.admin", got)
+	}
+	// Restart: Public already has an active leader, nothing changes.
+	if leader, err := bootstrap.EnsurePublicLeader(ctx, store, repo, admins[1:]); err != nil || leader != "" {
+		t.Fatalf("second start = %q, %v; want no change", leader, err)
+	}
+}

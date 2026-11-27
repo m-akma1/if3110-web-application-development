@@ -66,9 +66,6 @@ func main() {
 
 	sessionStore := authn.NewPostgresSessionStore(db, cfg.Session)
 	groupRepo := groups.NewRepository(db)
-	if err := groupRepo.EnsureLeaders(ctx); err != nil {
-		slog.Warn("groups.ensure_leaders_failed", slog.String("error", err.Error()))
-	}
 	grantStore := rbac.NewPostgresGrantStore(db)
 	authorizer := rbac.NewAuthorizer(grantStore)
 	// Target pools: the viewer, the target manager and the migration engine share one registry.
@@ -108,6 +105,23 @@ func main() {
 		if registered {
 			slog.Info("bootstrap.demo_target_registered", slog.String("name", bootstrap.DemoTargetName))
 		}
+	}
+
+	// Every group with database access needs an active leader to approve changes.
+	if err := groupRepo.EnsureLeaders(ctx); err != nil {
+		slog.Warn("groups.ensure_leaders_failed", slog.String("error", err.Error()))
+	}
+	if leader, err := bootstrap.EnsurePublicLeader(ctx, sessionStore, groupRepo, cfg.BootstrapAdmins); err != nil {
+		slog.Warn("groups.public_leader_failed", slog.String("error", err.Error()))
+	} else if leader != "" {
+		slog.Info("groups.public_leader_set", slog.String("leader", leader))
+	}
+	if leaderless, err := groupRepo.LeaderlessWithGrants(ctx); err == nil && len(leaderless) > 0 {
+		names := make([]string, 0, len(leaderless))
+		for _, g := range leaderless {
+			names = append(names, g.Name)
+		}
+		slog.Warn("groups.leaderless_with_grants", slog.Any("groups", names))
 	}
 
 	// Connect every registered target. Unreachable targets are marked ERROR, never fatal.
