@@ -1,54 +1,99 @@
-# Security: Static Application Security Testing (SAST) dengan CodeQL
+# SAST with CodeQL
 
-## 1. Konfigurasi & Cakupan Analisis
+## Overview
 
-Workflow CodeQL didefinisikan pada [`.github/workflows/codeql.yml`](../.github/workflows/codeql.yml) dan berjalan otomatis pada:
-- `push` ke branch `main`, `dev`, dan `feat/**`
-- `pull_request` menuju `main` dan `dev`
-- Jadwal mingguan (`cron: "30 2 * * 1"`) serta pemicu manual (`workflow_dispatch`)
+This document records the static analysis of the repository with GitHub CodeQL: what is scanned, every finding with its decision (fixed, false positive or accepted risk) and the reason, and what SAST cannot catch. In the latest scan nothing is left to fix: the frontend is clean, and the 9 Go alerts are 8 false positives and 1 accepted risk.
 
-### Cakupan Kode & Query Suite
+### Setup
 
-| Bahasa CodeQL | Mode Build | Cakupan Kode (Berdasarkan SARIF) | Jumlah Rule (`security-extended`) | Scan Awal (`0bc25da`) | Hasil Re-Scan (`e8a2ac0`) |
-|---|---|---|---|---|---|
-| `go` | `autobuild` (Go `1.26.0`) | 82 file backend Go (`main.go`, `domain/`, `internal/`) | 35 rules | 4 temuan | **1 temuan** (*Accepted Risk*) |
-| `javascript-typescript` | `none` | 42 file frontend React/TypeScript (`frontend/src/`) | 103 rules | 0 temuan | **0 temuan** |
+[`.github/workflows/codeql.yml`](../.github/workflows/codeql.yml) runs CodeQL with the `security-extended` query suite on every push and pull request to `main` and `dev`. Each run:
 
-Setiap eksekusi menghasilkan:
-1. Upload otomatis hasil analisis ke tab **Security → Code scanning** di GitHub (`upload: always`).
-2. Tabel ringkasan temuan pada **GitHub Actions Job Summary** (`$GITHUB_STEP_SUMMARY`).
-3. Berkas laporan `.sarif` yang disimpan sebagai **Build Artifact** (`codeql-sarif-go` dan `codeql-sarif-javascript-typescript`) selama 30 hari.
+- uploads its results to **Security → Code scanning** on GitHub;
+- writes a findings table to the Actions job summary;
+- keeps the SARIF files as artifacts (`codeql-sarif-go`, `codeql-sarif-javascript-typescript`) for 30 days.
 
----
+| Language | Build mode | Files analysed (from the SARIF) | Rules |
+|---|---|---|---|
+| `go` | `autobuild` | 115: all 63 application files (`main.go`, `domain/`, `internal/`) and 52 test files | 35 |
+| `javascript-typescript` | `none` | 53: the 36 TS/TSX files in `frontend/src/`, frontend config, `loadtest/stress.js`, and the workflow, Compose and observability YAML | 103 |
 
-## 2. Dokumentasi Temuan Hasil Scan CodeQL (`go.sarif` & `javascript.sarif`)
+### Limitation
 
-### A. Temuan Aktual dari Hasil Scan CodeQL
+A clean or explained scan does not prove the application is secure. CodeQL follows data flow for the patterns its rules know, and misses, for example:
 
-| Rule / CWE | Severity | Lokasi Kode | Potensi Dampak | Keputusan & Alasan | Status |
-|---|---|---|---|---|---|
-| `go/log-injection` (CWE-117) | Medium | `internal/http/api_viewer.go:216` (`logViewerError`, 2 alur taint) | Parameter `dbID` dari query request (`?db_id=`) dan pesan error dicatat ke `s.logger.Printf` tanpa sanitasi newline, berisiko *log forging* apabila karakter `\r`/`\n` disisipkan. | **Perlu Diperbaiki (Temuan Valid)**: Seluruh argumen (`op`, `user.ID`, `dbID`, `err.Error()`) dibersihkan dengan `stripLogNewlines` sebelum dicetak ke log. | **Diperbaiki & Terverifikasi Hilang** (Commit `e8a2ac0`, re-scan `go.sarif`: 0 alert `go/log-injection`). |
-| `go/log-injection` (CWE-117) | Medium | `internal/http/authz.go:144` (`authorizeDB`) | Parameter `dbID` dari input HTTP (`resolveDBID`) masuk ke `s.logger.Printf` saat terjadi kegagalan pemeriksaan otorisasi. | **Perlu Diperbaiki (Temuan Valid)**: Membersihkan `u.ID`, `dbID`, `action`, dan `err.Error()` menggunakan `stripLogNewlines`. | **Diperbaiki & Terverifikasi Hilang** (Commit `e8a2ac0`, re-scan `go.sarif`: 0 alert `go/log-injection`). |
-| `go/sql-injection` (CWE-89) | High | `internal/dbmanager/query_guard.go:185` (`RunReadOnlyQuery`) | Query SQL dari pengguna diteruskan ke `tx.QueryContext(ctx, query, args...)`. | **Tidak Diperbaiki: Risiko Diterima (*Accepted Risk / Mitigated by Design*)**: Fitur **SQL Query Explorer** memang bertugas mengeksekusi query read-only dari pengguna. Mitigasi berlapis telah diterapkan: `CheckReadOnlyQuery` (hanya mengizinkan `SELECT`/`WITH`/`SHOW`, menolak DDL/DML & fungsi berbahaya), transaksi `SET TRANSACTION READ ONLY` yang selalu di-rollback, `statement_timeout`, batas baris `QUERY_ROW_LIMIT`, dan RBAC per database. | **Accepted Risk**. |
+- **Migration SQL.** It runs on the target as written, but CodeQL never flags it: the SQL is stored in the platform database before the worker reads it, and CodeQL's default `remote` threat model does not count database reads as user input. The protection here is business logic: leader approval, revalidation under the lock, dry runs, and LIFO rollback.
+- **Authorization rules.** CodeQL cannot tell who may do what. The integration tests check this (`internal/http/authz_matrix_test.go`).
+- **Deployment configuration**, such as TLS and Caddy, the target database role's privileges, and secrets in `.env`.
 
-### B. Perbaikan Preventif Tambahan (Pra-Scan)
+## Scan history
 
-Selain temuan pada `go.sarif`, hardening preventif berikut telah diterapkan dan terkonfirmasi bersih pada hasil scan CodeQL (`0` alert pada lokasi terkait):
+| Commit | Go | JS/TS | What changed |
+|---|---|---|---|
+| `0bc25da` (2026-11-22) | 4 | 0 | First scan |
+| `e8a2ac0` (2026-11-22) | 1 | 0 | The two log-injection findings fixed |
+| `c0aa875` (2026-11-26) | 8 | 0 | Logging moved to `log/slog` JSON (`a36320b`..`0c5cc90`); CodeQL flags each `slog` call that logs user input |
+| `1d88e5f` (2026-11-26) | 9 | 0 | Audit events added (`f91beb6`) |
+| `31dc68f` (2026-11-27) | 9 | 0 | Rescan on `main` for Milestone 2 ([run 46025336706](https://github.com/m-akma1/if3110-web-application-development/actions/runs/46025336706)) |
 
-| Rule / CWE | Severity | Lokasi Kode | Potensi Dampak | Keputusan & Alasan |
+### Findings 2026-11-22 (`0bc25da`)
+
+| Rule | Severity | Location (then) | Impact | Decision |
 |---|---|---|---|---|
-| `go/log-injection` (CWE-117) | Medium | `internal/http/middleware_logger.go` (`SanitizedLoggerMiddleware`) | Penyisipan `\r`/`\n` pada HTTP Method dan URL Path saat logging request. | **Diperbaiki**: Diterapkan `stripLogNewlines` serta unit test pada `internal/http/middleware_logger_test.go`. |
-| `go/sql-injection` (CWE-89) | High | `internal/migration/repository.go` (`hasPendingActionFor`) | Penggabungan nama kolom ke string SQL literal. | **Diperbaiki**: Dipecah menjadi dua konstanta query literal statis (`rollbackQuery` dan `forwardQuery`). |
-| `CWE-400` / Slowloris HTTP DoS | Medium | `main.go` (`http.Server`) | Koneksi HTTP tanpa batas waktu pembacaan header. | **Diperbaiki**: Menetapkan `ReadHeaderTimeout: 10 * time.Second`. |
+| `go/log-injection` (CWE-117) | Medium | `internal/http/api_viewer.go:216` (`logViewerError`) | `?db_id=` and error text written with `logger.Printf` (plain text, one line per record), so `\r\n` could forge log lines | **Valid, fixed** in `e8a2ac0` with `stripLogNewlines`; gone in the re-scan |
+| `go/log-injection` (CWE-117) | Medium | `internal/http/authz.go:144` (`authorizeDB`) | Same, with the `db_id` of a denied request | **Valid, fixed** in `e8a2ac0`; gone in the re-scan |
+| `go/sql-injection` (CWE-89) | High | `internal/dbmanager/query_guard.go:185` | User SQL reaches `tx.QueryContext` | **Accepted risk**, still open as alert #1 (below) |
 
-### C. Hasil Analisis Frontend (`javascript.sarif`)
+Hardening done before the first scan, clean in every scan since:
 
-- Cakupan: 42 file TypeScript/React (`frontend/src/`), 103 rule CodeQL `security-extended`.
-- Hasil: **0 temuan (`0 alerts`)**.
-- Catatan: Tidak ditemukan penggunaan sink berbahaya seperti `dangerouslySetInnerHTML`, `innerHTML`, `eval()`, maupun penyimpanan token rahasia di `localStorage` (autentikasi menggunakan cookie `__Host-sid` `HttpOnly` + `Secure` dan CSRF double-submit).
+| Issue | Location | Fix |
+|---|---|---|
+| CR/LF in the logged method and path | `internal/http/middleware_logger.go` | `stripLogNewlines`, with a unit test |
+| Column name concatenated into SQL | `internal/migration/repository.go` (`hasPendingActionFor`) | Two static queries |
+| Slowloris (CWE-400) | `main.go`, `internal/metrics` | `ReadHeaderTimeout` of 10 s and 5 s |
 
----
+### Findings 2026-11-27 (`31dc68f`)
 
-## 3. Keterbatasan SAST
+| Alert | Rule | Severity | Location | Tainted input | Decision |
+|---|---|---|---|---|---|
+| #1 | `go/sql-injection` (CWE-89) | High | `internal/dbmanager/query_guard.go:185` (`queryRows`) | `sql_query` of `POST /api/viewer/query` | **Accepted risk** |
+| #5, #6 | `go/log-injection` (CWE-117) | Medium | `internal/logging/sql.go:143`, `:151` (`sql.result`) | viewer request body, URL and form values | **False positive** |
+| #13 | `go/log-injection` (CWE-117) | Medium | `internal/logging/sql.go:72` (`sql.start`) | same | **False positive** |
+| #7, #8 | `go/log-injection` (CWE-117) | Medium | `internal/http/authz.go:150`, `:156` (`authz.denied`, `authz.error`) | `db_id` | **False positive** |
+| #9, #10 | `go/log-injection` (CWE-117) | Medium | `internal/http/api_viewer.go:218`, `:219` (`viewer.error`) | `db_id`, error text | **False positive** |
+| #12 | `go/log-injection` (CWE-117) | Medium | `internal/audit/audit.go:47` (`audit.Log`) | `group_id`, `database_id`, `level` of `POST /api/admin/grants` | **False positive** |
 
-Hasil scan bersih (`0 alerts` pada `javascript-typescript`, maupun setelah perbaikan `go/log-injection`) **tidak berarti aplikasi pasti aman sepenuhnya**. CodeQL menganalisis pola aliran data (*taint tracking*) statis sesuai cakupan rule `security-extended`, sehingga tetap perlu dilengkapi dengan *automated integration test* otorisasi, review konfigurasi TLS/Caddy, serta verifikasi *business logic* (seperti aturan LIFO rollback dan *Group Leader approval*).
+GitHub shows alert #11 (`internal/logging/sql.go:63`) as fixed, but that is not a real fix. Commit `10ac5d0` moved the same log call, and GitHub reported it again as #13.
+
+## Rationales
+
+### Log injection: false positive
+
+Log injection needs a log written as plain text, one record per line. Since Milestone 2 there is no such log:
+
+- **One JSON logger.** `main.go` builds the only logger with `logging.New`, which uses `slog.NewJSONHandler`, and sets it as the default. No application code logs with `log.Printf` or `fmt.Print*`.
+- **The JSON encoder escapes control characters.** CR, LF, ESC and the rest are written as `\r`, `\n` and `\u001b` inside the JSON string. A record is always one line, and a value cannot close its string or add a key.
+- **The OTLP export is structured.** With `OTEL_LOGS_EXPORTER=otlp`, records go to Loki as protobuf attributes, not as lines of text.
+
+CodeQL flags every `slog` call as a sink, whatever handler is used. It does not recognise the JSON escaping as a sanitizer.
+
+Stripping newlines, as in Milestone 1, would only make the logs worse. Migration SQL has line breaks and must be logged as it was sent, and JSON escaping keeps it intact.
+
+The test `TestUserInputCannotForgeLogLines` ([`internal/logging/logging_test.go`](../internal/logging/logging_test.go)) is the evidence. It logs a `database_id`, an error, an audit attribute and a multi-line SQL statement, all containing `\r\n`, a fake `{"event":"authz.allowed"}` record and ESC. It then checks four things:
+
+- the four records are exactly four valid JSON lines;
+- no forged event appears;
+- every value, including the SQL line breaks, decodes back unchanged;
+- no raw CR or ESC reaches the output.
+
+The eight alerts are dismissed on GitHub as *False positive*, with a comment pointing here. The rule stays on, so a future plain-text log of user input would still be reported.
+
+### SQL injection: accepted risk
+
+The SQL Query Explorer exists to run the user's read-only queries, so the query cannot be a constant. Several layers protect it:
+
+- **Access check.** `authorizeDB(..., rbac.ActionViewData)` runs before the query is checked or sent.
+- **Validation.** `ValidateReadOnlySQL` accepts one statement starting with `SELECT`, `WITH` or `SHOW`. It refuses data and schema changes, and dangerous server functions (`blockedFunctions` in [`sql_scan.go`](../internal/dbmanager/sql_scan.go): `pg_read_file`, `dblink`, `pg_terminate_backend`, advisory locks, ...).
+- **Read-only transaction.** `withReadOnlyTx` uses `BeginTx(ReadOnly: true)` and always rolls back, so PostgreSQL itself refuses any write.
+- **Limits.** `SET LOCAL statement_timeout` (`QUERY_TIMEOUT_MS`), a client-side deadline, and `QUERY_ROW_LIMIT`.
+
+The alert stays open on purpose, as a reminder that this endpoint takes free-form SQL.
