@@ -282,6 +282,7 @@ export interface MigrationJobView {
   last_error?: string
   next_run_at: string
   created_at: string
+  started_at?: string
   finished_at?: string
   done: boolean
 }

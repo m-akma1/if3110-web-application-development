@@ -279,6 +279,7 @@ func toJobView(j *migration.Job) *domain.MigrationJobView {
 		LastError:   j.LastError,
 		NextRunAt:   j.NextRunAt,
 		CreatedAt:   j.CreatedAt,
+		StartedAt:   j.SQLStartedAt,
 		FinishedAt:  j.FinishedAt,
 		Done:        j.Done(),
 	}

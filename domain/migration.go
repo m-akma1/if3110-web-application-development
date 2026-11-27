@@ -162,18 +162,21 @@ type PlanNodeView struct {
 
 // MigrationJobView is one queued run of a migration, polled by the SPA until it is done.
 type MigrationJobView struct {
-	ID          string     `json:"id"`
-	MigrationID string     `json:"migration_id"`
-	DatabaseID  string     `json:"database_id"`
-	JobType     string     `json:"job_type"`
-	Status      string     `json:"status"`
-	Attempt     int        `json:"attempt"`
-	MaxAttempts int        `json:"max_attempts"`
-	LastError   string     `json:"last_error,omitempty"`
-	NextRunAt   time.Time  `json:"next_run_at"`
-	CreatedAt   time.Time  `json:"created_at"`
-	FinishedAt  *time.Time `json:"finished_at,omitempty"`
-	Done        bool       `json:"done"`
+	ID          string    `json:"id"`
+	MigrationID string    `json:"migration_id"`
+	DatabaseID  string    `json:"database_id"`
+	JobType     string    `json:"job_type"`
+	Status      string    `json:"status"`
+	Attempt     int       `json:"attempt"`
+	MaxAttempts int       `json:"max_attempts"`
+	LastError   string    `json:"last_error,omitempty"`
+	NextRunAt   time.Time `json:"next_run_at"`
+	CreatedAt   time.Time `json:"created_at"`
+	// StartedAt is when the current or last attempt sent its SQL (after the lock). StartedAt
+	// minus NextRunAt is the queue and lock wait of that attempt.
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	Done       bool       `json:"done"`
 }
 
 // MigrationExecutionView is one attempt to run a migration (append-only history).
