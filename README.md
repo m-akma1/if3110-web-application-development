@@ -11,6 +11,23 @@ In this milestone, we implemented a database web platform where a team can work 
 - **View Only** users browse tables, schemas and data, run read-only queries, and read the migration history.
 - **View & Edit** users can also write migration scripts, test them with a dry run (including query plans), and execute them. Every execution runs in a single transaction and is recorded in an immutable history.
 
+### Milestone 2
+
+In this milestone, the platform was extended so that database changes are validated and reviewed before they run, large migrations run in the background, and every run can be traced.
+
+- **Single-page application**: every page, including login, signup and the admin console, is a React SPA that talks to the Go backend through a JSON API. Pages are responsive from phone to desktop width. See [Routes](#routes).
+- **Review and approval**: a migration goes `DRAFT → PENDING_REVIEW → APPROVED → QUEUED → RUNNING → SUCCESS | FAILED`. The **leader of every group with access** to the database (View Only or View & Edit) must approve it. The same applies to rollbacks, forwards and batch actions. Permission and approvals are checked again right before the SQL runs. See [Review and Approval](#review-and-approval).
+- **Rollback and forward**: every migration has a SQL Down, or is marked irreversible with a reason. Rollback undoes only the latest active migration (LIFO). Forward re-applies it as a new run. Both use the original, immutable scripts. See [Migrations](#migrations).
+- **Execution history**: every attempt is kept in an append-only history, including failures, retries, rollbacks and forwards. Each attempt records the exact SQL that was sent. A rollback points at the execution it undid, and **Hide rollback** filters such pairs out without deleting anything. See [Execution History and Audit](#execution-history-and-audit).
+- **Asynchronous execution**: execute, rollback and forward only queue a job and return its ID. A worker pool then runs it under a per-database lock, with leases, bounded retries and no double commit. See [Asynchronous Execution](#asynchronous-execution).
+- **Per-batch execution**: large `UPDATE`/`DELETE` migrations can run one transaction per batch. Each batch saves a checkpoint and recovery data in the same transaction, and a stopped run can be resumed or aborted with a safe rollback. See [Per-Batch Execution](#per-batch-execution). It was measured on 2,000,000 rows.
+- **Logging and tracing**: structured JSON logs record every SQL statement, transaction, job and audit event. OpenTelemetry traces run from the API through the queue and worker to every batch and statement. See [Activity Logging](#activity-logging) and [Tracing](#tracing).
+- **Automated tests**: unit and integration tests cover success, failure and access-denied cases. They run in CI with the race detector. See [Testing and CI](#testing-and-ci).
+- **Bonuses**:
+  - [Observability](#observability): OpenTelemetry Collector, Tempo, Loki, Prometheus and Grafana.
+  - [Stress Test (k6)](#stress-test-k6).
+  - [SAST with CodeQL](#security-sast-with-codeql), with a re-scan for this milestone.
+
 ## Build and Run
 
 ### Requirements
@@ -18,6 +35,7 @@ In this milestone, we implemented a database web platform where a team can work 
 - Docker with Docker Compose v2
 - `openssl` (to generate secrets)
 - For local development only: Go 1.26 and Node.js 22
+- Optional: `jq` to read the JSON logs. The k6 stress test runs in the `grafana/k6` Docker image, so k6 does not need to be installed
 
 ### Steps
 
@@ -125,10 +143,11 @@ The resume/abort buttons of batch migrations can be hidden with the frontend bui
 
 The worker pool itself uses fixed settings: 4 workers, a 30 s lease renewed every 10 s, at most 3 attempts per job, retry delay 2 s doubling up to 1 min, and a lease check every 10 s (`migration.DefaultWorkerConfig`).
 
-#### Logging
+#### Server and Logging
 
 | Variable | Default Value | Description |
 |---|---|---|
+| `LISTEN_ADDR` | `:8080` | (Optional) Address the app listens on. Caddy proxies to `app:8080`, so change both together |
 | `LOG_LEVEL` | `info` | (Optional) Minimum log level: `debug`, `info`, `warn` or `error` |
 
 #### Tracing
@@ -225,12 +244,15 @@ When enabled, the app creates the demo users and groups that do not exist yet, r
 | Databases | PostgreSQL 16, driver `jackc/pgx/v5` |
 | Password hashing | Argon2id (`golang.org/x/crypto`) |
 | Logging | `log/slog` structured JSON logs on stdout (one logger, request correlation ID, trace/span IDs, redaction) |
-| Tracing | OpenTelemetry Go SDK, `otelhttp`, W3C Trace Context carried through the job queue, console exporter |
+| Tracing | OpenTelemetry Go SDK, `otelhttp`, W3C Trace Context carried through the job queue; console (default) or OTLP exporter, logs over OTLP through the `otelslog` bridge |
+| Metrics | Prometheus Go client on a separate `/metrics` port |
+| Observability stack (bonus) | OpenTelemetry Collector, Grafana Tempo, Loki, Prometheus and Grafana (Compose profile `observability`) |
+| Load testing (bonus) | k6 (`grafana/k6` Docker image) |
 | Background jobs | Job queue in a PostgreSQL table (`FOR UPDATE SKIP LOCKED`), worker pool inside the app process |
 | History and audit | Append-only `migration_executions` table (enforced by a trigger) and `audit.*` log events |
 | Reverse proxy and TLS | Caddy 2 |
 | Deployment | Docker multi-stage build (Node -> Go -> Alpine), Docker Compose |
-| CI and security | GitHub Actions (build, vet, test), CodeQL SAST |
+| CI and security | GitHub Actions (frontend build, gofmt, vet, build, tests with `-race`, Docker build), CodeQL SAST (`security-extended`) |
 
 ### Architectural Diagram
 
@@ -253,7 +275,7 @@ flowchart LR
             groups["groups<br/>groups, leaders, invite codes"]
             admin["admin<br/>console services"]
             migr["migration<br/>drafts, dry run, approvals,<br/>job queue, engine,<br/>rollback/forward, history"]
-            obs["logging · audit · tracing<br/>used by every component:<br/>JSON logs, audit.* events,<br/>OTel spans on stdout"]
+            obs["logging · audit · tracing · metrics<br/>used by every component:<br/>JSON logs, audit.* events, OTel spans<br/>(stdout or OTLP), /metrics on :9091"]
 
             viewer["dbmanager<br/>target pools, read-only viewer"]
         end
@@ -284,7 +306,7 @@ flowchart LR
 - Execute, rollback and forward requests only **enqueue a job** and answer `202 Accepted`. A worker in the same process runs the job later; the SPA polls until it is done.
 - **Target databases** are only reached through the connection registry, which holds one small pool (up to 5 connections) per connected target. The Data Viewer, the target manager and the migration engine share it.
 - Every request that touches a target first identifies the user (`authn`), then asks `rbac.Authorizer` whether the action is allowed. Handlers never compare access levels themselves.
-- Logging, audit events and tracing are used by every component, so the diagram shows them as one box instead of an arrow from each component. See [Activity Logging](#activity-logging) and [Tracing](#tracing).
+- Logging, audit events, tracing and metrics are used by every component, so the diagram shows them as one box instead of an arrow from each component. See [Activity Logging](#activity-logging), [Tracing](#tracing) and [Observability](#observability), which also shows where the optional observability containers fit.
 
 ### Repository Structure
 
@@ -317,11 +339,12 @@ flowchart LR
 │   ├── src/components/          # Layout, sidebar, data grid, dry-run report, migration and admin parts
 │   ├── src/types/, src/utils/   # Shared TypeScript types and helpers
 │   └── public/static/           # Images; copied into frontend/dist/static, served under /static
-├── docs/                        # Extra documentation (CodeQL SAST report)
+├── docs/                        # Details linked from this README: batch mode, logging and tracing examples,
+│                                #   observability, CodeQL SAST report
 ├── docker/target-init/          # Init scripts for the demo target database
 ├── docker/seed/                 # Optional large dataset for batch mode (make seed-large)
 ├── docker/observability/        # Collector, Tempo, Loki, Prometheus, Grafana config + dashboard (make observability)
-├── loadtest/                    # k6 stress test (stress.js, run.sh, local-run.sh) and the documented results
+├── loadtest/                    # k6 stress test (stress.js, run.sh, local-run.sh); runs write results/*.json (git-ignored)
 ├── Dockerfile                   # SPA build (Node) -> Go build -> Alpine runtime
 ├── docker-compose.yml           # caddy, app, postgres, target-postgres; profiles "test" and "observability"
 ├── Caddyfile                    # TLS, reverse proxy, log filtering
@@ -389,7 +412,7 @@ Database pages and API calls take the selected database as `?db_id=`.
 - **Sign up** creates a `USER` account. Fields: username (3-32 characters of `a-z`, `0-9`, `.`, `_`, `-`, case-insensitive), optional email, password (8-128 characters), and an optional invite code. A valid, active invite code also adds the new user to that code's group. The user is logged in right after signing up.
 - **Log in** accepts a username or an email (an identifier containing `@` is matched against emails). Deactivated accounts cannot log in. Wrong usernames and wrong passwords get the same error message.
 - Passwords are hashed with **Argon2id** (64 MiB memory, 1 iteration, 4 threads, 16-byte salt). A dummy hash is verified when the account does not exist, so response time does not reveal which usernames exist.
-- Login and signup reject requests that put the password in the URL query string.
+- Login and signup refuse a request that puts the password in the URL query string (`400`), and read credentials only from the request body.
 - **Log out** revokes the session on the server and clears the cookie.
 
 #### Authorization
@@ -535,34 +558,14 @@ A migration can run in **batch mode** (*Mode Eksekusi → Per-batch* in the edit
   - **Resume** (*Lanjutkan dari Checkpoint*) runs the remaining batches, starting after the last checkpoint;
   - **Abort with rollback** (*Batalkan & Rollback Batch*) runs SQL Down over the same key ranges, **newest batch first**. When every batch is undone the migration is `ABORTED`; if it stops early it reads as **`PARTIALLY_REVERTED`** and can only be aborted again;
   - **Mark as stopped** (*Tandai Dihentikan*) sets `ABORTED` and leaves the committed batches in place.
-- **Recovery data**: before an UP batch of an `UPDATE` changes its rows, it copies them into `_dbplatform_batch_rows` on the target, as `to_jsonb` of the whole row (the *before-image*), and locks them with `FOR UPDATE`, in the batch's own transaction. How many it stored is kept with the checkpoint (`recovery_rows`).
-  - The copy uses the statement's `WHERE`; with `UPDATE ... FROM`, whose `WHERE` joins other tables, it takes every row of the key range.
-  - The statement then reports the keys it changed (`RETURNING`). If it changed a row that was not copied (another transaction made it match in between), the batch is rolled back with "baris pada rentang batch berubah ..." and the run stops; running it again is safe.
-  - Irreversible migrations store nothing, since they cannot be aborted with rollback.
-- **The abort safety rule**: an abort with rollback is refused before it starts when a committed batch has no recovery data (it was committed by an older version of the platform); *Tandai Dihentikan* still works. Each DOWN batch runs SQL Down over the batch's key range, then, **in the same transaction**, compares the stored before-images with the rows now in the range. It commits only when
-  1. every stored row is back exactly as it was before the migration, and
-  2. SQL Down changed no more rows than the batch had changed.
+- **Recovery data**: before an UP batch of an `UPDATE` changes its rows, it stores a copy of them (the *before-image*) in `_dbplatform_batch_rows` on the target, in the batch's own transaction. Irreversible migrations store nothing.
+- **The abort safety rule**: an abort with rollback is refused when a committed batch has no recovery data. Each DOWN batch commits only when the rows are back exactly as they were before the migration; otherwise that batch is rolled back and the abort stops as **unsafe**. A batch is never left half-reverted. Recovery rows are deleted when the migration is final.
 
-  Otherwise that batch is rolled back and the abort stops as **unsafe** (still `PARTIAL`, or `PARTIALLY_REVERTED` when later batches were already undone), with the batch number, key range and row counts in the error. The usual causes are a row changed again after the migration, or a SQL Down that does not exactly undo SQL Up, for example `UPDATE ... SET status = 'NEW' WHERE status = 'ARCHIVED'` when some rows were already `ARCHIVED` before. A batch is never left half-reverted.
-- **Cleanup**: a DOWN batch deletes its own recovery rows when it commits; the rest are purged when the migration becomes final (`SUCCESS` or `ABORTED`). `_dbplatform_batch_rows` is hidden from the Database Viewer like the checkpoint table.
+  How the before-images are captured, checked and cleaned up is in [docs/batch-mode.md](docs/batch-mode.md).
 - **Restarts are safe**: on `SIGTERM` a batch run stops at the next batch boundary and its job goes back to the queue without using an attempt; when a worker dies mid-run, the job is put back in the queue instead of becoming `UNCERTAIN`. In both cases the next run continues after the last checkpoint.
 - Every run (first run, resume, abort) is one execution in the history (`PARTIAL` when it stopped with committed batches); the batches it committed point at that execution.
 
-**Large dataset.** `make seed-large` creates `events` (2,000,000 rows, 173 MB) on the demo target, owned by the app role. Measured on 2026-11-27 on one laptop against the Docker test database (PostgreSQL 16, data on tmpfs), each run on a freshly seeded table, so treat the numbers as rough and compare them with each other rather than with another machine:
-
-| Run of `UPDATE events SET status = 'ARCHIVED'` | Total | Longest single transaction (average) |
-|---|---|---|
-| One statement (standard mode) | 6.9 s | the whole statement, 6.9 s, with row locks on all 2,000,000 rows |
-| Batch mode, `batch_size` 10,000 (200 batches), with recovery data | 20.5 s | 145 ms (97 ms) |
-| Batch mode, `batch_size` 10,000, irreversible (no recovery data) | 7.7 s | 46 ms (33 ms) |
-| Batch mode, `batch_size` 50,000 (40 batches), with recovery data | 20.6 s | 512 ms (462 ms) |
-| Batch mode, `batch_size` 50,000, irreversible (no recovery data) | 7.6 s | 237 ms (175 ms) |
-| Abort with rollback of 199 batches of 10,000 (SQL Down + check per batch) | 19.7 s | 125 ms (94 ms) |
-
-- Batch mode alone costs little next to the single statement. Storing the before-images makes each batch about three times slower, because every changed row is also written as JSON; the longest transaction still stays well under a second.
-- The recovery data of the whole table took **459 MB** (the table itself is 173 MB). It is deleted when the migration is final, but PostgreSQL keeps the space for reuse by the table (autovacuum) instead of returning it to the disk; `VACUUM FULL _dbplatform_batch_rows` gives it back.
-- Marking a batch migration irreversible skips the recovery data (and the abort with rollback) when that cost is not worth it.
-- An earlier measurement on a slower laptop, before recovery data existed, gave 30–49 s for the single statement and 40.0 s / 25.9 s for batch sizes 10,000 / 50,000.
+**Large dataset.** `make seed-large` creates `events` (2,000,000 rows, 173 MB) on the demo target. On one laptop, `UPDATE events SET status = 'ARCHIVED'` took **6.9 s** as one statement, holding row locks on every row. In batch mode with `batch_size` 10,000 it took 20.5 s with recovery data (7.7 s without), and no single transaction ran longer than 145 ms. The full measurements and their analysis are in [docs/batch-mode.md](docs/batch-mode.md#large-dataset).
 
 #### Execution History and Audit
 
@@ -608,7 +611,7 @@ ORDER BY e.finished_at;
 - Worker settings (number of workers, lease, attempts, backoff) are fixed in code and cannot be set through environment variables yet.
 - Batch mode supports one `UPDATE` or `DELETE` with an integer cursor column. Rows inserted beyond the last key while a run is in progress are included; keys below the checkpoint that appear later are not. Rolling back a **completed** batch migration (`SUCCESS`) runs SQL Down in one transaction, like a standard migration.
 - Batch mode creates `_dbplatform_batch_checkpoints` and `_dbplatform_batch_rows` in the target's default schema; the platform's database role must be allowed to create tables there.
-- The recovery data takes about as much space as the rows the batches changed (as JSON), until the migration is final; see the measurements under [Per-Batch Execution](#per-batch-execution).
+- The recovery data takes about as much space as the rows the batches changed (as JSON), until the migration is final; see the measurements in [docs/batch-mode.md](docs/batch-mode.md#large-dataset).
 - The abort check compares whole rows. A column that the application changes on its own (an `updated_at` set by a trigger, a counter) after the migration makes that batch unsafe to undo, even if SQL Down is correct; such a migration can only be marked as stopped.
 
 ### Activity Logging
@@ -628,92 +631,15 @@ Every log record is one JSON object on stdout, written by one `log/slog` logger 
 - **Batches** log `migration.batch` (direction, `batch_no`, `cursor_from`, `cursor_to`, `rows`, `duration_ms`), `migration.batch_failed`, and `migration.batch_recovered` when checkpoints are copied from the target after a crash.
 - **Audit** events are `audit.*` (see **Execution History and Audit**).
 - **Other events**: `http.request` (access log; `WARN` for 4xx, `ERROR` for 5xx), `authz.denied`, `authz.error`, `viewer.error`, `migration.error`, and startup events such as `server.started`.
-- **Redaction**: attributes whose name contains `password`, `secret`, `token`, `session`, `cookie`, `authorization`, `dsn` or `credential` are written as `[REDACTED]`. Bind parameter values are never logged, only their types. Query text is cut at 2000 characters.
+- **Redaction**: attributes whose name contains `password`, `passwd`, `secret`, `token`, `session`, `cookie`, `authorization`, `dsn` or `credential` are written as `[REDACTED]`. Bind parameter values are never logged, only their types. Query text is cut at 2000 characters.
 - **Why parameter values are masked** (a decision, not an omission): the SQL that changes a target never uses bind parameters. Migration scripts are sent as text, logged in full in `sql.start` and stored in the execution history, so a run can always be reproduced. Bind parameters carry two other kinds of value: the platform's own (IDs, batch bounds, the batch size), which already appear as separate fields (`migration_id`, `batch_no`, `cursor_from`, `cursor_to`) in the same records, and user input from the Database Viewer, which can be personal data or something secret typed into a query. Logging only the types keeps the second kind out of the logs and loses nothing needed to debug the first.
 
-Reading the logs:
-
-```sh
-# every record of one request (X-Request-ID from the browser's DevTools)
-docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.correlation_id=="<id>")'
-# failed SQL
-docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.event=="sql.result" and .status=="FAILED")'
-# audit trail
-docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.event | startswith("audit."))'
-# one job from claim to finish
-docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.job_id=="<job id>")'
-```
-
-Example output (one block per request; long IDs shortened). A read-only query:
+Example: a read-only query (long IDs shortened). The `jq` commands for reading the logs, and examples of a failing query, a denied access, a migration run, a failed run, a rollback and a retry while the target is down, are in [docs/logging-and-tracing.md](docs/logging-and-tracing.md#logs).
 
 ```json
 {"time":"2026-11-26T06:55:10.438974839Z","level":"INFO","event":"sql.start","component":"dbmanager","database_id":"4ea8b6a0-…","sql_kind":"read_only","query":"SELECT 1","correlation_id":"readme-q1","actor":"0e966767-…"}
 {"time":"2026-11-26T06:55:10.439979881Z","level":"INFO","event":"sql.result","component":"dbmanager","database_id":"4ea8b6a0-…","sql_kind":"read_only","query":"SELECT 1","duration_ms":0,"status":"SUCCESS","rows":1,"correlation_id":"readme-q1","actor":"0e966767-…"}
 {"time":"2026-11-26T06:55:10.440056923Z","level":"INFO","event":"http.request","component":"http","method":"POST","path":"/api/viewer/query","status":200,"duration_ms":5,"correlation_id":"readme-q1","actor":"0e966767-…"}
-```
-
-A failing query:
-
-```json
-{"time":"2026-11-26T06:55:10.476767964Z","level":"ERROR","event":"sql.result","component":"dbmanager","database_id":"4ea8b6a0-…","sql_kind":"read_only","query":"SELECT * FROM tidak_ada","duration_ms":3,"status":"FAILED","error":"ERROR: relation \"tidak_ada\" does not exist (SQLSTATE 42P01)","sqlstate":"42P01","correlation_id":"readme-q2","actor":"0e966767-…"}
-{"time":"2026-11-26T06:55:10.476863589Z","level":"WARN","event":"http.request","component":"http","method":"POST","path":"/api/viewer/query","status":422,"duration_ms":6,"correlation_id":"readme-q2","actor":"0e966767-…"}
-```
-
-Access to a database the user has no grant on:
-
-```json
-{"time":"2026-11-26T06:55:10.533319339Z","level":"WARN","event":"authz.denied","component":"http","database_id":"00000000-0000-0000-0000-000000000000","action":"database:view_schema","status":"DENIED","correlation_id":"readme-deny","actor":"0e966767-…"}
-{"time":"2026-11-26T06:55:10.533437673Z","level":"WARN","event":"http.request","component":"http","method":"GET","path":"/api/viewer?db_id=00000000-0000-0000-0000-000000000000","status":403,"duration_ms":6,"correlation_id":"readme-deny","actor":"0e966767-…"}
-```
-
-The migration examples below are records from an integration test run (`time` left out; in the test the HTTP records have no `component`, in the app they carry `"component":"http"`).
-
-A group gets edit access:
-
-```json
-{"level":"INFO","event":"audit.grant","action":"grant","outcome":"success","group_id":"ebda6aac-…","database_id":"37491ac9-…","access_level":"VIEW_EDIT","correlation_id":"afb88795-…","actor":"894a4741-…"}
-```
-
-A migration is queued over HTTP, then run by a worker. Note the same `correlation_id` from the request to `job.finished`, and the execution ID shared by `migration.attempt` and `audit.execute`:
-
-```json
-{"level":"INFO","event":"audit.enqueue","action":"enqueue","outcome":"success","migration_id":"e3777042-…","database_id":"37491ac9-…","status":"QUEUED","request":"execute","job_id":"985f0362-…","requires_approval":false,"correlation_id":"fc63554d-…","actor":"492d74cb-…"}
-{"level":"INFO","event":"job.claimed","component":"worker","job_id":"985f0362-…","migration_id":"e3777042-…","database_id":"37491ac9-…","job_type":"EXECUTE","attempt":1,"worker_id":"w1","correlation_id":"fc63554d-…","actor":"492d74cb-…"}
-{"level":"INFO","event":"sql.start","component":"migration","database_id":"37491ac9-…","sql_kind":"migration","query":"CREATE TABLE orders (id int PRIMARY KEY)","migration_id":"e3777042-…","execution_type":"UP","correlation_id":"fc63554d-…","actor":"492d74cb-…"}
-{"level":"INFO","event":"sql.result","component":"migration","database_id":"37491ac9-…","sql_kind":"migration","query":"CREATE TABLE orders (id int PRIMARY KEY)","migration_id":"e3777042-…","execution_type":"UP","duration_ms":1,"status":"SUCCESS","correlation_id":"fc63554d-…","actor":"492d74cb-…"}
-{"level":"INFO","event":"tx.commit","component":"migration","database_id":"37491ac9-…","migration_id":"e3777042-…","execution_type":"UP","correlation_id":"fc63554d-…","actor":"492d74cb-…"}
-{"level":"INFO","event":"migration.attempt","component":"migration","execution_type":"UP","migration_id":"e3777042-…","execution_id":"16f18003-…","database_id":"37491ac9-…","version":1,"status":"SUCCESS","duration_ms":8,"query":"CREATE TABLE orders (id int PRIMARY KEY)","correlation_id":"fc63554d-…","actor":"492d74cb-…"}
-{"level":"INFO","event":"audit.execute","component":"migration","action":"execute","outcome":"success","execution_id":"16f18003-…","migration_id":"e3777042-…","database_id":"37491ac9-…","attempt":1,"sql_sent":true,"job_id":"985f0362-…","correlation_id":"fc63554d-…","actor":"492d74cb-…"}
-{"level":"INFO","event":"job.finished","component":"worker","job_id":"985f0362-…","migration_id":"e3777042-…","database_id":"37491ac9-…","job_type":"EXECUTE","attempt":1,"worker_id":"w1","status":"SUCCESS","correlation_id":"fc63554d-…","actor":"492d74cb-…"}
-```
-
-A migration that fails and is rolled back:
-
-```json
-{"level":"ERROR","event":"sql.result","component":"migration","database_id":"37491ac9-…","sql_kind":"migration","query":"INSERT INTO missing VALUES (1)","migration_id":"2b6fd488-…","execution_type":"UP","duration_ms":0,"status":"FAILED","error":"ERROR: relation \"missing\" does not exist (SQLSTATE 42P01)","sqlstate":"42P01","correlation_id":"ae6e465e-…","actor":"492d74cb-…"}
-{"level":"WARN","event":"tx.rollback","component":"migration","database_id":"37491ac9-…","migration_id":"2b6fd488-…","execution_type":"UP","error":"ERROR: relation \"missing\" does not exist (SQLSTATE 42P01)","correlation_id":"ae6e465e-…","actor":"492d74cb-…"}
-{"level":"ERROR","event":"migration.attempt","component":"migration","execution_type":"UP","migration_id":"2b6fd488-…","execution_id":"abca4e2e-…","database_id":"37491ac9-…","version":0,"status":"FAILED","duration_ms":1,"query":"INSERT INTO missing VALUES (1)","error":"ERROR 42P01: relation \"missing\" does not exist (statement 1, baris 1, kolom 13)","sqlstate":"42P01","correlation_id":"ae6e465e-…","actor":"492d74cb-…"}
-{"level":"WARN","event":"audit.execute","component":"migration","action":"execute","outcome":"failure","execution_id":"abca4e2e-…","migration_id":"2b6fd488-…","database_id":"37491ac9-…","attempt":1,"sql_sent":true,"job_id":"cf784c11-…","error":"ERROR 42P01: relation \"missing\" does not exist (statement 1, baris 1, kolom 13)","correlation_id":"ae6e465e-…","actor":"492d74cb-…"}
-{"level":"WARN","event":"job.finished","component":"worker","job_id":"cf784c11-…","migration_id":"2b6fd488-…","database_id":"37491ac9-…","job_type":"EXECUTE","attempt":1,"worker_id":"w1","status":"FAILED","error":"ERROR 42P01: relation \"missing\" does not exist (statement 1, baris 1, kolom 13)","correlation_id":"ae6e465e-…","actor":"492d74cb-…"}
-```
-
-A rollback: `audit.rollback` points at the rollback row (`migration_id`) and at the execution it undid (`reverts_execution_id`, the `execution_id` of the run above):
-
-```json
-{"level":"INFO","event":"migration.attempt","component":"migration","execution_type":"ROLLBACK","migration_id":"e3777042-…","execution_id":"cab7f42c-…","database_id":"37491ac9-…","version":1,"status":"SUCCESS","duration_ms":3,"query":"DROP TABLE orders","correlation_id":"ee0558e1-…","actor":"492d74cb-…"}
-{"level":"INFO","event":"audit.rollback","component":"migration","action":"rollback","outcome":"success","execution_id":"cab7f42c-…","migration_id":"29011a19-…","database_id":"37491ac9-…","attempt":1,"sql_sent":true,"job_id":"876b21a1-…","reverts_execution_id":"16f18003-…","correlation_id":"ee0558e1-…","actor":"492d74cb-…"}
-{"level":"INFO","event":"job.finished","component":"worker","job_id":"876b21a1-…","migration_id":"e3777042-…","database_id":"37491ac9-…","job_type":"ROLLBACK","attempt":1,"worker_id":"w1","status":"SUCCESS","correlation_id":"ee0558e1-…","actor":"492d74cb-…"}
-```
-
-The target is down: every attempt is recorded with `sql_sent: false` and retried with backoff (the test used a 10 ms base delay; the app uses 2 s), and the job fails after the third attempt:
-
-```json
-{"level":"WARN","event":"audit.execute","component":"worker","action":"execute","outcome":"failure","execution_id":"459628dd-…","migration_id":"4110053e-…","database_id":"37491ac9-…","attempt":1,"sql_sent":false,"job_id":"9bf8298a-…","error":"koneksi ke database target tidak tersedia","correlation_id":"69a08b0e-…","actor":"492d74cb-…"}
-{"level":"WARN","event":"job.retry_scheduled","component":"worker","job_id":"9bf8298a-…","migration_id":"4110053e-…","database_id":"37491ac9-…","job_type":"EXECUTE","attempt":1,"worker_id":"w1","delay_ms":10,"counts_as_attempt":true,"error":"koneksi ke database target tidak tersedia","correlation_id":"69a08b0e-…","actor":"492d74cb-…"}
-{"level":"WARN","event":"audit.execute","component":"worker","action":"execute","outcome":"failure","execution_id":"bd92f643-…","migration_id":"4110053e-…","database_id":"37491ac9-…","attempt":2,"sql_sent":false,"job_id":"9bf8298a-…","error":"koneksi ke database target tidak tersedia","correlation_id":"69a08b0e-…","actor":"492d74cb-…"}
-{"level":"WARN","event":"job.retry_scheduled","component":"worker","job_id":"9bf8298a-…","migration_id":"4110053e-…","database_id":"37491ac9-…","job_type":"EXECUTE","attempt":2,"worker_id":"w1","delay_ms":20,"counts_as_attempt":true,"error":"koneksi ke database target tidak tersedia","correlation_id":"69a08b0e-…","actor":"492d74cb-…"}
-{"level":"WARN","event":"audit.execute","component":"worker","action":"execute","outcome":"failure","execution_id":"99982564-…","migration_id":"4110053e-…","database_id":"37491ac9-…","attempt":3,"sql_sent":false,"job_id":"9bf8298a-…","error":"koneksi ke database target tidak tersedia","correlation_id":"69a08b0e-…","actor":"492d74cb-…"}
-{"level":"WARN","event":"job.finished","component":"worker","job_id":"9bf8298a-…","migration_id":"4110053e-…","database_id":"37491ac9-…","job_type":"EXECUTE","attempt":3,"worker_id":"w1","status":"FAILED","error":"koneksi ke database target tidak tersedia","correlation_id":"69a08b0e-…","actor":"492d74cb-…"}
 ```
 
 ### Tracing
@@ -741,18 +667,7 @@ POST /api/migration/{id}/execute     server span (otelhttp), named by route
 - Only `/api/*` requests are traced. The API is public, so a `traceparent` header sent by a client is recorded as a link, not trusted as the parent. Every trace is sampled.
 - **Output**: with `OTEL_TRACES_EXPORTER=console` (the default) each finished span is one JSON line on stdout, next to the logs. Spans are written in batches every few seconds, and the rest are flushed on shutdown.
 
-Reading a trace:
-
-```sh
-# trace ID of one request (X-Request-ID from the browser's DevTools)
-docker compose logs --no-log-prefix app | jq -R -r 'fromjson? | select(.correlation_id=="<id>" and .event=="http.request") | .trace_id'
-# every log record of that trace
-docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.trace_id=="<trace id>")'
-# its spans as a list: name, span, parent
-docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.SpanContext.TraceID=="<trace id>") | [.Name, .SpanContext.SpanID, .Parent.SpanID, .Status.Code]'
-```
-
-Example: a migration approved by both group leaders, then executed (`X-Request-ID: readme-trace-2`). The spans of the trace (name, span ID, parent span ID, status):
+The spans of one executed migration (name, span ID, parent span ID, status). The `jq` commands, the raw span, the log records of the same trace, and a failing and a batch run are in [docs/logging-and-tracing.md](docs/logging-and-tracing.md#traces).
 
 ```json
 ["POST /api/migration/{id}/execute","dd0a201e800a2260","0000000000000000","Unset"]
@@ -761,42 +676,6 @@ Example: a migration approved by both group leaders, then executed (`X-Request-I
 ["migration.lock_wait","3c6d2770cfe3a832","6733661cfcf76d95","Unset"]
 ["migration.run","c0ad35b2b3b2d411","6733661cfcf76d95","Unset"]
 ["sql migration","cb073128265e78cd","c0ad35b2b3b2d411","Unset"]
-```
-
-The `job.process` span as the console exporter writes it (`Resource` and scope fields left out, attributes flattened for reading). `Parent.Remote: true` is the context read back from the job row:
-
-```json
-{"Name":"job.process","SpanContext":{"TraceID":"1f5d052389932c3d11896055d2763300","SpanID":"6733661cfcf76d95"},"Parent":{"TraceID":"1f5d052389932c3d11896055d2763300","SpanID":"f1b426a30e579215","Remote":true},"SpanKind":5,"StartTime":"2026-11-27T09:30:03.157861455+07:00","EndTime":"2026-11-27T09:30:03.168851125+07:00","Attributes":{"job_id":"6b55242d-16cb-40f7-97aa-279fa5494be1","job_type":"EXECUTE","migration_id":"7f96e713-8b88-498e-879e-b7ba980d41bc","database_id":"15a8a362-0dae-4299-8bc3-0770df206823","attempt":1,"worker_id":"worker-3-bbd17602","job.queue_wait_ms":376,"job.status":"SUCCESS"},"Status":{"Code":"Unset","Description":""}}
-```
-
-The log records of the same trace (`time` left out, long IDs shortened). The HTTP records share the request span, the worker records share `job.process`, and the SQL records share the SQL span:
-
-```json
-{"level":"INFO","event":"audit.enqueue","component":"http","action":"enqueue","outcome":"success","migration_id":"7f96e713-…","database_id":"15a8a362-…","status":"QUEUED","request":"execute","job_id":"6b55242d-…","requires_approval":false,"trace_id":"1f5d052389932c3d11896055d2763300","span_id":"dd0a201e800a2260","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
-{"level":"INFO","event":"http.request","component":"http","method":"POST","path":"/api/migration/7f96e713-8b88-498e-879e-b7ba980d41bc/execute","status":202,"duration_ms":4,"trace_id":"1f5d052389932c3d11896055d2763300","span_id":"dd0a201e800a2260","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
-{"level":"INFO","event":"job.claimed","component":"worker","job_id":"6b55242d-…","migration_id":"7f96e713-…","database_id":"15a8a362-…","job_type":"EXECUTE","attempt":1,"worker_id":"worker-3-bbd17602","trace_id":"1f5d052389932c3d11896055d2763300","span_id":"6733661cfcf76d95","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
-{"level":"INFO","event":"sql.start","component":"migration","database_id":"15a8a362-…","sql_kind":"migration","query":"CREATE TABLE shipments (id bigint PRIMARY KEY, status text NOT NULL);\nINSERT INTO shipments SELECT g, 'NEW' FROM generate_series(1, 3) g;","migration_id":"7f96e713-…","execution_type":"UP","trace_id":"1f5d052389932c3d11896055d2763300","span_id":"cb073128265e78cd","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
-{"level":"INFO","event":"sql.result","component":"migration","database_id":"15a8a362-…","sql_kind":"migration","query":"CREATE TABLE shipments (id bigint PRIMARY KEY, status text NOT NULL);\nINSERT INTO shipments SELECT g, 'NEW' FROM generate_series(1, 3) g;","migration_id":"7f96e713-…","execution_type":"UP","duration_ms":4,"status":"SUCCESS","trace_id":"1f5d052389932c3d11896055d2763300","span_id":"cb073128265e78cd","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
-{"level":"INFO","event":"tx.commit","component":"migration","database_id":"15a8a362-…","migration_id":"7f96e713-…","execution_type":"UP","trace_id":"1f5d052389932c3d11896055d2763300","span_id":"c0ad35b2b3b2d411","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
-{"level":"INFO","event":"migration.attempt","component":"migration","execution_type":"UP","migration_id":"7f96e713-…","execution_id":"541a76dc-…","database_id":"15a8a362-…","version":1,"status":"SUCCESS","duration_ms":5,"query":"CREATE TABLE shipments (id bigint PRIMARY KEY, status text NOT NULL);\nINSERT INTO shipments SELECT g, 'NEW' FROM generate_series(1, 3) g;","trace_id":"1f5d052389932c3d11896055d2763300","span_id":"6733661cfcf76d95","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
-{"level":"INFO","event":"audit.execute","component":"migration","action":"execute","outcome":"success","execution_id":"541a76dc-…","migration_id":"7f96e713-…","database_id":"15a8a362-…","attempt":1,"sql_sent":true,"job_id":"6b55242d-…","trace_id":"1f5d052389932c3d11896055d2763300","span_id":"6733661cfcf76d95","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
-{"level":"INFO","event":"job.finished","component":"worker","job_id":"6b55242d-…","migration_id":"7f96e713-…","database_id":"15a8a362-…","job_type":"EXECUTE","attempt":1,"worker_id":"worker-3-bbd17602","status":"SUCCESS","trace_id":"1f5d052389932c3d11896055d2763300","span_id":"6733661cfcf76d95","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
-```
-
-A script that fails (`CREATE TABLE orders` when `orders` already exists) gives the same tree, with the error from the SQL span up to the job:
-
-```json
-["sql migration","Error","ERROR: relation \"orders\" already exists (SQLSTATE 42P07)",["exception"]]
-["migration.run","Error","ERROR: relation \"orders\" already exists (SQLSTATE 42P07)",["tx.rollback","exception"]]
-["job.process","Error","ERROR 42P07: relation \"orders\" already exists",[]]
-```
-
-A batch migration (`UPDATE shipments SET status = 'SHIPPED'`, cursor `id`, batch size 2, 3 rows): every batch is a child of `job.process` with its own statements and commit. The last batch finds no keys left and ends the run (name, attributes, events):
-
-```json
-["migration.batch","batch_no=1 rows=2 cursor_to=2",["tx.commit"]]
-["migration.batch","batch_no=2 rows=1 cursor_to=3",["tx.commit"]]
-["migration.batch","batch_no=3 rows=0",[]]
 ```
 
 ### Observability
@@ -813,44 +692,11 @@ app ──OTLP/HTTP──► otel-collector ──► Tempo   (traces)
 - **Grafana**: <http://localhost:3000> (anonymous visitors can view; sign in as `admin`/`admin` to edit). The home dashboard is **DB Platform**. Prometheus is also on <http://localhost:9090> for raw queries. Both are published on `127.0.0.1` only; the collector, Tempo, Loki and the app's `:9091` are only reachable inside the Compose network.
 - **Traces**: `OTEL_TRACES_EXPORTER=otlp` sends the spans described in [Tracing](#tracing) to the collector, which forwards them to Tempo.
 - **Logs**: `OTEL_LOGS_EXPORTER=otlp` adds a second output to the logger (the `otelslog` bridge) next to stdout. It gets exactly the records stdout gets: the same level, the same `correlation_id`/`actor`, and the same redaction (the redaction runs before the export, so a password never reaches Loki either). Each record keeps the trace and span of its context. In Loki the event name is the log line and the attributes (`job_id`, `migration_id`, `correlation_id`, `sql_kind`, ...) and `trace_id`/`span_id` are structured metadata; the only stream label is `service_name`.
-- **Metrics** (`internal/metrics`, Prometheus client on `METRICS_ADDR`):
-
-  | Metric | Labels | What it shows |
-  |---|---|---|
-  | `dbplatform_jobs` | `status` | Jobs in `migration_jobs` by status, read at scrape time |
-  | `dbplatform_jobs_enqueued_total`, `dbplatform_jobs_finished_total` | `job_type`, `status` | Queue input and output (throughput) |
-  | `dbplatform_job_retries_total` | `job_type`, `reason` | `busy` (database locked, no attempt used), `transient` (target unreachable), `interrupted` (shutdown between batches), `recovered` (lease expired) |
-  | `dbplatform_job_queue_wait_seconds` | `job_type` | From a job being due to a worker claiming it |
-  | `dbplatform_migration_lock_wait_seconds` | `outcome` | Waiting for the database's advisory lock (`acquired`, `busy`, `error`) |
-  | `dbplatform_migration_run_seconds` | `job_type`, `outcome` | One attempt in the engine (`success`, `script_failed`, `partial`, `busy`, `revalidation_failed`, ...) |
-  | `dbplatform_migration_batches_total`, `dbplatform_migration_batch_rows_total`, `dbplatform_migration_batch_seconds` | `direction` | Batch mode: committed batches, rows, transaction time |
-  | `dbplatform_http_requests_total`, `dbplatform_http_request_duration_seconds` | `route`, `method`, `code` | API requests by route pattern (`POST /api/migration/{id}/execute`), status class |
-  | `dbplatform_db_pool_*` | `pool` | `sql.DB.Stats()` of the platform pool and of every target pool by target name: open, in use, idle, max, waits |
-
-  Labels never contain user IDs, job or migration IDs, raw paths or SQL: those would create a series per value. They are in the logs and traces instead, one click away.
-- **Correlation in Grafana**:
-  - a log line's `trace_id` has a **Buka trace di Tempo** link (Loki derived field);
-  - a span in Tempo has **Logs for this span**, which opens the Loki records of the same trace (`{service_name="dbplatform"} | trace_id="..."`);
-  - the dashboard's last row shows warnings/errors from Loki and the newest `job.process` traces from Tempo next to the metrics.
+- **Metrics** (`internal/metrics`, Prometheus client on `METRICS_ADDR`): jobs by status, queue throughput, retries, queue and lock wait, migration and batch duration, batches and rows, HTTP requests by route, and connection pool stats per pool. Labels never contain user, job or migration IDs, raw paths or SQL.
+- **Correlation in Grafana**: a log line links to its trace in Tempo, a span links to its logs in Loki, and the dashboard shows recent errors and `job.process` traces next to the metrics.
 - **Without the profile** nothing changes: `OTEL_TRACES_EXPORTER` stays `console`, `OTEL_LOGS_EXPORTER` stays `none`, and `/metrics` is still served on `:9091` inside the network (set `METRICS_ADDR=off` to turn it off).
 
-Useful queries:
-
-```promql
-# job throughput and queue wait (p95)
-sum by (status) (rate(dbplatform_jobs_finished_total[1m]))
-histogram_quantile(0.95, sum by (le) (rate(dbplatform_job_queue_wait_seconds_bucket[1m])))
-# is a database pool saturated?
-rate(dbplatform_db_pool_wait_seconds_total[1m])
-```
-
-```logql
-# every record of one trace, or of one job
-{service_name="dbplatform"} | trace_id="<trace id>"
-{service_name="dbplatform"} | job_id="<job id>"
-# failed SQL
-{service_name="dbplatform"} |= "sql.result" | status="FAILED"
-```
+Every metric, the correlation setup and example PromQL/LogQL queries are in [docs/observability.md](docs/observability.md).
 
 ### Stress Test (k6)
 
@@ -859,7 +705,7 @@ rate(dbplatform_db_pool_wait_seconds_total[1m])
 | Runner | Databases | For |
 |---|---|---|
 | `make loadtest` (`loadtest/run.sh`) | the demo database plus `loadtest_a`, `loadtest_b`, created on `target-postgres` | anyone: it needs nothing but this repository |
-| `make loadtest-local` (`loadtest/local-run.sh`) | the demo database plus the IF3140 praktikum databases `airport`, `bioskop` and `sales`, started from `demo/<name>/docker-compose.yml` on the platform's network | the team: `demo/` is git-ignored |
+| `make loadtest-local` (`loadtest/local-run.sh`) | the demo database plus the IF3140 lab databases `airport`, `bioskop` and `sales`, started from `demo/<name>/docker-compose.yml` on the platform's network | the team: `demo/` is git-ignored |
 
 Both take the same settings (`MIGRATIONS_PER_DB`, `JOB_VU_RATIO`, `INCLUDE_DEMO`, `RUN_NAME`; `LOCAL_DBS` for the local runner). Results go to `loadtest/results/stress-NN.json`.
 
@@ -948,19 +794,32 @@ In `stress-01` the four databases came out even: 493–494 jobs each, job p95 1.
 - **What to change first:** page the migration list instead of returning every row, and make the per-target pool size (fixed at 5 connections in `internal/dbmanager/targets.go`) configurable for a database that gets most of the traffic. The one-migration-per-database rule is intended and stays: it is what keeps versions ordered and runs safe.
 - These numbers come from one laptop that also ran k6 and the observability stack. Compare the runs with each other and the stages with each other, rather than reading the absolute numbers as production capacity.
 
-To reproduce: `make observability`, then `make loadtest` (repository only) or `make loadtest-local` (`stress-01`). `stress-02` is `LOCAL_DBS=airport INCLUDE_DEMO=false MIGRATIONS_PER_DB=1800 make loadtest-local`. Watch it on the Grafana dashboard. The raw k6 summaries of both runs are in `loadtest/results/`.
+To reproduce: `make observability`, then `make loadtest` (repository only) or `make loadtest-local` (`stress-01`). `stress-02` is `LOCAL_DBS=airport INCLUDE_DEMO=false MIGRATIONS_PER_DB=1800 make loadtest-local`. Watch it on the Grafana dashboard. Each run writes its raw k6 summary to `loadtest/results/<name>.json`; these files are git-ignored, so the numbers above are the record of `stress-01` and `stress-02`.
 
 ### Testing and CI
 
 - Unit tests run without a database: `make test`.
 - Integration tests use a disposable PostgreSQL from the `postgres-test` Compose profile (port 5433 on localhost, data on tmpfs): `make test-integration`.
+- **Unit tests** cover parts that need no database, replacing dependencies with stubs or in-memory stores where needed. Examples: the access rules with a stub grant store, sessions with an in-memory store, the script splitter and checks, the read-only guard, batch planning, config parsing, and log redaction and escaping.
+- **Integration tests** run real components against the test PostgreSQL, through the HTTP handlers or the services directly. They cover:
+  - every access level and action (`internal/http/authz_matrix_test.go`);
+  - the approval workflow, including leader rules, grant changes during a review, and revalidation under the lock;
+  - the job queue and worker: retries, leases, uncertain outcomes and no double commit;
+  - batch mode: checkpoints, resume, abort with rollback, and the unsafe-abort rule;
+  - the append-only history, logging and tracing.
+- Tests cover the successful path, failures, and access denial. On 2026-11-27, `make test-integration` ran 327 tests (including subtests) with `-race`: none failed or were skipped.
 - GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on pushes to `main` and `dev` and on pull requests. It installs and builds the frontend SPA, then runs `gofmt`, `go vet`, `go build`, and every test with the race detector against a PostgreSQL service. A second job builds the Docker image.
 
-### Security: SAST dengan CodeQL
+### Security: SAST with CodeQL
 
-- Static Application Security Testing (SAST) diaktifkan menggunakan **GitHub CodeQL** pada [.github/workflows/codeql.yml](.github/workflows/codeql.yml) untuk menganalisis bahasa `go` (`autobuild`) dan `javascript-typescript` (`build-mode: none`) dengan query suite `security-extended`.
-- Hasil analisis diunggah ke **GitHub Code Scanning**, ditampilkan sebagai ringkasan pada **GitHub Actions Step Summary**, serta disimpan sebagai **SARIF artifact** (`codeql-sarif-go`, `codeql-sarif-javascript-typescript`).
-- Dokumentasi lengkap cakupan analisis, audit temuan, mitigasi/perbaikan, dan batasan SAST tersedia pada [docs/SAST-CodeQL.md](docs/SAST-CodeQL.md).
+- **GitHub CodeQL** ([.github/workflows/codeql.yml](.github/workflows/codeql.yml)) analyses `go` (`autobuild`) and `javascript-typescript` (`build-mode: none`) with the `security-extended` query suite, on pushes and pull requests to `main` and `dev`.
+- Results go to **GitHub Code Scanning**, a summary table in the **Actions job summary**, and a **SARIF artifact** (`codeql-sarif-go`, `codeql-sarif-javascript-typescript`).
+- Milestone 2 re-scan (`main@31dc68f`):
+  - `javascript-typescript`: **0 findings**.
+  - `go`: **9 findings**:
+    - 8 `go/log-injection` are false positives: every log record is written as JSON by `slog.JSONHandler`, which escapes `\r`/`\n`. The test `TestUserInputCannotForgeLogLines` shows that user input cannot forge a log line.
+    - 1 `go/sql-injection` in the SQL Query Explorer is an accepted risk: the feature exists to run user queries, behind several layers of protection.
+- Every finding with its decision, the fixes, the scan history and the limits of SAST are in [docs/SAST-CodeQL.md](docs/SAST-CodeQL.md).
 
 ## Credits
 
