@@ -33,6 +33,9 @@ services:
   target-postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # Notice a dead client within ~2 minutes (60 s idle + 6 probes x 10 s) instead of the OS
+    # default of ~2 hours, so a worker that died mid-batch does not keep its transaction open.
+    command: ["postgres", "-c", "tcp_keepalives_idle=60", "-c", "tcp_keepalives_interval=10", "-c", "tcp_keepalives_count=6"]
     # No fallbacks: compose refuses to start when one of these is missing from .env.
     environment:
       POSTGRES_USER: ${TARGET_POSTGRES_USER:?set TARGET_POSTGRES_USER in .env}
@@ -54,6 +57,9 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # Notice a dead client within ~2 minutes, so the session advisory lock of a worker whose host
+    # vanished (no FIN/RST) is released quickly; see README "Lock recovery".
+    command: ["postgres", "-c", "tcp_keepalives_idle=60", "-c", "tcp_keepalives_interval=10", "-c", "tcp_keepalives_count=6"]
     # Only the database's own settings; the app's secrets stay out of this container.
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}

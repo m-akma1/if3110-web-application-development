@@ -25,7 +25,6 @@ WORKDIR /app
 
 COPY --from=go-builder /app/server /app/server
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
-COPY static /app/static
 
 EXPOSE 8080
 CMD ["/app/server"]

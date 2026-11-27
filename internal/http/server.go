@@ -113,14 +113,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) registerRoutes() {
-	// Static assets
-	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
-
-	// Vite SPA Assets
-	for _, assetsDir := range []string{"./dist/assets", "./frontend/dist/assets"} {
-		if _, err := os.Stat(assetsDir); err == nil {
-			s.mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir(assetsDir))))
-			break
+	// Vite SPA files: hashed bundles (/assets/) and the files Vite copies from frontend/public
+	// (/static/, e.g. the login background).
+	for _, prefix := range []string{"assets", "static"} {
+		for _, dir := range []string{"./dist/" + prefix, "./frontend/dist/" + prefix} {
+			if _, err := os.Stat(dir); err == nil {
+				s.mux.Handle("GET /"+prefix+"/", http.StripPrefix("/"+prefix+"/", http.FileServer(http.Dir(dir))))
+				break
+			}
 		}
 	}
 
