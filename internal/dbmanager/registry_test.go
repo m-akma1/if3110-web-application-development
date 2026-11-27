@@ -50,6 +50,8 @@ func introspectionFixture(t *testing.T) (reg *dbmanager.ConnectionRegistry, main
 		`CREATE INDEX orders_lower_status ON orders (lower(status)) INCLUDE (total)`,
 		`CREATE TABLE "Order Items" ("Qty" int)`,
 		`CREATE TABLE "delete" (x int)`, // a keyword as a table name must still be viewable
+		// the platform's batch checkpoints are not user data: never listed
+		`CREATE TABLE _dbplatform_batch_checkpoints (x int)`,
 		`INSERT INTO customers (email) SELECT 'c' || g || '@x.test' FROM generate_series(1, 3) g`,
 		// inserted in reverse so the page order can only come from ORDER BY id
 		`INSERT INTO orders (id, customer_id, status) SELECT g, 1 + g % 3, 'S' || g FROM generate_series(30, 1, -1) g`,

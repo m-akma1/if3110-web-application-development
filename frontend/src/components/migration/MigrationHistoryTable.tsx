@@ -157,10 +157,10 @@ export const MigrationHistoryTable: React.FC<MigrationHistoryTableProps> = ({
                           </span>
                         ) : null}
                       </div>
-                    ) : h.status === 'PARTIAL' ? (
+                    ) : h.status === 'PARTIAL' || h.status === 'PARTIALLY_REVERTED' ? (
                       <div className="flex flex-col gap-0.5">
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30 text-center">
-                          PARTIAL
+                          {h.status === 'PARTIAL' ? 'PARTIAL' : 'PARTIALLY REVERTED'}
                         </span>
                         <span className="text-[10px] font-mono text-sem-warning">
                           Batch {h.batch_committed_count || 0}/{h.batch_total_count || '?'}
@@ -179,17 +179,19 @@ export const MigrationHistoryTable: React.FC<MigrationHistoryTableProps> = ({
                   <td className="px-4 py-3 text-xs whitespace-nowrap">
                     {canEdit && (
                       <div className="flex items-center gap-1.5">
-                        {h.status === 'PARTIAL' && features.batchActions && (
+                        {(h.status === 'PARTIAL' || h.status === 'PARTIALLY_REVERTED') && features.batchActions && (
                           <>
-                            <button
-                              type="button"
-                              disabled={actionLoading}
-                              onClick={() => onResumeBatch(h)}
-                              className="px-2.5 py-1 rounded text-[11px] font-semibold text-app-bg bg-brand-primary hover:bg-brand-primary-hover transition cursor-pointer disabled:opacity-50"
-                              title="Lanjutkan eksekusi dari checkpoint terakhir"
-                            >
-                              Lanjutkan
-                            </button>
+                            {h.status === 'PARTIAL' && (
+                              <button
+                                type="button"
+                                disabled={actionLoading}
+                                onClick={() => onResumeBatch(h)}
+                                className="px-2.5 py-1 rounded text-[11px] font-semibold text-app-bg bg-brand-primary hover:bg-brand-primary-hover transition cursor-pointer disabled:opacity-50"
+                                title="Lanjutkan eksekusi dari checkpoint terakhir"
+                              >
+                                Lanjutkan
+                              </button>
+                            )}
                             <button
                               type="button"
                               disabled={actionLoading}

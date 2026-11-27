@@ -54,11 +54,12 @@ const lockPollInterval = 100 * time.Millisecond
 
 // Engine runs scripts on target databases and records executions in the platform database.
 type Engine struct {
-	platform *sql.DB
-	pools    PoolSource
-	limits   Limits
-	now      func() time.Time
-	logger   *slog.Logger
+	platform   *sql.DB
+	pools      PoolSource
+	limits     Limits
+	now        func() time.Time
+	logger     *slog.Logger
+	onRunStart func(ctx context.Context, migrationID string) error
 }
 
 func NewEngine(platform *sql.DB, pools PoolSource, limits Limits) *Engine {
@@ -69,6 +70,20 @@ func (e *Engine) SetLogger(l *slog.Logger) {
 	if l != nil {
 		e.logger = l
 	}
+}
+
+// SetRunStartHook registers fn to run right before a script is sent to the target.
+// The worker uses it to record that SQL may have run: a crash after this point must not be
+// retried blindly. An error from fn stops the run before any SQL is sent.
+func (e *Engine) SetRunStartHook(fn func(ctx context.Context, migrationID string) error) {
+	e.onRunStart = fn
+}
+
+func (e *Engine) runStarted(ctx context.Context, migrationID string) error {
+	if e.onRunStart == nil {
+		return nil
+	}
+	return e.onRunStart(ctx, migrationID)
 }
 
 // DryRun runs script on the target inside a transaction that is always rolled back, so the
@@ -105,14 +120,17 @@ func (e *Engine) DryRun(ctx context.Context, databaseID, script string) (*RunRes
 // Errors mean nothing ran: ErrNotFound, ErrNotDraft, *RejectedError, ErrTargetUnavailable,
 // ErrTargetBusy, or a storage error.
 //
+// The migration row and its execution row (migration_executions) are written in one
+// transaction, so the history never has one without the other.
+//
 // Known limitation: if the process dies after the target COMMIT but before the history write,
-// the history misses that run.
+// the history misses that run; the worker then marks the job UNCERTAIN.
 func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*Migration, *RunResult, error) {
 	m, err := getMigration(ctx, e.platform, migrationID)
 	if err != nil {
 		return nil, nil, err
 	}
-	if !m.IsDraft() && m.Status != StatusApproved {
+	if !m.IsExecutable() {
 		return nil, nil, ErrNotDraft
 	}
 	if m.ExecutionType == "ROLLBACK" && m.RollbackTargetID != "" {
@@ -120,6 +138,9 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	}
 	if m.ExecutionType == "FORWARD" && m.SourceMigrationID != "" {
 		return e.executeApprovedForward(ctx, m.ID, executorID)
+	}
+	if m.IsBatch() {
+		return e.executeBatch(ctx, m.ID, executorID, DirUp)
 	}
 	pool, ok := e.pools.GetPool(m.DatabaseID)
 	if !ok {
@@ -145,11 +166,15 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	if err != nil {
 		return nil, nil, err
 	}
-	if !m.IsDraft() && m.Status != StatusApproved {
+	if !m.IsExecutable() {
 		return nil, nil, ErrNotDraft
 	}
 	stmts, err := CheckScript(m.SQL)
 	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := e.runStarted(runCtx, m.ID); err != nil {
 		return nil, nil, err
 	}
 
@@ -170,13 +195,15 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	if res.Err != nil {
 		rec.Error = res.Err.String()
 	}
-	status := "SUCCESS"
-	if !res.OK {
-		status = "FAILED"
-	}
-	if err := recordExecution(runCtx, lockConn, rec); err != nil {
+	ex := newExecution(runCtx, ExecExecute, m.ID, m.DatabaseID, executorID).withResult(m.SQL, executedAt, res)
+	if err := withTx(runCtx, lockConn, func(tx *sql.Tx) error {
+		if err := recordExecution(runCtx, tx, rec); err != nil {
+			return err
+		}
+		return insertExecution(runCtx, tx, ex)
+	}); err != nil {
 		// The attempt still happened on the target; log it even though history was not saved.
-		e.logAttempt(runCtx, "UP", m.ID, m.ID, m.DatabaseID, 0, status, res.Duration, m.SQL, res)
+		e.logAttempt(runCtx, "UP", m.ID, "", m.DatabaseID, 0, string(ex.Status), res.Duration, m.SQL, res)
 		if res.OK {
 			return nil, res, fmt.Errorf("migration sudah di-COMMIT pada database target, tetapi riwayat gagal disimpan: %w", err)
 		}
@@ -188,8 +215,8 @@ func (e *Engine) Execute(ctx context.Context, migrationID, executorID string) (*
 	if m != nil {
 		version = m.Version // assigned by recordExecution on success
 	}
-	// One row is one execution for now, so the execution ID is the migration ID.
-	e.logAttempt(runCtx, "UP", migrationID, migrationID, databaseID, version, status, res.Duration, rec.SQL, res)
+	e.logAttempt(runCtx, "UP", migrationID, ex.ID, databaseID, version, string(ex.Status), res.Duration, rec.SQL, res)
+	auditExecution(runCtx, e.logger, ex)
 	return m, res, err
 }
 

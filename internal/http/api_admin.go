@@ -3,11 +3,13 @@ package http
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"dbplatform/internal/admin"
+	"dbplatform/internal/audit"
 	"dbplatform/internal/authn"
 	"dbplatform/internal/dbmanager"
 	"dbplatform/internal/groups"
@@ -293,6 +295,10 @@ func (s *Server) handleAPIAdminSetGrant(w http.ResponseWriter, r *http.Request) 
 	}
 	level := strings.TrimSpace(body.Level)
 	err := s.admin.SetGrant(r.Context(), strings.TrimSpace(body.GroupID), strings.TrimSpace(body.DatabaseID), level)
+	s.audit(r.Context(), audit.Grant, err,
+		slog.String("group_id", strings.TrimSpace(body.GroupID)),
+		slog.String("database_id", strings.TrimSpace(body.DatabaseID)),
+		slog.String("access_level", level)) // not "level": that key is the log level
 	if err != nil {
 		msg, code := adminErrorMessage(err)
 		writeJSON(w, code, map[string]any{"error": msg})

@@ -8,6 +8,7 @@ import { MigrationDraftSidebar } from '../components/migration/MigrationDraftSid
 import { MigrationEditor } from '../components/migration/MigrationEditor'
 import { MigrationHistoryTable } from '../components/migration/MigrationHistoryTable'
 import { features } from '../config/features'
+import { jobFeedback, waitForJob } from '../utils/jobs'
 
 export const MigrationPage: React.FC = () => {
   const { user, groups, activeDBID } = useAuth()
@@ -301,7 +302,9 @@ export const MigrationPage: React.FC = () => {
         setFeedback({ success: true, message: res.message || `Permintaan rollback untuk "${m.name}" telah diajukan untuk persetujuan Group Leader.` })
         await fetchOverview(activeDBID, res.migration?.id || draftParam)
       } else {
-        setFeedback({ success: true, message: `Rollback untuk migrasi "${m.name}" berhasil dijalankan.` })
+        setFeedback({ success: true, message: `Rollback untuk migrasi "${m.name}" masuk antrean...` })
+        const job = await waitForJob(res.job_id)
+        setFeedback(jobFeedback(job, `Rollback untuk migrasi "${m.name}"`))
         await fetchOverview(activeDBID, draftParam)
       }
     } catch (err: any) {
@@ -323,7 +326,9 @@ export const MigrationPage: React.FC = () => {
         setFeedback({ success: true, message: res.message || `Permintaan forward untuk "${m.name}" telah diajukan untuk persetujuan Group Leader.` })
         await fetchOverview(activeDBID, res.migration?.id || draftParam)
       } else {
-        setFeedback({ success: true, message: `Forward untuk migrasi "${m.name}" berhasil dijalankan.` })
+        setFeedback({ success: true, message: `Forward untuk migrasi "${m.name}" masuk antrean...` })
+        const job = await waitForJob(res.job_id)
+        setFeedback(jobFeedback(job, `Forward untuk migrasi "${m.name}"`))
         await fetchOverview(activeDBID, draftParam, false)
       }
     } catch (err: any) {
@@ -343,7 +348,7 @@ export const MigrationPage: React.FC = () => {
     setFeedback(null)
     try {
       await api.resumeMigration(m.id)
-      setFeedback({ success: true, message: `Eksekusi migrasi "${m.name}" berhasil dilanjutkan.` })
+      setFeedback({ success: true, message: `Migrasi "${m.name}" masuk antrean untuk dilanjutkan dari checkpoint.` })
       await fetchOverview(activeDBID, draftParam, false)
     } catch (err: any) {
       setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal melanjutkan migrasi dari checkpoint' })
@@ -364,7 +369,7 @@ export const MigrationPage: React.FC = () => {
     setFeedback(null)
     try {
       await api.abortPartialMigration(m.id, { rollback: true })
-      setFeedback({ success: true, message: `Migrasi "${m.name}" berhasil dibatalkan dan di-rollback.` })
+      setFeedback({ success: true, message: `Pembatalan migrasi "${m.name}" masuk antrean: batch tersimpan di-rollback dari yang terakhir.` })
       await fetchOverview(activeDBID, draftParam, false)
     } catch (err: any) {
       setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal membatalkan migrasi' })

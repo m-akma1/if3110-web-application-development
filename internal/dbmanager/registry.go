@@ -168,10 +168,12 @@ func (r *ConnectionRegistry) ExecuteQueryOnDB(ctx context.Context, dbID, rawSQL 
 const userSchemas = `n.nspname <> 'information_schema' AND n.nspname NOT LIKE 'pg\_%'`
 
 // listTablesSQL lists plain and partitioned tables (not partitions) of every user schema.
+// Tables named _dbplatform_* belong to the platform (batch checkpoints) and are left out.
 const listTablesSQL = `SELECT n.nspname, c.relname
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition AND ` + userSchemas + `
+  AND c.relname NOT LIKE '\_dbplatform\_%'
 ORDER BY n.nspname, c.relname`
 
 // describeTableQuery labels the pg_catalog lookups of describeTable (columns, constraints,

@@ -115,11 +115,12 @@ export interface MigrationView {
   batch_attribute?: string
   batch_size?: number
   batch_committed_count?: number
+  batch_reverted_count?: number
   batch_total_count?: number
   checkpoint_cursor?: string | number
   current_phase?: string
   batch_error?: string
-  status: 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'RUNNING' | 'QUEUED' | 'SUCCESS' | 'FAILED' | 'PARTIAL' | 'REJECTED' | 'ABORTED' | 'ROLLED_BACK' | string
+  status: 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'RUNNING' | 'QUEUED' | 'SUCCESS' | 'FAILED' | 'PARTIAL' | 'PARTIALLY_REVERTED' | 'REJECTED' | 'ABORTED' | 'ROLLED_BACK' | string
   review_required?: boolean
   can_approve?: boolean
   rejection_reason?: string
@@ -223,4 +224,40 @@ export interface AdminOverview {
   groups: GroupItem[]
   targets: TargetItem[]
   codes: InviteCodeItem[]
+}
+
+// One queued run of a migration (GET /api/jobs/{id}).
+// One attempt to run a migration (GET /api/migration/{id}/executions). Append-only.
+export interface MigrationExecutionView {
+  id: string
+  migration_id: string
+  job_id?: string
+  attempt: number
+  execution_type: 'EXECUTE' | 'ROLLBACK' | 'FORWARD'
+  status: 'SUCCESS' | 'FAILED' | 'UNCERTAIN' | 'PARTIAL'
+  sql_sent: boolean
+  sql_executed: string
+  reverts_execution_id?: string
+  executor_name: string
+  error?: string
+  sqlstate?: string
+  correlation_id?: string
+  started_at: string
+  finished_at: string
+  duration_ms: number
+}
+
+export interface MigrationJobView {
+  id: string
+  migration_id: string
+  database_id: string
+  job_type: 'EXECUTE' | 'ROLLBACK' | 'FORWARD' | 'RESUME' | 'ABORT'
+  status: 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'UNCERTAIN' | 'PARTIAL'
+  attempt: number
+  max_attempts: number
+  last_error?: string
+  next_run_at: string
+  created_at: string
+  finished_at?: string
+  done: boolean
 }

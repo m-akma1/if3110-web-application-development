@@ -54,9 +54,9 @@ func TestExecuteLogsStartResultCommit(t *testing.T) {
 			t.Fatalf("Execute: %v", err)
 		}
 	})
-	wantEvents(t, eventNames(recs), "sql.start", "sql.result", "tx.commit", "migration.attempt")
+	wantEvents(t, eventNames(recs), "sql.start", "sql.result", "tx.commit", "migration.attempt", "audit.execute")
 
-	for _, r := range recs {
+	for _, r := range recs[:4] {
 		if r["correlation_id"] != "req-engine" || r["actor"] != f.userID {
 			t.Errorf("%v: correlation_id/actor from ctx missing: %v", r["event"], r)
 		}
@@ -68,8 +68,13 @@ func TestExecuteLogsStartResultCommit(t *testing.T) {
 		t.Errorf("sql.result = %v, want SUCCESS migration", recs[1])
 	}
 	// encoding/json decodes numbers as float64; version is assigned when history is recorded.
-	if a := recs[3]; a["status"] != "SUCCESS" || a["version"] != float64(1) || a["execution_id"] != d.ID {
-		t.Errorf("migration.attempt = %v, want SUCCESS version 1", a)
+	a := recs[3]
+	if a["status"] != "SUCCESS" || a["version"] != float64(1) || a["execution_id"] == "" || a["execution_id"] == d.ID {
+		t.Errorf("migration.attempt = %v, want SUCCESS version 1 with its own execution_id", a)
+	}
+	// The audit event names the same execution and keeps the actor from ctx.
+	if au := recs[4]; au["outcome"] != "success" || au["execution_id"] != a["execution_id"] || au["actor"] != f.userID {
+		t.Errorf("audit.execute = %v, want success for execution %v", au, a["execution_id"])
 	}
 }
 
@@ -82,7 +87,7 @@ func TestExecuteFailureLogsSQLStateAndRollback(t *testing.T) {
 			t.Fatalf("a failing script is a result, not an error: %v", err)
 		}
 	})
-	wantEvents(t, eventNames(recs), "sql.start", "sql.result", "tx.rollback", "migration.attempt")
+	wantEvents(t, eventNames(recs), "sql.start", "sql.result", "tx.rollback", "migration.attempt", "audit.execute")
 
 	result, rollback := recs[1], recs[2]
 	if result["level"] != "ERROR" || result["status"] != "FAILED" || result["sqlstate"] != "42P01" {

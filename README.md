@@ -115,7 +115,11 @@ The `target-postgres` init scripts ([docker/target-init/](docker/target-init/)) 
 |---|---|---|
 | `MIGRATION_LOCK_TIMEOUT_MS` | `5000` | (Optional) Maximum time in milliseconds to wait for a database lock |
 | `MIGRATION_STATEMENT_TIMEOUT_MS` | `60000` | (Optional) Maximum execution time in milliseconds for a single migration statement |
-| `MIGRATION_QUEUE_TIMEOUT_MS` | `15000` | (Optional) Maximum time in milliseconds a migration can wait in the queue |
+| `MIGRATION_QUEUE_TIMEOUT_MS` | `15000` | (Optional) Maximum time in milliseconds a worker waits for a database's migration lock. When it expires the job goes back to the queue without using an attempt |
+
+The resume/abort buttons of batch migrations can be hidden with the frontend build argument `VITE_ENABLE_BATCH_ACTIONS=false` (default `true`).
+
+The worker pool itself uses fixed settings: 4 workers, a 30 s lease renewed every 10 s, at most 3 attempts per job, retry delay 2 s doubling up to 1 min, and a lease check every 10 s (`migration.DefaultWorkerConfig`).
 
 #### Logging
 
@@ -207,6 +211,8 @@ When enabled, the app creates the demo users and groups that do not exist yet, r
 | Databases | PostgreSQL 16, driver `jackc/pgx/v5` |
 | Password hashing | Argon2id (`golang.org/x/crypto`) |
 | Logging | `log/slog` structured JSON logs on stdout (one logger, request correlation ID, redaction) |
+| Background jobs | Job queue in a PostgreSQL table (`FOR UPDATE SKIP LOCKED`), worker pool inside the app process |
+| History and audit | Append-only `migration_executions` table (enforced by a trigger) and `audit.*` log events |
 | Reverse proxy and TLS | Caddy 2 |
 | Deployment | Docker multi-stage build (Node -> Go -> Alpine), Docker Compose |
 | CI and security | GitHub Actions (build, vet, test), CodeQL SAST |
@@ -230,7 +236,9 @@ flowchart LR
             admin["admin<br/>console services"]
             groups["groups<br/>groups, leaders, invite codes"]
             viewer["dbmanager<br/>pools, read-only viewer"]
-            migr["migration<br/>drafts, dry run, approvals,<br/>engine, rollback/forward"]
+            migr["migration<br/>drafts, dry run, approvals,<br/>engine, rollback/forward,<br/>execution history"]
+            worker["migration worker pool<br/>queue, lease, retry"]
+            audit["audit<br/>audit.* events"]
         end
 
         platform[("postgres<br/>platform DB")]
@@ -244,13 +252,18 @@ flowchart LR
     caddy -- HTTP --> static
     caddy -- HTTP --> http
     http --> authn & rbac & admin & groups & viewer & migr
+    http -- "enqueue job (202)" --> platform
+    worker -- "claim job" --> platform
+    worker --> migr
+    http & migr & worker --> audit
     authn & rbac & admin & groups & migr --> platform
     viewer & migr --> target
     viewer & migr --> other
 ```
 
 - The browser loads the SPA once (`index.html` + `/assets/*`). Every page change after that is handled by React Router on the client, and data comes from the JSON API under `/api/*`.
-- The **platform database** stores users, sessions, groups, grants, invite codes, registered targets (with sealed passwords) and migration history. It is never exposed as a viewer target.
+- The **platform database** stores users, sessions, groups, grants, invite codes, registered targets (with sealed passwords), migrations, the **job queue** (`migration_jobs`) and the **execution history** (`migration_executions`). It is never exposed as a viewer target.
+- Execute, rollback and forward requests only **enqueue a job** and answer `202 Accepted`. A worker in the same process runs the job later; the SPA polls until it is done.
 - **Target databases** are only reached through the connection registry, which holds one small pool (up to 5 connections) per connected target. The Data Viewer, the target manager and the migration engine share it.
 - Every request that touches a target first identifies the user (`authn`), then asks `rbac.Authorizer` whether the action is allowed. Handlers never compare access levels themselves.
 
@@ -268,7 +281,9 @@ flowchart LR
 │   ├── groups/                  # Groups, memberships, group leaders, invite codes
 │   ├── admin/                   # Platform Admin console services
 │   ├── dbmanager/               # Target registry, credential encryption, read-only guard, viewer queries
-│   ├── migration/               # Splitter, script checks, engine, rollback/forward, approvals, EXPLAIN, history
+│   ├── migration/               # Splitter, script checks, engine, rollback/forward, approvals, EXPLAIN,
+│   │                            #   job queue + worker pool, append-only execution history
+│   ├── audit/                   # audit.<action> events: who did what, with which outcome
 │   ├── bootstrap/               # Bootstrap admins and demo data seeding
 │   ├── http/                    # REST API handlers, SPA host, middleware, cookies
 │   ├── logging/                 # Structured JSON logger (slog), correlation ID and actor in context, SQL log helpers
@@ -284,6 +299,7 @@ flowchart LR
 ├── static/                      # Images served under /static
 ├── docs/                        # Extra documentation (CodeQL SAST report)
 ├── docker/target-init/          # Init scripts for the demo target database
+├── docker/seed/                 # Optional large dataset for batch mode (make seed-large)
 ├── Dockerfile                   # SPA build (Node) -> Go build -> Alpine runtime
 ├── docker-compose.yml           # caddy, app, postgres, target-postgres, postgres-test (profile "test")
 ├── Caddyfile                    # TLS, reverse proxy, log filtering
@@ -327,9 +343,15 @@ The Go server answers every non-API `GET` with `index.html`; React Router render
 | `POST /api/migration/{id}/submit-review` | View & Edit | Sends a draft to group leaders for review |
 | `GET /api/migration/pending-reviews` | Group Leader | Lists migrations waiting for review |
 | `POST /api/migration/{id}/approve`, `POST /api/migration/{id}/reject` | Group Leader | Approves or rejects for the leader's group |
-| `POST /api/migration/{id}/execute` | View & Edit | Executes an approved migration |
-| `POST /api/migration/{id}/rollback` | View & Edit | Requests (or runs) a rollback of the latest active migration |
-| `POST /api/migration/{id}/forward` | View & Edit | Requests (or runs) a forward of a rolled-back migration |
+| `POST /api/migration/{id}/execute` | View & Edit | Queues an approved migration: `202` with the job, `409` when it is already queued |
+| `POST /api/migration/{id}/rollback` | View & Edit | Rollback of the latest active migration: a request for approval (`200`), or a queued job (`202`) when no group needs to approve |
+| `POST /api/migration/{id}/forward` | View & Edit | Forward of a rolled-back migration: a request for approval (`200`), or a queued job (`202`) |
+| `GET /api/migration/{id}/status` | View Only | Migration with its newest job, for polling |
+| `GET /api/migration/{id}/executions` | View Only | Every execution attempt of the migration, oldest first |
+| `GET /api/jobs/{id}` | View Only | One job, for polling after a `202` |
+| `GET /api/migration/{id}/batches` | View Only | Committed batches of a batch migration (`UP`, and `DOWN` for undone ones) |
+| `POST /api/migration/{id}/resume` | View & Edit | Continues a `PARTIAL` batch migration from its checkpoint (`202`) |
+| `POST /api/migration/{id}/abort` | View & Edit | `{"rollback": true}` undoes the committed batches (`202`); `{"rollback": false}` marks it `ABORTED` (`200`) |
 | `POST /api/migration/{id}/duplicate` | View & Edit | Copies a migration into a new draft |
 | `GET /api/admin/overview` and `/api/admin/*` | Platform Admin | Admin console data and actions |
 
@@ -420,17 +442,91 @@ The admin console (`/admin`) is only available to Platform Admins and has four t
 
 #### Migrations
 
-A migration is a named SQL script for one target database. It is either a **DRAFT** (editable) or an executed run, **SUCCESS** or **FAILED** (immutable).
+A migration is a named SQL script (SQL Up, and SQL Down for rollback) for one target database. Its status moves through
+`DRAFT → PENDING_REVIEW → APPROVED → QUEUED → RUNNING → SUCCESS | FAILED`, plus `PARTIAL` and `ABORTED` for batch migrations. Once it is `SUCCESS`, `FAILED` or `ABORTED` the row never changes again; `ROLLED_BACK` and `PARTIALLY_REVERTED` are not stored but derived from the history (see below).
 
 - **Drafts** (View & Edit): create, edit, delete, and duplicate. Names are up to 200 characters and scripts are up to 1 MiB. Duplicating copies any migration into a new draft.
 - **Script checks**: the platform wraps every script in one transaction, so statements that cannot run inside it are rejected before anything runs: transaction control (`BEGIN`, `COMMIT`, `ROLLBACK`, ...), `VACUUM`, `DISCARD`, `CREATE`/`DROP DATABASE` or `TABLESPACE`, `ALTER SYSTEM`, the `CONCURRENTLY` forms of index commands, and `COPY ... FROM STDIN / TO STDOUT`. `SAVEPOINT`, `RELEASE` and `ROLLBACK TO SAVEPOINT` are allowed.
 - **Execute**:
   - The whole script runs in one transaction: **COMMIT** when every statement succeeds, **ROLLBACK** otherwise.
   - Each statement is bounded by `MIGRATION_LOCK_TIMEOUT_MS` and `MIGRATION_STATEMENT_TIMEOUT_MS`.
-  - Executions on the same database run one at a time, using an advisory lock on the platform database. A migration waits up to `MIGRATION_QUEUE_TIMEOUT_MS` and is then rejected as busy.
+  - Executions on the same database run one at a time, in the order they were queued; different databases run in parallel (see **Asynchronous Execution**).
   - A successful run gets the next **version number** of its database (1, 2, 3, ...). A failed run is kept in the history without a version, with the error message and the line, column and statement where it failed.
   - Session settings changed by a committed script (`SET search_path`, `SET ROLE`, ...) are reset before the connection goes back to the pool.
-- **History**: every executed run with version, status, executor, time and duration. A database trigger blocks any change to an executed migration.
+- **Rollback and forward**: rollback runs the SQL Down of the **latest active** migration only (LIFO); forward re-applies the earliest rolled-back migration as a new run with a new version (linear). Irreversible migrations cannot be rolled back. When groups have access to the database, both are requests that need the same leader approvals as a migration.
+- **History**: every run with version, status, executor, time and duration. A database trigger blocks any change to an executed migration. The migration page can hide rollback pairs.
+
+#### Asynchronous Execution
+
+- `POST .../execute` (and a direct rollback/forward) stores a job in `migration_jobs` in the same transaction that moves the migration to `QUEUED`, then answers `202 Accepted` with the job. The SPA polls `GET /api/jobs/{id}` or the migration status until the job is done.
+- A pool of workers in the app claims jobs with `FOR UPDATE SKIP LOCKED`. Only the oldest queued job of a database can start, and only while no other job of that database is running, so one database runs one migration at a time in queue order while different databases run in parallel. An advisory lock taken while claiming closes the race between two workers.
+- A worker holds a **lease** on its job and renews it while the job runs (heartbeat). If the process dies, the lease expires and the job is recovered on the next start:
+  - no SQL was sent yet: the job goes back to the queue;
+  - the outcome is already in the history: the job is closed as `SUCCESS` without running again;
+  - SQL may have been sent but no outcome was recorded: the job becomes **`UNCERTAIN`** and holds every later job of that database until someone checks the target.
+- **Retry** only happens for errors before any SQL reaches the target (target unavailable, broken connection), up to 3 attempts with exponential backoff. A failing script is a final `FAILED` result and is never retried. A busy database puts the job back without using an attempt.
+- **No double commit**: before running, the worker checks whether an execution of the same job already sent SQL and finished. A job is never run twice, even when it is delivered again after a crash.
+- On `SIGINT`/`SIGTERM` (Ctrl+C, `docker stop`) the server stops taking requests and jobs, waits for running jobs to finish, then exits.
+
+#### Per-Batch Execution
+
+A migration can run in **batch mode** (*Mode Eksekusi → Per-batch* in the editor) with a cursor column (`batch_attribute`, an integer key such as `id`) and a batch size (1–100,000 rows, default 1,000). This is for changes to large tables: one transaction per batch keeps every transaction and its locks short, and a run that stops can continue where it stopped.
+
+- **Script**: exactly one `UPDATE` or `DELETE` on one table, written as for a normal run (no `WITH`, `RETURNING`, `ORDER BY`, `LIMIT`). SQL Down, if any, follows the same rule. Both are checked when the draft is saved.
+- **How a batch runs**: the platform adds the key range to the statement itself. For `UPDATE orders SET status = 'ARCHIVED' WHERE status = 'CANCELLED'` with cursor `id`, every batch runs
+  ```sql
+  UPDATE orders SET status = 'ARCHIVED' WHERE (status = 'CANCELLED')
+    AND ($1::bigint IS NULL OR orders.id > $1) AND orders.id <= $2::bigint
+  ```
+  where `$1` is the previous batch's upper bound and `$2` the largest `id` among the next `batch_size` keys (`WHERE id > $1 ORDER BY id LIMIT n`).
+- **Checkpoint in the same transaction**: each batch writes its checkpoint (batch number, key range, rows changed) to `_dbplatform_batch_checkpoints` **on the target, in the same transaction as its data change**, then commits. A batch is either committed with its checkpoint or not at all. The platform keeps a copy in `migration_batches` and re-reads the target's checkpoints at the start of every run, so a batch that committed just before a crash is never run again. The checkpoint table is hidden from the Database Viewer.
+- **The database's lock is held for the whole run**, across all batches, and the worker's heartbeat keeps the lease. Every batch has its own lock and statement timeouts.
+- **When a batch fails** (an SQL error), its transaction is rolled back and the run stops: the migration is **`PARTIAL`** (or `FAILED` if no batch was ever committed). The monitor on the detail page shows committed/total batches, the checkpoint cursor and the error. A `PARTIAL` migration **holds every other migration of its database** until it is finished or aborted. Then:
+  - **Resume** (*Lanjutkan dari Checkpoint*) runs the remaining batches, starting after the last checkpoint; no new approval is needed;
+  - **Abort with rollback** (*Batalkan & Rollback Batch*) runs SQL Down over the same key ranges, **newest batch first**. When every batch is undone the migration is `ABORTED`; if it stops early it reads as **`PARTIALLY_REVERTED`** and can only be aborted again;
+  - **Mark as stopped** (*Tandai Dihentikan*) sets `ABORTED` and leaves the committed batches in place.
+- **Restarts are safe**: on `SIGTERM` a batch run stops at the next batch boundary and its job goes back to the queue without using an attempt; when a worker dies mid-run, the job is put back in the queue instead of becoming `UNCERTAIN`. In both cases the next run continues after the last checkpoint.
+- Every run (first run, resume, abort) is one execution in the history (`PARTIAL` when it stopped with committed batches); the batches it committed point at that execution.
+
+**Large dataset.** `make seed-large` creates `events` (2,000,000 rows, 173 MB) on the demo target, owned by the app role. Measured once on a laptop against the Docker test database (data on tmpfs), so treat the numbers as rough:
+
+| Run | Total | Longest single transaction |
+|---|---|---|
+| `UPDATE events SET status = 'ARCHIVED'` in one statement | 30–49 s | the whole statement (30–49 s) |
+| Batch mode, `batch_size` 10,000 (200 batches) | 40.0 s | 621 ms (average 146 ms) |
+| Batch mode, `batch_size` 50,000 (40 batches) | 25.9 s | 1.6 s (average 583 ms) |
+
+The single statement is already close to the default `MIGRATION_STATEMENT_TIMEOUT_MS` (60 s), and it holds row locks on all 2,000,000 rows until it commits. In batch mode the total time is similar, but no transaction lasts more than a couple of seconds, and progress is never lost.
+
+#### Execution History and Audit
+
+- Every attempt to run a migration is one row in **`migration_executions`**: execution ID, attempt, job ID, the exact SQL sent, executor, status (`SUCCESS`, `FAILED`, `UNCERTAIN`), error and SQLSTATE, and `reverts_execution_id`. The migration detail page lists them under **Riwayat Eksekusi**.
+- Attempts that stopped **before any SQL reached the target** are recorded too, with `sql_sent = false`. For example, three attempts while the target is down give three rows.
+- The table is **append-only**: a trigger rejects every `UPDATE` and `DELETE`. The only exceptions are the executor becoming `NULL` when a user is deleted, and rows removed together with their target database. A draft that already has attempts cannot be deleted.
+- **Rollback does not rewrite history.** It adds a `ROLLBACK` execution whose `reverts_execution_id` points at the execution it undid; a forward adds a `FORWARD` execution that reverts that rollback. A migration is shown as `ROLLED_BACK` when such a rollback exists (view `migration_chain`), so the original row stays exactly as it was.
+- The migration row and its execution row are written in **one transaction**, so the history never has one without the other.
+- **Audit events** record who did what and with which outcome (`success`, `failure`, `denied`, `uncertain`), as `audit.<action>` log records with `actor` and `correlation_id`:
+
+  | Event | Written when |
+  |---|---|
+  | `audit.submit`, `audit.approve`, `audit.reject` | A draft is sent for review, approved or rejected |
+  | `audit.enqueue` | Execute, rollback or forward is requested (`request`, plus `job_id` or `requires_approval`) |
+  | `audit.grant` | A group's access level on a database changes (`group_id`, `database_id`, `access_level`) |
+  | `audit.execute`, `audit.rollback`, `audit.forward` | An execution is recorded (`execution_id`, `attempt`, `sql_sent`, `reverts_execution_id`); outcome `partial` for a batch run that stopped |
+  | `audit.abort` | A `PARTIAL` batch migration is marked `ABORTED` without rollback (resume and abort with rollback are `audit.enqueue` with `request: resume / abort`) |
+
+  Audit events never contain SQL; it is in the execution history, found through `execution_id`.
+
+Inspecting the history in the platform database:
+
+```sql
+-- every attempt on one database, oldest first
+SELECT left(e.id::text, 8) AS exec, m.name, e.execution_type, e.attempt, e.status, e.sql_sent,
+       left(e.reverts_execution_id::text, 8) AS reverts, left(e.error_message, 40) AS error
+FROM migration_executions e JOIN migrations m ON m.id = e.migration_id
+WHERE e.database_id = '<database id>'
+ORDER BY e.finished_at;
+```
 
 #### Dry Run and Query Plans
 
@@ -442,16 +538,22 @@ A migration is a named SQL script for one target database. It is either a **DRAF
 #### Limitations
 
 - Only PostgreSQL targets are supported.
-- If the app process dies after a migration commits on the target but before its history is saved, that run is missing from the history.
+- If the app process dies after a migration commits on the target but before its history is saved, the job becomes `UNCERTAIN` and holds that database. There is no UI to resolve it yet: check the target, then update the job (and, for a run that did commit, the migration) in the platform database.
+- Worker settings (number of workers, lease, attempts, backoff) are fixed in code and cannot be set through environment variables yet.
+- Batch mode supports one `UPDATE` or `DELETE` with an integer cursor column. Rows inserted beyond the last key while a run is in progress are included; keys below the checkpoint that appear later are not. Rolling back a **completed** batch migration (`SUCCESS`) runs SQL Down in one transaction, like a standard migration.
+- Batch mode creates `_dbplatform_batch_checkpoints` in the target's default schema; the platform's database role must be allowed to create tables there.
 
 ### Activity Logging
 
 Every log record is one JSON object on stdout, written by one `log/slog` logger (`internal/logging`).
 
-- **Common fields**: `time`, `level`, `event` (a stable name such as `sql.result`), `component` (`http`, `dbmanager`, `migration`), `correlation_id`, `actor` (user ID), and `database_id` and `status` where they apply.
+- **Common fields**: `time`, `level`, `event` (a stable name such as `sql.result`), `component` (`http`, `dbmanager`, `migration`, `worker`), `correlation_id`, `actor` (user ID), and `database_id` and `status` where they apply.
 - **Correlation ID**: every request gets an ID, returned in the `X-Request-ID` response header. A well-formed `X-Request-ID` from the client (`[A-Za-z0-9._-]`, at most 64 characters) is reused. Every record written while handling the request carries it.
 - **Every SQL execution is logged** as a `sql.start` and `sql.result` pair: Query Explorer queries (`sql_kind: read_only`), table browsing (`table_browse`), schema lookups (`catalog`) and migration scripts (`migration`). `sql.result` has `duration_ms`, `status`, `rows` when known, and on failure `error` and the PostgreSQL `sqlstate`.
-- **Transactions that change data** also log `tx.commit` or `tx.rollback`. A run of a migration, rollback or forward ends with one `migration.attempt` record (`execution_type`, `version`, `status`).
+- **Transactions that change data** also log `tx.commit` or `tx.rollback`. A run of a migration, rollback or forward ends with one `migration.attempt` record (`execution_type`, `execution_id`, `version`, `status`).
+- **Jobs** log `job.claimed`, `job.finished`, `job.retry_scheduled` (with `delay_ms` and `counts_as_attempt`), `job.uncertain` and `worker.reaped`. A job keeps the `correlation_id` and `actor` of the request that queued it, so the worker's records join the HTTP request's.
+- **Batches** log `migration.batch` (direction, `batch_no`, `cursor_from`, `cursor_to`, `rows`, `duration_ms`), `migration.batch_failed`, and `migration.batch_recovered` when checkpoints are copied from the target after a crash.
+- **Audit** events are `audit.*` (see **Execution History and Audit**).
 - **Other events**: `http.request` (access log; `WARN` for 4xx, `ERROR` for 5xx), `authz.denied`, `authz.error`, `viewer.error`, `migration.error`, and startup events such as `server.started`.
 - **Redaction**: attributes whose name contains `password`, `secret`, `token`, `session`, `cookie`, `authorization`, `dsn` or `credential` are written as `[REDACTED]`. Bind parameter values are never logged, only their types. Query text is cut at 2000 characters.
 
@@ -462,6 +564,10 @@ Reading the logs:
 docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.correlation_id=="<id>")'
 # failed SQL
 docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.event=="sql.result" and .status=="FAILED")'
+# audit trail
+docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.event | startswith("audit."))'
+# one job from claim to finish
+docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.job_id=="<job id>")'
 ```
 
 Example output (one block per request; long IDs shortened). A read-only query:
@@ -486,21 +592,54 @@ Access to a database the user has no grant on:
 {"time":"2026-11-26T06:55:10.533437673Z","level":"WARN","event":"http.request","component":"http","method":"GET","path":"/api/viewer?db_id=00000000-0000-0000-0000-000000000000","status":403,"duration_ms":6,"correlation_id":"readme-deny","actor":"0e966767-…"}
 ```
 
-A migration that commits (records from an integration test run, `time` left out):
+The migration examples below are records from an integration test run (`time` left out; in the test the HTTP records have no `component`, in the app they carry `"component":"http"`).
+
+A group gets edit access:
 
 ```json
-{"level":"INFO","event":"sql.start","component":"migration","database_id":"dfdf7952-…","sql_kind":"migration","query":"CREATE TABLE orders (id int PRIMARY KEY)","migration_id":"a4b31c6a-…","execution_type":"UP","correlation_id":"readme-exec","actor":"76d4ed46-…"}
-{"level":"INFO","event":"sql.result","component":"migration","database_id":"dfdf7952-…","sql_kind":"migration","query":"CREATE TABLE orders (id int PRIMARY KEY)","migration_id":"a4b31c6a-…","execution_type":"UP","duration_ms":3,"status":"SUCCESS","correlation_id":"readme-exec","actor":"76d4ed46-…"}
-{"level":"INFO","event":"tx.commit","component":"migration","database_id":"dfdf7952-…","migration_id":"a4b31c6a-…","execution_type":"UP","correlation_id":"readme-exec","actor":"76d4ed46-…"}
-{"level":"INFO","event":"migration.attempt","component":"migration","execution_type":"UP","migration_id":"a4b31c6a-…","execution_id":"a4b31c6a-…","database_id":"dfdf7952-…","version":1,"status":"SUCCESS","duration_ms":17,"query":"CREATE TABLE orders (id int PRIMARY KEY)","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+{"level":"INFO","event":"audit.grant","action":"grant","outcome":"success","group_id":"ebda6aac-…","database_id":"37491ac9-…","access_level":"VIEW_EDIT","correlation_id":"afb88795-…","actor":"894a4741-…"}
+```
+
+A migration is queued over HTTP, then run by a worker. Note the same `correlation_id` from the request to `job.finished`, and the execution ID shared by `migration.attempt` and `audit.execute`:
+
+```json
+{"level":"INFO","event":"audit.enqueue","action":"enqueue","outcome":"success","migration_id":"e3777042-…","database_id":"37491ac9-…","status":"QUEUED","request":"execute","job_id":"985f0362-…","requires_approval":false,"correlation_id":"fc63554d-…","actor":"492d74cb-…"}
+{"level":"INFO","event":"job.claimed","component":"worker","job_id":"985f0362-…","migration_id":"e3777042-…","database_id":"37491ac9-…","job_type":"EXECUTE","attempt":1,"worker_id":"w1","correlation_id":"fc63554d-…","actor":"492d74cb-…"}
+{"level":"INFO","event":"sql.start","component":"migration","database_id":"37491ac9-…","sql_kind":"migration","query":"CREATE TABLE orders (id int PRIMARY KEY)","migration_id":"e3777042-…","execution_type":"UP","correlation_id":"fc63554d-…","actor":"492d74cb-…"}
+{"level":"INFO","event":"sql.result","component":"migration","database_id":"37491ac9-…","sql_kind":"migration","query":"CREATE TABLE orders (id int PRIMARY KEY)","migration_id":"e3777042-…","execution_type":"UP","duration_ms":1,"status":"SUCCESS","correlation_id":"fc63554d-…","actor":"492d74cb-…"}
+{"level":"INFO","event":"tx.commit","component":"migration","database_id":"37491ac9-…","migration_id":"e3777042-…","execution_type":"UP","correlation_id":"fc63554d-…","actor":"492d74cb-…"}
+{"level":"INFO","event":"migration.attempt","component":"migration","execution_type":"UP","migration_id":"e3777042-…","execution_id":"16f18003-…","database_id":"37491ac9-…","version":1,"status":"SUCCESS","duration_ms":8,"query":"CREATE TABLE orders (id int PRIMARY KEY)","correlation_id":"fc63554d-…","actor":"492d74cb-…"}
+{"level":"INFO","event":"audit.execute","component":"migration","action":"execute","outcome":"success","execution_id":"16f18003-…","migration_id":"e3777042-…","database_id":"37491ac9-…","attempt":1,"sql_sent":true,"job_id":"985f0362-…","correlation_id":"fc63554d-…","actor":"492d74cb-…"}
+{"level":"INFO","event":"job.finished","component":"worker","job_id":"985f0362-…","migration_id":"e3777042-…","database_id":"37491ac9-…","job_type":"EXECUTE","attempt":1,"worker_id":"w1","status":"SUCCESS","correlation_id":"fc63554d-…","actor":"492d74cb-…"}
 ```
 
 A migration that fails and is rolled back:
 
 ```json
-{"level":"ERROR","event":"sql.result","component":"migration","database_id":"dfdf7952-…","sql_kind":"migration","query":"INSERT INTO missing VALUES (1)","migration_id":"4cc4cfc2-…","execution_type":"UP","duration_ms":0,"status":"FAILED","error":"ERROR: relation \"missing\" does not exist (SQLSTATE 42P01)","sqlstate":"42P01","correlation_id":"readme-exec","actor":"76d4ed46-…"}
-{"level":"WARN","event":"tx.rollback","component":"migration","database_id":"dfdf7952-…","migration_id":"4cc4cfc2-…","execution_type":"UP","error":"ERROR: relation \"missing\" does not exist (SQLSTATE 42P01)","correlation_id":"readme-exec","actor":"76d4ed46-…"}
-{"level":"ERROR","event":"migration.attempt","component":"migration","execution_type":"UP","migration_id":"4cc4cfc2-…","execution_id":"4cc4cfc2-…","database_id":"dfdf7952-…","version":0,"status":"FAILED","duration_ms":2,"query":"INSERT INTO missing VALUES (1)","error":"ERROR 42P01: relation \"missing\" does not exist (statement 1, baris 1, kolom 13)","sqlstate":"42P01","correlation_id":"readme-exec","actor":"76d4ed46-…"}
+{"level":"ERROR","event":"sql.result","component":"migration","database_id":"37491ac9-…","sql_kind":"migration","query":"INSERT INTO missing VALUES (1)","migration_id":"2b6fd488-…","execution_type":"UP","duration_ms":0,"status":"FAILED","error":"ERROR: relation \"missing\" does not exist (SQLSTATE 42P01)","sqlstate":"42P01","correlation_id":"ae6e465e-…","actor":"492d74cb-…"}
+{"level":"WARN","event":"tx.rollback","component":"migration","database_id":"37491ac9-…","migration_id":"2b6fd488-…","execution_type":"UP","error":"ERROR: relation \"missing\" does not exist (SQLSTATE 42P01)","correlation_id":"ae6e465e-…","actor":"492d74cb-…"}
+{"level":"ERROR","event":"migration.attempt","component":"migration","execution_type":"UP","migration_id":"2b6fd488-…","execution_id":"abca4e2e-…","database_id":"37491ac9-…","version":0,"status":"FAILED","duration_ms":1,"query":"INSERT INTO missing VALUES (1)","error":"ERROR 42P01: relation \"missing\" does not exist (statement 1, baris 1, kolom 13)","sqlstate":"42P01","correlation_id":"ae6e465e-…","actor":"492d74cb-…"}
+{"level":"WARN","event":"audit.execute","component":"migration","action":"execute","outcome":"failure","execution_id":"abca4e2e-…","migration_id":"2b6fd488-…","database_id":"37491ac9-…","attempt":1,"sql_sent":true,"job_id":"cf784c11-…","error":"ERROR 42P01: relation \"missing\" does not exist (statement 1, baris 1, kolom 13)","correlation_id":"ae6e465e-…","actor":"492d74cb-…"}
+{"level":"WARN","event":"job.finished","component":"worker","job_id":"cf784c11-…","migration_id":"2b6fd488-…","database_id":"37491ac9-…","job_type":"EXECUTE","attempt":1,"worker_id":"w1","status":"FAILED","error":"ERROR 42P01: relation \"missing\" does not exist (statement 1, baris 1, kolom 13)","correlation_id":"ae6e465e-…","actor":"492d74cb-…"}
+```
+
+A rollback: `audit.rollback` points at the rollback row (`migration_id`) and at the execution it undid (`reverts_execution_id`, the `execution_id` of the run above):
+
+```json
+{"level":"INFO","event":"migration.attempt","component":"migration","execution_type":"ROLLBACK","migration_id":"e3777042-…","execution_id":"cab7f42c-…","database_id":"37491ac9-…","version":1,"status":"SUCCESS","duration_ms":3,"query":"DROP TABLE orders","correlation_id":"ee0558e1-…","actor":"492d74cb-…"}
+{"level":"INFO","event":"audit.rollback","component":"migration","action":"rollback","outcome":"success","execution_id":"cab7f42c-…","migration_id":"29011a19-…","database_id":"37491ac9-…","attempt":1,"sql_sent":true,"job_id":"876b21a1-…","reverts_execution_id":"16f18003-…","correlation_id":"ee0558e1-…","actor":"492d74cb-…"}
+{"level":"INFO","event":"job.finished","component":"worker","job_id":"876b21a1-…","migration_id":"e3777042-…","database_id":"37491ac9-…","job_type":"ROLLBACK","attempt":1,"worker_id":"w1","status":"SUCCESS","correlation_id":"ee0558e1-…","actor":"492d74cb-…"}
+```
+
+The target is down: every attempt is recorded with `sql_sent: false` and retried with backoff (the test used a 10 ms base delay; the app uses 2 s), and the job fails after the third attempt:
+
+```json
+{"level":"WARN","event":"audit.execute","component":"worker","action":"execute","outcome":"failure","execution_id":"459628dd-…","migration_id":"4110053e-…","database_id":"37491ac9-…","attempt":1,"sql_sent":false,"job_id":"9bf8298a-…","error":"koneksi ke database target tidak tersedia","correlation_id":"69a08b0e-…","actor":"492d74cb-…"}
+{"level":"WARN","event":"job.retry_scheduled","component":"worker","job_id":"9bf8298a-…","migration_id":"4110053e-…","database_id":"37491ac9-…","job_type":"EXECUTE","attempt":1,"worker_id":"w1","delay_ms":10,"counts_as_attempt":true,"error":"koneksi ke database target tidak tersedia","correlation_id":"69a08b0e-…","actor":"492d74cb-…"}
+{"level":"WARN","event":"audit.execute","component":"worker","action":"execute","outcome":"failure","execution_id":"bd92f643-…","migration_id":"4110053e-…","database_id":"37491ac9-…","attempt":2,"sql_sent":false,"job_id":"9bf8298a-…","error":"koneksi ke database target tidak tersedia","correlation_id":"69a08b0e-…","actor":"492d74cb-…"}
+{"level":"WARN","event":"job.retry_scheduled","component":"worker","job_id":"9bf8298a-…","migration_id":"4110053e-…","database_id":"37491ac9-…","job_type":"EXECUTE","attempt":2,"worker_id":"w1","delay_ms":20,"counts_as_attempt":true,"error":"koneksi ke database target tidak tersedia","correlation_id":"69a08b0e-…","actor":"492d74cb-…"}
+{"level":"WARN","event":"audit.execute","component":"worker","action":"execute","outcome":"failure","execution_id":"99982564-…","migration_id":"4110053e-…","database_id":"37491ac9-…","attempt":3,"sql_sent":false,"job_id":"9bf8298a-…","error":"koneksi ke database target tidak tersedia","correlation_id":"69a08b0e-…","actor":"492d74cb-…"}
+{"level":"WARN","event":"job.finished","component":"worker","job_id":"9bf8298a-…","migration_id":"4110053e-…","database_id":"37491ac9-…","job_type":"EXECUTE","attempt":3,"worker_id":"w1","status":"FAILED","error":"koneksi ke database target tidak tersedia","correlation_id":"69a08b0e-…","actor":"492d74cb-…"}
 ```
 
 ### Testing and CI

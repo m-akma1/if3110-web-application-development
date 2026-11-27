@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"dbplatform/internal/logging"
 	"dbplatform/internal/rbac"
 )
 
@@ -56,7 +57,7 @@ func (s *Service) Overview(ctx context.Context, userID, dbID string) (*Overview,
 		return nil, err
 	}
 	ov := &Overview{DatabaseID: dbID, Level: level, CanEdit: rbac.IsAllowed(level, rbac.ActionCreateMigration)}
-	if ov.History, err = s.repo.ListByDatabase(ctx, dbID, StatusSuccess, StatusFailed, StatusRolledBack, StatusPartial); err != nil {
+	if ov.History, err = s.repo.ListByDatabase(ctx, dbID, StatusQueued, StatusRunning, StatusSuccess, StatusFailed, StatusRolledBack, StatusPartial, StatusPartiallyReverted, StatusAborted); err != nil {
 		return nil, err
 	}
 	latestActive, _ := s.repo.GetLatestActive(ctx, dbID)
@@ -132,7 +133,14 @@ func (s *Service) Duplicate(ctx context.Context, userID, id string) (*Migration,
 	if err != nil {
 		return nil, err
 	}
-	return s.repo.CreateDraft(ctx, NewDraft{DatabaseID: m.DatabaseID, Name: copyName(m.Name), SQL: m.SQL, CreatedBy: userID})
+	in := NewDraft{DatabaseID: m.DatabaseID, Name: copyName(m.Name), SQL: m.SQL, CreatedBy: userID}
+	if m.ExecutionType != "ROLLBACK" && m.SourceMigrationID == "" {
+		// Copy the whole definition so a copied batch migration is still a batch migration.
+		in.SQLUp, in.SQLDown = m.SQLUp, m.SQLDown
+		in.IsIrreversible, in.IrreversibleReason = m.IsIrreversible, m.IrreversibleReason
+		in.ExecutionMode, in.BatchAttribute, in.BatchSize = m.ExecutionMode, m.BatchAttribute, m.BatchSize
+	}
+	return s.repo.CreateDraft(ctx, in)
 }
 
 // DryRun runs a draft's script on its database and rolls it back, with a plan per DML statement.
@@ -154,19 +162,31 @@ func (s *Service) Execute(ctx context.Context, userID, id string) (*Migration, *
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := s.checkExecutable(ctx, m); err != nil {
+		return nil, nil, err
+	}
+	return s.engine.Execute(ctx, id, userID)
+}
+
+// checkExecutable applies the workflow rules before a run: not executed yet, not waiting for or
+// rejected in review, and approved when groups have access to the database.
+func (s *Service) checkExecutable(ctx context.Context, m *Migration) error {
 	if !m.ExecutedAt.IsZero() || m.Status == StatusSuccess || m.Status == StatusFailed || m.Status == StatusRolledBack || m.Status == StatusAborted || m.Status == StatusPartial {
-		return nil, nil, ErrNotDraft
+		return ErrNotDraft
+	}
+	if m.Status == StatusQueued || m.Status == StatusRunning {
+		return ErrJobActive
 	}
 	if m.Status == StatusPendingReview || m.Status == StatusRejected {
-		return nil, nil, ErrNotApproved
+		return ErrNotApproved
 	}
 	if s.grants != nil {
 		groupIDs, err := s.grants.GroupsWithAccess(ctx, m.DatabaseID)
 		if err == nil && len(groupIDs) > 0 && m.Status != StatusApproved {
-			return nil, nil, ErrNotApproved
+			return ErrNotApproved
 		}
 	}
-	return s.engine.Execute(ctx, id, userID)
+	return nil
 }
 
 // Rollback initiates a rollback of an executed migration.
@@ -220,57 +240,116 @@ func (s *Service) Rollback(ctx context.Context, userID, id string) (*Migration, 
 	return s.engine.ExecuteRollback(ctx, id, userID)
 }
 
+// rollbackRequest validates a rollback of id. With groups on the database it creates the
+// rollback draft for approval and returns it; otherwise it returns the migration to roll back
+// and direct = true.
+func (s *Service) rollbackRequest(ctx context.Context, userID, id string) (m *Migration, direct bool, err error) {
+	m, _, err = s.load(ctx, userID, id, rbac.ActionExecuteMigration)
+	if err != nil {
+		return nil, false, err
+	}
+	downScript, err := validateRollbackTarget(ctx, s.repo.db, m)
+	if err != nil {
+		return nil, false, err
+	}
+	if pending, err := hasPendingActionFor(ctx, s.repo.db, m.ID, "ROLLBACK"); err != nil {
+		return nil, false, err
+	} else if pending {
+		return nil, false, ErrPendingRollbackExists
+	}
+	groupIDs, err := s.groupsWithAccess(ctx, m.DatabaseID)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(groupIDs) == 0 {
+		return m, true, nil
+	}
+	rb, err := s.repo.CreateDraft(ctx, NewDraft{
+		DatabaseID:       m.DatabaseID,
+		Name:             rollbackName(m.Name),
+		SQL:              downScript,
+		SQLUp:            m.SQLUp,
+		SQLDown:          downScript,
+		ExecutionType:    "ROLLBACK",
+		RollbackTargetID: m.ID,
+		CreatedBy:        userID,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return s.withApprovals(ctx, rb, groupIDs)
+}
+
+// withApprovals opens one approval per group on a new rollback/forward draft.
+func (s *Service) withApprovals(ctx context.Context, d *Migration, groupIDs []string) (*Migration, bool, error) {
+	if err := s.repo.CreateApprovals(ctx, d.ID, groupIDs); err != nil {
+		return nil, false, err
+	}
+	d, err := s.repo.Get(ctx, d.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	d.Approvals, _ = s.repo.ListApprovals(ctx, d.ID)
+	return d, false, nil
+}
+
+func (s *Service) groupsWithAccess(ctx context.Context, dbID string) ([]string, error) {
+	if s.grants == nil {
+		return nil, nil
+	}
+	return s.grants.GroupsWithAccess(ctx, dbID)
+}
+
 // Forward initiates re-application of a rolled-back migration.
 // If groups have access to the database, it creates a PENDING_REVIEW forward request for Group Leader approval.
 // If no groups have access, it executes the forward directly.
 func (s *Service) Forward(ctx context.Context, userID, id string) (*Migration, *RunResult, error) {
-	m, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
+	m, direct, err := s.forwardRequest(ctx, userID, id)
+	if err != nil || !direct {
+		return m, nil, err
+	}
+	return s.engine.ExecuteForward(ctx, id, userID)
+}
+
+// forwardRequest is rollbackRequest for forward: an approval draft, or the rolled-back
+// migration to re-apply with direct = true.
+func (s *Service) forwardRequest(ctx context.Context, userID, id string) (m *Migration, direct bool, err error) {
+	m, _, err = s.load(ctx, userID, id, rbac.ActionExecuteMigration)
 	if err != nil {
-		return nil, nil, err
+		return nil, false, err
 	}
 	upScript, err := validateForwardSource(ctx, s.repo.db, m)
 	if err != nil {
-		return nil, nil, err
+		return nil, false, err
 	}
 	if pending, err := hasPendingActionFor(ctx, s.repo.db, m.ID, "FORWARD"); err != nil {
-		return nil, nil, err
+		return nil, false, err
 	} else if pending {
-		return nil, nil, ErrPendingForwardExists
+		return nil, false, ErrPendingForwardExists
 	}
-
-	var groupIDs []string
-	if s.grants != nil {
-		groupIDs, err = s.grants.GroupsWithAccess(ctx, m.DatabaseID)
-		if err != nil {
-			return nil, nil, err
-		}
+	groupIDs, err := s.groupsWithAccess(ctx, m.DatabaseID)
+	if err != nil {
+		return nil, false, err
 	}
-	if len(groupIDs) > 0 {
-		fwdDraft, err := s.repo.CreateDraft(ctx, NewDraft{
-			DatabaseID:         m.DatabaseID,
-			Name:               forwardName(m.Name),
-			SQL:                upScript,
-			SQLUp:              upScript,
-			SQLDown:            m.SQLDown,
-			IsIrreversible:     m.IsIrreversible,
-			IrreversibleReason: m.IrreversibleReason,
-			ExecutionType:      "FORWARD",
-			SourceMigrationID:  m.ID,
-			CreatedBy:          userID,
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		if err := s.repo.CreateApprovals(ctx, fwdDraft.ID, groupIDs); err != nil {
-			return nil, nil, err
-		}
-		fwdDraft, err = s.repo.Get(ctx, fwdDraft.ID)
-		if err == nil {
-			fwdDraft.Approvals, _ = s.repo.ListApprovals(ctx, fwdDraft.ID)
-		}
-		return fwdDraft, nil, err
+	if len(groupIDs) == 0 {
+		return m, true, nil
 	}
-	return s.engine.ExecuteForward(ctx, id, userID)
+	fwd, err := s.repo.CreateDraft(ctx, NewDraft{
+		DatabaseID:         m.DatabaseID,
+		Name:               forwardName(m.Name),
+		SQL:                upScript,
+		SQLUp:              upScript,
+		SQLDown:            m.SQLDown,
+		IsIrreversible:     m.IsIrreversible,
+		IrreversibleReason: m.IrreversibleReason,
+		ExecutionType:      "FORWARD",
+		SourceMigrationID:  m.ID,
+		CreatedBy:          userID,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return s.withApprovals(ctx, fwd, groupIDs)
 }
 
 // SubmitReview submits a draft or rejected migration for review by group leaders.
@@ -392,4 +471,159 @@ func copyName(name string) string {
 		name = strings.TrimSpace(string(r[:limit]))
 	}
 	return name + copySuffix
+}
+
+// EnqueueExecute queues a run of a draft or approved migration (including approved rollback and
+// forward drafts) and returns the QUEUED migration and its job. The workflow rules are checked
+// now, so the user gets an error immediately; the engine checks again when the job runs.
+func (s *Service) EnqueueExecute(ctx context.Context, userID, id string) (*Migration, *Job, error) {
+	m, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.checkExecutable(ctx, m); err != nil {
+		return nil, nil, err
+	}
+	job, err := s.repo.EnqueueJob(ctx, EnqueueInput{
+		MigrationID: m.ID, DatabaseID: m.DatabaseID, Type: JobExecute, ExecutorID: userID,
+		CorrelationID: correlationID(ctx), MarkQueued: true,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	m, err = s.repo.Get(ctx, m.ID)
+	return m, job, err
+}
+
+// EnqueueRollback requests a rollback. With groups on the database it returns the rollback
+// draft waiting for approval and a nil job; otherwise it queues a ROLLBACK job.
+func (s *Service) EnqueueRollback(ctx context.Context, userID, id string) (*Migration, *Job, error) {
+	m, direct, err := s.rollbackRequest(ctx, userID, id)
+	if err != nil || !direct {
+		return m, nil, err
+	}
+	job, err := s.repo.EnqueueJob(ctx, EnqueueInput{
+		MigrationID: m.ID, DatabaseID: m.DatabaseID, Type: JobRollback, ExecutorID: userID,
+		CorrelationID: correlationID(ctx),
+	})
+	return m, job, err
+}
+
+// EnqueueForward is EnqueueRollback for forward.
+func (s *Service) EnqueueForward(ctx context.Context, userID, id string) (*Migration, *Job, error) {
+	m, direct, err := s.forwardRequest(ctx, userID, id)
+	if err != nil || !direct {
+		return m, nil, err
+	}
+	job, err := s.repo.EnqueueJob(ctx, EnqueueInput{
+		MigrationID: m.ID, DatabaseID: m.DatabaseID, Type: JobForward, ExecutorID: userID,
+		CorrelationID: correlationID(ctx),
+	})
+	return m, job, err
+}
+
+// GetJob returns a job when the user may view migrations on its database.
+// An unknown job is reported as forbidden, so job IDs of other databases cannot be probed.
+func (s *Service) GetJob(ctx context.Context, userID, jobID string) (*Job, error) {
+	j, err := s.repo.GetJob(ctx, jobID)
+	if errors.Is(err, ErrNotFound) {
+		return nil, rbac.ErrForbidden
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.access.Authorize(ctx, userID, j.DatabaseID, rbac.ActionViewMigration); err != nil {
+		return nil, err
+	}
+	return j, nil
+}
+
+// Status returns a migration with its newest job (nil when it never had one).
+func (s *Service) Status(ctx context.Context, userID, id string) (*Migration, *Job, error) {
+	m, _, err := s.load(ctx, userID, id, rbac.ActionViewMigration)
+	if err != nil {
+		return nil, nil, err
+	}
+	j, err := s.repo.LatestJobForMigration(ctx, m.ID)
+	if errors.Is(err, ErrNotFound) {
+		return m, nil, nil
+	}
+	return m, j, err
+}
+
+func correlationID(ctx context.Context) string {
+	if info := logging.Info(ctx); info != nil {
+		return info.CorrelationID
+	}
+	return ""
+}
+
+// Executions returns the execution attempts of a migration the user may view, oldest first.
+func (s *Service) Executions(ctx context.Context, userID, id string) ([]Execution, error) {
+	m, _, err := s.load(ctx, userID, id, rbac.ActionViewMigration)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListExecutions(ctx, m.ID)
+}
+
+// EnqueueResume queues a RESUME job that continues a PARTIAL batch migration after its last
+// checkpoint. The migration was approved before its first run, so no new approval is needed.
+func (s *Service) EnqueueResume(ctx context.Context, userID, id string) (*Migration, *Job, error) {
+	m, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch {
+	case m.Status == StatusPartiallyReverted:
+		return nil, nil, ErrBatchReverting
+	case m.Status != StatusPartial:
+		return nil, nil, ErrNotPartial
+	}
+	return s.enqueueBatchJob(ctx, userID, m, JobResume)
+}
+
+// EnqueueAbort cancels a PARTIAL batch migration. With rollback it queues an ABORT job that
+// undoes the committed batches with SQL Down, newest first; without rollback it marks the
+// migration ABORTED right away and leaves the committed batches in place (job is nil).
+func (s *Service) EnqueueAbort(ctx context.Context, userID, id string, rollback bool) (*Migration, *Job, error) {
+	m, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
+	if err != nil {
+		return nil, nil, err
+	}
+	if m.Status != StatusPartial && m.Status != StatusPartiallyReverted {
+		return nil, nil, ErrNotPartial
+	}
+	if !rollback {
+		if err := s.repo.MarkAborted(ctx, m.ID); err != nil {
+			return nil, nil, err
+		}
+		m, err = s.repo.Get(ctx, m.ID)
+		return m, nil, err
+	}
+	if m.IsIrreversible || strings.TrimSpace(m.SQLDown) == "" {
+		return nil, nil, ErrNoRollbackScript
+	}
+	return s.enqueueBatchJob(ctx, userID, m, JobAbort)
+}
+
+func (s *Service) enqueueBatchJob(ctx context.Context, userID string, m *Migration, t JobType) (*Migration, *Job, error) {
+	job, err := s.repo.EnqueueJob(ctx, EnqueueInput{
+		MigrationID: m.ID, DatabaseID: m.DatabaseID, Type: t, ExecutorID: userID,
+		CorrelationID: correlationID(ctx), MarkQueued: true,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	m, err = s.repo.Get(ctx, m.ID)
+	return m, job, err
+}
+
+// Batches returns the committed batches of a migration the user may view.
+func (s *Service) Batches(ctx context.Context, userID, id string) ([]Batch, error) {
+	m, _, err := s.load(ctx, userID, id, rbac.ActionViewMigration)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListBatches(ctx, m.ID)
 }

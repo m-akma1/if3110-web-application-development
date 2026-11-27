@@ -48,6 +48,26 @@ type MigrationView struct {
 	ExecutedAt         time.Time           `json:"executed_at"` // zero for drafts
 	DurationMs         int64               `json:"duration_ms"`
 	Error              string              `json:"error"`
+
+	// Per-batch execution. Counts are batches; committed excludes batches undone by an abort.
+	ExecutionMode    string `json:"execution_mode"`
+	BatchAttribute   string `json:"batch_attribute,omitempty"`
+	BatchSize        int    `json:"batch_size,omitempty"`
+	BatchCommitted   int    `json:"batch_committed_count"`
+	BatchReverted    int    `json:"batch_reverted_count"`
+	BatchTotal       int    `json:"batch_total_count"`
+	CheckpointCursor *int64 `json:"checkpoint_cursor,omitempty"`
+}
+
+// MigrationBatchView is one committed batch of a batch migration.
+type MigrationBatchView struct {
+	Direction   string    `json:"direction"` // UP, or DOWN for a batch undone by an abort
+	BatchNo     int       `json:"batch_no"`
+	ExecutionID string    `json:"execution_id,omitempty"`
+	CursorFrom  *int64    `json:"cursor_from"`
+	CursorTo    int64     `json:"cursor_to"`
+	Rows        int64     `json:"rows"`
+	CommittedAt time.Time `json:"committed_at"`
 }
 
 // VersionLabel is "v3" for executed migrations and "-" otherwise.
@@ -113,4 +133,40 @@ type PlanNodeView struct {
 	SharedRead    int64    `json:"shared_read"`
 	NeverExecuted bool     `json:"never_executed"`
 	Misestimated  bool     `json:"misestimated"` // estimate off by 10x or more
+}
+
+// MigrationJobView is one queued run of a migration, polled by the SPA until it is done.
+type MigrationJobView struct {
+	ID          string     `json:"id"`
+	MigrationID string     `json:"migration_id"`
+	DatabaseID  string     `json:"database_id"`
+	JobType     string     `json:"job_type"`
+	Status      string     `json:"status"`
+	Attempt     int        `json:"attempt"`
+	MaxAttempts int        `json:"max_attempts"`
+	LastError   string     `json:"last_error,omitempty"`
+	NextRunAt   time.Time  `json:"next_run_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	Done        bool       `json:"done"`
+}
+
+// MigrationExecutionView is one attempt to run a migration (append-only history).
+type MigrationExecutionView struct {
+	ID                 string    `json:"id"`
+	MigrationID        string    `json:"migration_id"`
+	JobID              string    `json:"job_id,omitempty"`
+	Attempt            int       `json:"attempt"`
+	ExecutionType      string    `json:"execution_type"`
+	Status             string    `json:"status"`
+	SQLSent            bool      `json:"sql_sent"`
+	SQLExecuted        string    `json:"sql_executed"`
+	RevertsExecutionID string    `json:"reverts_execution_id,omitempty"`
+	ExecutorName       string    `json:"executor_name"`
+	Error              string    `json:"error,omitempty"`
+	SQLState           string    `json:"sqlstate,omitempty"`
+	CorrelationID      string    `json:"correlation_id,omitempty"`
+	StartedAt          time.Time `json:"started_at"`
+	FinishedAt         time.Time `json:"finished_at"`
+	DurationMs         int64     `json:"duration_ms"`
 }

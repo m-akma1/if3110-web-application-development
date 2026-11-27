@@ -20,6 +20,8 @@ func migrationErrorResponse(err error) (int, string) {
 		return http.StatusForbidden, accessDeniedMessage(err)
 	case errors.As(err, &rejected):
 		return http.StatusUnprocessableEntity, "Script ditolak sebelum dijalankan: " + rejected.Error()
+	case errors.Is(err, migration.ErrJobActive):
+		return http.StatusConflict, err.Error()
 	case errors.Is(err, migration.ErrTargetUnavailable):
 		return http.StatusUnprocessableEntity, "Database target sedang tidak terhubung. Minta Platform Admin memeriksa koneksinya, lalu coba lagi."
 	case errors.Is(err, migration.ErrNotApproved),
@@ -40,7 +42,12 @@ func migrationErrorResponse(err error) (int, string) {
 		errors.Is(err, migration.ErrAlreadyForwarded),
 		errors.Is(err, migration.ErrPendingRollbackExists),
 		errors.Is(err, migration.ErrPendingForwardExists),
-		errors.Is(err, migration.ErrImmutableRollbackScript):
+		errors.Is(err, migration.ErrImmutableRollbackScript),
+		errors.Is(err, migration.ErrHasHistory),
+		errors.Is(err, migration.ErrBatchConfig),
+		errors.Is(err, migration.ErrBatchScript),
+		errors.Is(err, migration.ErrNotPartial),
+		errors.Is(err, migration.ErrBatchReverting):
 		return http.StatusUnprocessableEntity, err.Error()
 	default:
 		// If error is descriptive validation or target error, return 422 with message
@@ -112,6 +119,13 @@ func toMigrationView(m *migration.Migration) domain.MigrationView {
 		ExecutedAt:         m.ExecutedAt,
 		DurationMs:         m.DurationMs,
 		Error:              m.Error,
+		ExecutionMode:      m.ExecutionMode,
+		BatchAttribute:     m.BatchAttribute,
+		BatchSize:          m.BatchSize,
+		BatchCommitted:     m.BatchesUp - m.BatchesDown,
+		BatchReverted:      m.BatchesDown,
+		BatchTotal:         m.BatchTotal,
+		CheckpointCursor:   m.CheckpointCursor,
 	}
 }
 
@@ -199,4 +213,61 @@ func orDash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// toJobView converts a job for the API; nil stays nil (the migration never had a job).
+func toJobView(j *migration.Job) *domain.MigrationJobView {
+	if j == nil {
+		return nil
+	}
+	return &domain.MigrationJobView{
+		ID:          j.ID,
+		MigrationID: j.MigrationID,
+		DatabaseID:  j.DatabaseID,
+		JobType:     string(j.Type),
+		Status:      string(j.Status),
+		Attempt:     j.Attempt,
+		MaxAttempts: j.MaxAttempts,
+		LastError:   j.LastError,
+		NextRunAt:   j.NextRunAt,
+		CreatedAt:   j.CreatedAt,
+		FinishedAt:  j.FinishedAt,
+		Done:        j.Done(),
+	}
+}
+
+func toExecutionViews(list []migration.Execution) []domain.MigrationExecutionView {
+	out := make([]domain.MigrationExecutionView, 0, len(list))
+	for _, ex := range list {
+		out = append(out, domain.MigrationExecutionView{
+			ID:                 ex.ID,
+			MigrationID:        ex.MigrationID,
+			JobID:              ex.JobID,
+			Attempt:            ex.Attempt,
+			ExecutionType:      string(ex.Kind),
+			Status:             string(ex.Status),
+			SQLSent:            ex.SQLSent,
+			SQLExecuted:        ex.SQL,
+			RevertsExecutionID: ex.RevertsExecutionID,
+			ExecutorName:       ex.ExecutorName,
+			Error:              ex.Error,
+			SQLState:           ex.SQLState,
+			CorrelationID:      ex.CorrelationID,
+			StartedAt:          ex.StartedAt,
+			FinishedAt:         ex.FinishedAt,
+			DurationMs:         ex.Duration.Milliseconds(),
+		})
+	}
+	return out
+}
+
+func toBatchViews(list []migration.Batch) []domain.MigrationBatchView {
+	out := make([]domain.MigrationBatchView, 0, len(list))
+	for _, b := range list {
+		out = append(out, domain.MigrationBatchView{
+			Direction: b.Direction, BatchNo: b.No, ExecutionID: b.ExecutionID,
+			CursorFrom: b.From, CursorTo: b.To, Rows: b.Rows, CommittedAt: b.CommittedAt,
+		})
+	}
+	return out
 }

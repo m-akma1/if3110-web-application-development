@@ -2,6 +2,7 @@ package migration
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -114,13 +115,10 @@ func validateForwardSource(ctx context.Context, q querier, m *Migration) (string
 	return upScript, nil
 }
 
-// recordRollbackSuccess stores a committed rollback row in platform DB and marks target migration ROLLED_BACK.
-func recordRollbackSuccess(ctx context.Context, q querier, orig *Migration, downScript, executorID string, executedAt time.Time, duration time.Duration) (*Migration, error) {
-	var executedBy any
-	if ids.IsValid(executorID) {
-		executedBy = executorID
-	}
-	rollbackID := ids.New()
+// insertRollbackRow appends the SUCCESS rollback row of a direct rollback of orig. The row is
+// what the history table shows; the execution row (written with it) is what links the rollback
+// to the execution it undid. orig itself is not changed.
+func insertRollbackRow(ctx context.Context, q querier, id string, orig *Migration, downScript, executorID string, executedAt time.Time, duration time.Duration) error {
 	_, err := q.ExecContext(ctx, `
 		INSERT INTO migrations (
 			id, database_id, name, sql_script, sql_up, sql_down,
@@ -131,20 +129,22 @@ func recordRollbackSuccess(ctx context.Context, q querier, orig *Migration, down
 			false, '', 'ROLLBACK', $7,
 			'SUCCESS', $8, $8, $9, $10, '', NOW()
 		)`,
-		rollbackID, orig.DatabaseID, rollbackName(orig.Name), downScript, orig.SQLUp, downScript,
-		orig.ID, executedBy, executedAt, duration.Milliseconds())
-	if err != nil {
-		return nil, err
-	}
+		id, orig.DatabaseID, rollbackName(orig.Name), downScript, orig.SQLUp, downScript,
+		orig.ID, nullID(executorID), executedAt, duration.Milliseconds())
+	return err
+}
 
-	if _, err := q.ExecContext(ctx, `
-		UPDATE migrations
-		SET status = 'ROLLED_BACK', updated_at = NOW()
-		WHERE id = $1 AND status = 'SUCCESS'`, orig.ID); err != nil {
-		return nil, err
+// recordFailedRun appends a FAILED execution of a direct rollback or forward. No migration row is
+// created for it; the execution points at the migration the user asked to roll back or forward.
+func (e *Engine) recordFailedRun(ctx context.Context, q querier, ex Execution, execType string, version int, res *RunResult) {
+	if err := insertExecution(ctx, q, ex); err != nil {
+		e.logger.ErrorContext(ctx, "migration.history_failed", slog.String("execution_id", ex.ID), slog.String("error", err.Error()))
+		ex.ID = ""
 	}
-
-	return getMigration(ctx, q, rollbackID)
+	e.logAttempt(ctx, execType, ex.MigrationID, ex.ID, ex.DatabaseID, version, string(ex.Status), res.Duration, ex.SQL, res)
+	if ex.ID != "" {
+		auditExecution(ctx, e.logger, ex)
+	}
 }
 
 // ExecuteRollback runs the SQL Down script of the latest active migration directly (used when no groups require approval).
@@ -188,6 +188,9 @@ func (e *Engine) ExecuteRollback(ctx context.Context, migrationID, executorID st
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := e.runStarted(runCtx, m.ID); err != nil {
+		return nil, nil, err
+	}
 
 	executedAt := e.now()
 	res, err := e.run(runCtx, pool, migrationSQLLog(m.DatabaseID, m.ID, "ROLLBACK", downScript), stmts)
@@ -195,22 +198,29 @@ func (e *Engine) ExecuteRollback(ctx context.Context, migrationID, executorID st
 		return nil, nil, err
 	}
 
+	ex := newExecution(runCtx, ExecRollback, m.ID, m.DatabaseID, executorID).withResult(downScript, executedAt, res)
+	ex.RevertsExecutionID = m.AppliedExecutionID
 	if !res.OK {
-		e.logAttempt(runCtx, "ROLLBACK", m.ID, "", m.DatabaseID, m.Version, "FAILED", res.Duration, downScript, res)
+		e.recordFailedRun(runCtx, lockConn, ex, "ROLLBACK", m.Version, res)
 		return nil, res, fmt.Errorf("rollback gagal: %s", res.Err.String())
 	}
 
-	rollbackRow, err := recordRollbackSuccess(runCtx, lockConn, m, downScript, executorID, executedAt, res.Duration)
-	if err != nil {
+	rollbackID := ids.New()
+	ex.MigrationID = rollbackID
+	if err := withTx(runCtx, lockConn, func(tx *sql.Tx) error {
+		if err := insertRollbackRow(runCtx, tx, rollbackID, m, downScript, executorID, executedAt, res.Duration); err != nil {
+			return err
+		}
+		return insertExecution(runCtx, tx, ex)
+	}); err != nil {
 		return nil, res, fmt.Errorf("rollback sudah di-COMMIT pada database target, tetapi riwayat gagal disimpan: %w", err)
 	}
-	e.logAttempt(runCtx, "ROLLBACK", m.ID, rollbackRow.ID, m.DatabaseID, m.Version, "SUCCESS", res.Duration, downScript, res)
+	e.logAttempt(runCtx, "ROLLBACK", m.ID, ex.ID, m.DatabaseID, m.Version, "SUCCESS", res.Duration, downScript, res)
+	auditExecution(runCtx, e.logger, ex)
 
-	origUpdated, err := getMigration(runCtx, lockConn, migrationID)
-	if err != nil {
-		return rollbackRow, res, nil
-	}
-	return origUpdated, res, nil
+	// The original row is unchanged; it reads as ROLLED_BACK because of the new execution.
+	orig, err := getMigration(runCtx, lockConn, migrationID)
+	return orig, res, err
 }
 
 // executeApprovedRollback runs an already-approved ROLLBACK request draft on the target DB.
@@ -241,7 +251,7 @@ func (e *Engine) executeApprovedRollback(ctx context.Context, rollbackDraftID, e
 	if err != nil {
 		return nil, nil, err
 	}
-	if !rb.IsDraft() && rb.Status != StatusApproved {
+	if !rb.IsExecutable() {
 		return nil, nil, ErrNotDraft
 	}
 	target, err := getMigration(runCtx, lockConn, rb.RollbackTargetID)
@@ -262,40 +272,38 @@ func (e *Engine) executeApprovedRollback(ctx context.Context, rollbackDraftID, e
 		return nil, nil, err
 	}
 
+	if err := e.runStarted(runCtx, rb.ID); err != nil {
+		return nil, nil, err
+	}
+
 	executedAt := e.now()
 	res, err := e.run(runCtx, pool, migrationSQLLog(rb.DatabaseID, rb.ID, "ROLLBACK", downScript,
 		slog.String("rollback_target_id", target.ID)), stmts)
 	if err != nil {
 		return nil, nil, err
 	}
+	ex := newExecution(runCtx, ExecRollback, rb.ID, rb.DatabaseID, executorID).withResult(downScript, executedAt, res)
+	ex.RevertsExecutionID = target.AppliedExecutionID
+	if err := withTx(runCtx, lockConn, func(tx *sql.Tx) error {
+		if res.OK {
+			if err := markRequestSucceeded(runCtx, tx, rb.ID, executorID, executedAt, res.Duration, false); err != nil {
+				return err
+			}
+		} else if err := recordExecution(runCtx, tx, failedRecord(rb.ID, downScript, executorID, executedAt, res)); err != nil {
+			return err
+		}
+		return insertExecution(runCtx, tx, ex)
+	}); err != nil {
+		if res.OK {
+			return nil, res, fmt.Errorf("rollback sudah di-COMMIT pada database target, tetapi riwayat gagal disimpan: %w", err)
+		}
+		return nil, res, fmt.Errorf("gagal menyimpan riwayat rollback: %w", err)
+	}
+	e.logAttempt(runCtx, "ROLLBACK", target.ID, ex.ID, rb.DatabaseID, target.Version, string(ex.Status), res.Duration, downScript, res)
+	auditExecution(runCtx, e.logger, ex)
 	if !res.OK {
-		e.logAttempt(runCtx, "ROLLBACK", target.ID, rb.ID, rb.DatabaseID, target.Version, "FAILED", res.Duration, downScript, res)
 		return nil, res, fmt.Errorf("rollback gagal: %s", res.Err.String())
 	}
-
-	var executedBy any
-	if ids.IsValid(executorID) {
-		executedBy = executorID
-	}
-	if _, err := lockConn.ExecContext(runCtx, `
-		UPDATE migrations SET
-			status        = 'SUCCESS',
-			executed_by   = $2,
-			executed_at   = $3,
-			duration_ms   = $4,
-			error_message = '',
-			updated_at    = NOW()
-		WHERE id = $1 AND status IN ('DRAFT', 'APPROVED')`,
-		rb.ID, executedBy, executedAt, res.Duration.Milliseconds()); err != nil {
-		return nil, res, fmt.Errorf("rollback sudah di-COMMIT pada database target, tetapi riwayat gagal disimpan: %w", err)
-	}
-	if _, err := lockConn.ExecContext(runCtx, `
-		UPDATE migrations SET status = 'ROLLED_BACK', updated_at = NOW()
-		WHERE id = $1 AND status = 'SUCCESS'`, target.ID); err != nil {
-		return nil, res, fmt.Errorf("rollback berhasil, tetapi status target gagal diperbarui: %w", err)
-	}
-
-	e.logAttempt(runCtx, "ROLLBACK", target.ID, rb.ID, rb.DatabaseID, target.Version, "SUCCESS", res.Duration, downScript, res)
 	rbUpdated, err := getMigration(runCtx, lockConn, rb.ID)
 	return rbUpdated, res, err
 }
@@ -342,22 +350,26 @@ func (e *Engine) ExecuteForward(ctx context.Context, migrationID, executorID str
 		return nil, nil, err
 	}
 
+	if err := e.runStarted(runCtx, m.ID); err != nil {
+		return nil, nil, err
+	}
+
 	executedAt := e.now()
 	res, err := e.run(runCtx, pool, migrationSQLLog(m.DatabaseID, m.ID, "FORWARD", upScript), stmts)
 	if err != nil {
 		return nil, nil, err
 	}
+	ex := newExecution(runCtx, ExecForward, m.ID, m.DatabaseID, executorID).withResult(upScript, executedAt, res)
+	ex.RevertsExecutionID = m.RollbackExecutionID
 	if !res.OK {
-		e.logAttempt(runCtx, "FORWARD", m.ID, "", m.DatabaseID, m.Version, "FAILED", res.Duration, upScript, res)
+		e.recordFailedRun(runCtx, lockConn, ex, "FORWARD", m.Version, res)
 		return nil, res, fmt.Errorf("forward gagal dijalankan pada target: %s", res.Err.String())
 	}
 
-	var executedBy any
-	if ids.IsValid(executorID) {
-		executedBy = executorID
-	}
 	fwdID := ids.New()
-	_, err = lockConn.ExecContext(runCtx, `
+	ex.MigrationID = fwdID
+	err = withTx(runCtx, lockConn, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(runCtx, `
 		INSERT INTO migrations (
 			id, database_id, version, name, sql_script, sql_up, sql_down,
 			is_irreversible, irreversible_reason, execution_type, source_migration_id,
@@ -368,16 +380,21 @@ func (e *Engine) ExecuteForward(ctx context.Context, migrationID, executorID str
 			$7, $8, 'FORWARD', $9,
 			'SUCCESS', $10, $10, $11, $12, '', NOW()
 		)`,
-		fwdID, m.DatabaseID, forwardName(m.Name), upScript, upScript, m.SQLDown,
-		m.IsIrreversible, m.IrreversibleReason, m.ID,
-		executedBy, executedAt, res.Duration.Milliseconds())
+			fwdID, m.DatabaseID, forwardName(m.Name), upScript, upScript, m.SQLDown,
+			m.IsIrreversible, m.IrreversibleReason, m.ID,
+			nullID(executorID), executedAt, res.Duration.Milliseconds()); err != nil {
+			return err
+		}
+		return insertExecution(runCtx, tx, ex)
+	})
 	if err != nil {
 		return nil, res, fmt.Errorf("forward berhasil di-COMMIT tetapi riwayat gagal diperbarui: %w", err)
 	}
 
 	fwdRow, err := getMigration(runCtx, lockConn, fwdID)
 	if err == nil {
-		e.logAttempt(runCtx, "FORWARD", m.ID, fwdRow.ID, m.DatabaseID, fwdRow.Version, "SUCCESS", res.Duration, upScript, res)
+		e.logAttempt(runCtx, "FORWARD", m.ID, ex.ID, m.DatabaseID, fwdRow.Version, "SUCCESS", res.Duration, upScript, res)
+		auditExecution(runCtx, e.logger, ex)
 	}
 	return fwdRow, res, err
 }
@@ -410,7 +427,7 @@ func (e *Engine) executeApprovedForward(ctx context.Context, forwardDraftID, exe
 	if err != nil {
 		return nil, nil, err
 	}
-	if !fwd.IsDraft() && fwd.Status != StatusApproved {
+	if !fwd.IsExecutable() {
 		return nil, nil, ErrNotDraft
 	}
 	src, err := getMigration(runCtx, lockConn, fwd.SourceMigrationID)
@@ -430,39 +447,77 @@ func (e *Engine) executeApprovedForward(ctx context.Context, forwardDraftID, exe
 		return nil, nil, err
 	}
 
+	if err := e.runStarted(runCtx, fwd.ID); err != nil {
+		return nil, nil, err
+	}
+
 	executedAt := e.now()
 	res, err := e.run(runCtx, pool, migrationSQLLog(fwd.DatabaseID, fwd.ID, "FORWARD", upScript,
 		slog.String("source_migration_id", src.ID)), stmts)
 	if err != nil {
 		return nil, nil, err
 	}
+	ex := newExecution(runCtx, ExecForward, fwd.ID, fwd.DatabaseID, executorID).withResult(upScript, executedAt, res)
+	ex.RevertsExecutionID = src.RollbackExecutionID
+	if err := withTx(runCtx, lockConn, func(tx *sql.Tx) error {
+		if res.OK {
+			if err := markRequestSucceeded(runCtx, tx, fwd.ID, executorID, executedAt, res.Duration, true); err != nil {
+				return err
+			}
+		} else if err := recordExecution(runCtx, tx, failedRecord(fwd.ID, upScript, executorID, executedAt, res)); err != nil {
+			return err
+		}
+		return insertExecution(runCtx, tx, ex)
+	}); err != nil {
+		if res.OK {
+			return nil, res, fmt.Errorf("forward berhasil di-COMMIT tetapi riwayat gagal diperbarui: %w", err)
+		}
+		return nil, res, fmt.Errorf("gagal menyimpan riwayat forward: %w", err)
+	}
 	if !res.OK {
-		e.logAttempt(runCtx, "FORWARD", src.ID, fwd.ID, fwd.DatabaseID, src.Version, "FAILED", res.Duration, upScript, res)
+		e.logAttempt(runCtx, "FORWARD", src.ID, ex.ID, fwd.DatabaseID, src.Version, "FAILED", res.Duration, upScript, res)
+		auditExecution(runCtx, e.logger, ex)
 		return nil, res, fmt.Errorf("forward gagal dijalankan pada target: %s", res.Err.String())
 	}
 
-	var executedBy any
-	if ids.IsValid(executorID) {
-		executedBy = executorID
+	fwdUpdated, err := getMigration(runCtx, lockConn, fwd.ID)
+	if err == nil {
+		e.logAttempt(runCtx, "FORWARD", src.ID, ex.ID, fwd.DatabaseID, fwdUpdated.Version, "SUCCESS", res.Duration, upScript, res)
+		auditExecution(runCtx, e.logger, ex)
 	}
-	_, err = lockConn.ExecContext(runCtx, `
+	return fwdUpdated, res, err
+}
+
+// markRequestSucceeded moves an approved rollback or forward request row to SUCCESS. A forward
+// gets the next version (it is active again); a rollback row has no version.
+func markRequestSucceeded(ctx context.Context, q querier, id, executorID string, executedAt time.Time, duration time.Duration, withVersion bool) error {
+	res, err := q.ExecContext(ctx, `
 		UPDATE migrations m SET
 			status        = 'SUCCESS',
-			version       = (SELECT COALESCE(MAX(o.version), 0) + 1 FROM migrations o WHERE o.database_id = m.database_id),
+			version       = CASE WHEN $5 THEN (SELECT COALESCE(MAX(o.version), 0) + 1
+			                                   FROM migrations o WHERE o.database_id = m.database_id) END,
 			executed_by   = $2,
 			executed_at   = $3,
 			duration_ms   = $4,
 			error_message = '',
 			updated_at    = NOW()
-		WHERE m.id = $1 AND m.status IN ('DRAFT', 'APPROVED')`,
-		fwd.ID, executedBy, executedAt, res.Duration.Milliseconds())
+		WHERE m.id = $1 AND m.status IN ('DRAFT', 'APPROVED', 'QUEUED', 'RUNNING')`,
+		id, nullID(executorID), executedAt, duration.Milliseconds(), withVersion)
 	if err != nil {
-		return nil, res, fmt.Errorf("forward berhasil di-COMMIT tetapi riwayat gagal diperbarui: %w", err)
+		return err
 	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotDraft
+	}
+	return nil
+}
 
-	fwdUpdated, err := getMigration(runCtx, lockConn, fwd.ID)
-	if err == nil {
-		e.logAttempt(runCtx, "FORWARD", src.ID, fwdUpdated.ID, fwd.DatabaseID, fwdUpdated.Version, "SUCCESS", res.Duration, upScript, res)
+// failedRecord is the history write for an approved rollback/forward request whose script
+// failed: the request row becomes FAILED, like a failed migration.
+func failedRecord(id, script, executorID string, executedAt time.Time, res *RunResult) executionRecord {
+	rec := executionRecord{ID: id, SQL: script, ExecutedBy: executorID, ExecutedAt: executedAt, Duration: res.Duration}
+	if res.Err != nil {
+		rec.Error = res.Err.String()
 	}
-	return fwdUpdated, res, err
+	return rec
 }
