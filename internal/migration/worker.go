@@ -132,8 +132,10 @@ func (w *Worker) RunOnce(ctx context.Context, workerID string) (bool, error) {
 // process runs one claimed job to a final or retry state.
 func (w *Worker) process(ctx context.Context, workerID string, j *Job) {
 	// A started job finishes even during shutdown: the engine already ignores cancellation once
-	// it holds the lock, and the job row must be updated to match.
-	ctx = context.WithoutCancel(ctx)
+	// it holds the lock, and the job row must be updated to match. A batch run is the exception:
+	// it stops at the next batch boundary and the job goes back to the queue.
+	shutdown := ctx.Done()
+	ctx = WithInterrupt(context.WithoutCancel(ctx), shutdown)
 	// The job keeps the request's correlation ID and actor, so its logs join the HTTP request's.
 	ctx = logging.WithRequestInfo(ctx, &logging.RequestInfo{CorrelationID: j.CorrelationID, Actor: j.ExecutorID})
 	// The engine stores the job and attempt on the execution row it writes.
@@ -158,6 +160,14 @@ func (w *Worker) process(ctx context.Context, workerID string, j *Job) {
 	switch {
 	case res != nil && res.OK && err == nil:
 		w.finish(ctx, log, j, JobSuccess, "")
+	case res != nil && res.Interrupted:
+		// Shutdown between batches: committed batches are checkpointed, so the next run of this
+		// job continues after them. Waiting is not an attempt.
+		w.requeue(ctx, log, j, errors.New("worker berhenti di antara batch; dilanjutkan dari checkpoint"), 0, false)
+	case res != nil && res.Partial:
+		// Batches were committed, then one failed: the migration is PARTIAL until a user resumes
+		// or aborts it. Not retried automatically: the failure is usually in the data or script.
+		w.finish(ctx, log, j, JobPartial, res.Err.String())
 	case res != nil && !res.OK:
 		// The script failed and its transaction was rolled back: a final result, never retried.
 		msg := "script gagal"
@@ -204,6 +214,10 @@ func (w *Worker) execute(ctx context.Context, j *Job) (*RunResult, error) {
 		_, res, err = w.engine.ExecuteRollback(ctx, j.MigrationID, j.ExecutorID)
 	case JobForward:
 		_, res, err = w.engine.ExecuteForward(ctx, j.MigrationID, j.ExecutorID)
+	case JobResume:
+		_, res, err = w.engine.Execute(ctx, j.MigrationID, j.ExecutorID)
+	case JobAbort:
+		_, res, err = w.engine.ExecuteAbort(ctx, j.MigrationID, j.ExecutorID)
 	default:
 		err = fmt.Errorf("job_type tidak dikenal: %s", j.Type)
 	}
@@ -261,7 +275,7 @@ func (w *Worker) finish(ctx context.Context, log *slog.Logger, j *Job, status Jo
 	switch status {
 	case JobSuccess:
 		log.InfoContext(ctx, "job.finished", attrs...)
-	case JobFailed:
+	case JobFailed, JobPartial:
 		log.WarnContext(ctx, "job.finished", attrs...)
 	default:
 		// UNCERTAIN holds every later job on this database until an operator checks the target.
@@ -277,6 +291,15 @@ func (w *Worker) requeue(ctx context.Context, log *slog.Logger, j *Job, cause er
 	log.WarnContext(ctx, "job.retry_scheduled",
 		slog.Int64("delay_ms", delay.Milliseconds()), slog.Bool("counts_as_attempt", countAttempt),
 		slog.String("error", cause.Error()))
+}
+
+// isBatchJob reports whether j runs per batch (resume and abort jobs always do).
+func (w *Worker) isBatchJob(ctx context.Context, j *Job) bool {
+	if j.Type == JobResume || j.Type == JobAbort {
+		return true
+	}
+	m, err := w.repo.Get(ctx, j.MigrationID)
+	return err == nil && m.IsBatch()
 }
 
 // backoff is BaseBackoff * 2^(attempt-1), capped at MaxBackoff.
@@ -341,6 +364,18 @@ func (w *Worker) RecoverStaleJobs(ctx context.Context) (int, error) {
 			return n, err
 		case done:
 			w.finish(jctx, log, j, JobSuccess, "dipulihkan: hasil sudah tercatat sebelum worker berhenti")
+		case j.SQLStartedAt != nil && w.isBatchJob(jctx, j):
+			// Every batch commits together with its checkpoint, so nothing is uncertain: run the
+			// job again and it continues after the last checkpoint.
+			const cause = "worker berhenti di tengah batch; dilanjutkan dari checkpoint"
+			w.recordAttempt(jctx, log, j, ExecPartial, true, cause)
+			if j.Attempt < j.MaxAttempts {
+				w.requeue(jctx, log, j, errors.New(cause), 0, true)
+			} else if status, err := w.repo.StopBatchJob(jctx, j); err != nil {
+				log.ErrorContext(jctx, "job.update_failed", slog.String("error", err.Error()))
+			} else {
+				w.finish(jctx, log, j, status, cause)
+			}
 		case j.SQLStartedAt == nil && j.Attempt < j.MaxAttempts:
 			const cause = "lease worker habis sebelum SQL dijalankan"
 			w.recordAttempt(jctx, log, j, ExecFailed, false, cause)

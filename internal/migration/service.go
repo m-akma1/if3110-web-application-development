@@ -57,7 +57,7 @@ func (s *Service) Overview(ctx context.Context, userID, dbID string) (*Overview,
 		return nil, err
 	}
 	ov := &Overview{DatabaseID: dbID, Level: level, CanEdit: rbac.IsAllowed(level, rbac.ActionCreateMigration)}
-	if ov.History, err = s.repo.ListByDatabase(ctx, dbID, StatusQueued, StatusRunning, StatusSuccess, StatusFailed, StatusRolledBack, StatusPartial); err != nil {
+	if ov.History, err = s.repo.ListByDatabase(ctx, dbID, StatusQueued, StatusRunning, StatusSuccess, StatusFailed, StatusRolledBack, StatusPartial, StatusPartiallyReverted, StatusAborted); err != nil {
 		return nil, err
 	}
 	latestActive, _ := s.repo.GetLatestActive(ctx, dbID)
@@ -133,7 +133,14 @@ func (s *Service) Duplicate(ctx context.Context, userID, id string) (*Migration,
 	if err != nil {
 		return nil, err
 	}
-	return s.repo.CreateDraft(ctx, NewDraft{DatabaseID: m.DatabaseID, Name: copyName(m.Name), SQL: m.SQL, CreatedBy: userID})
+	in := NewDraft{DatabaseID: m.DatabaseID, Name: copyName(m.Name), SQL: m.SQL, CreatedBy: userID}
+	if m.ExecutionType != "ROLLBACK" && m.SourceMigrationID == "" {
+		// Copy the whole definition so a copied batch migration is still a batch migration.
+		in.SQLUp, in.SQLDown = m.SQLUp, m.SQLDown
+		in.IsIrreversible, in.IrreversibleReason = m.IsIrreversible, m.IrreversibleReason
+		in.ExecutionMode, in.BatchAttribute, in.BatchSize = m.ExecutionMode, m.BatchAttribute, m.BatchSize
+	}
+	return s.repo.CreateDraft(ctx, in)
 }
 
 // DryRun runs a draft's script on its database and rolls it back, with a plan per DML statement.
@@ -558,4 +565,65 @@ func (s *Service) Executions(ctx context.Context, userID, id string) ([]Executio
 		return nil, err
 	}
 	return s.repo.ListExecutions(ctx, m.ID)
+}
+
+// EnqueueResume queues a RESUME job that continues a PARTIAL batch migration after its last
+// checkpoint. The migration was approved before its first run, so no new approval is needed.
+func (s *Service) EnqueueResume(ctx context.Context, userID, id string) (*Migration, *Job, error) {
+	m, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch {
+	case m.Status == StatusPartiallyReverted:
+		return nil, nil, ErrBatchReverting
+	case m.Status != StatusPartial:
+		return nil, nil, ErrNotPartial
+	}
+	return s.enqueueBatchJob(ctx, userID, m, JobResume)
+}
+
+// EnqueueAbort cancels a PARTIAL batch migration. With rollback it queues an ABORT job that
+// undoes the committed batches with SQL Down, newest first; without rollback it marks the
+// migration ABORTED right away and leaves the committed batches in place (job is nil).
+func (s *Service) EnqueueAbort(ctx context.Context, userID, id string, rollback bool) (*Migration, *Job, error) {
+	m, _, err := s.load(ctx, userID, id, rbac.ActionExecuteMigration)
+	if err != nil {
+		return nil, nil, err
+	}
+	if m.Status != StatusPartial && m.Status != StatusPartiallyReverted {
+		return nil, nil, ErrNotPartial
+	}
+	if !rollback {
+		if err := s.repo.MarkAborted(ctx, m.ID); err != nil {
+			return nil, nil, err
+		}
+		m, err = s.repo.Get(ctx, m.ID)
+		return m, nil, err
+	}
+	if m.IsIrreversible || strings.TrimSpace(m.SQLDown) == "" {
+		return nil, nil, ErrNoRollbackScript
+	}
+	return s.enqueueBatchJob(ctx, userID, m, JobAbort)
+}
+
+func (s *Service) enqueueBatchJob(ctx context.Context, userID string, m *Migration, t JobType) (*Migration, *Job, error) {
+	job, err := s.repo.EnqueueJob(ctx, EnqueueInput{
+		MigrationID: m.ID, DatabaseID: m.DatabaseID, Type: t, ExecutorID: userID,
+		CorrelationID: correlationID(ctx), MarkQueued: true,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	m, err = s.repo.Get(ctx, m.ID)
+	return m, job, err
+}
+
+// Batches returns the committed batches of a migration the user may view.
+func (s *Service) Batches(ctx context.Context, userID, id string) ([]Batch, error) {
+	m, _, err := s.load(ctx, userID, id, rbac.ActionViewMigration)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListBatches(ctx, m.ID)
 }

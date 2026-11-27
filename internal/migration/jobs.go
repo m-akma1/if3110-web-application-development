@@ -18,6 +18,8 @@ const (
 	JobExecute  JobType = "EXECUTE"  // run a draft or an approved migration (also approved rollback/forward drafts)
 	JobRollback JobType = "ROLLBACK" // roll back an executed migration directly (no approval needed)
 	JobForward  JobType = "FORWARD"  // re-apply a rolled-back migration directly (no approval needed)
+	JobResume   JobType = "RESUME"   // continue a PARTIAL batch migration from its checkpoint
+	JobAbort    JobType = "ABORT"    // undo the committed batches of a PARTIAL migration, newest first
 )
 
 // JobStatus is the lifecycle state of a job.
@@ -29,6 +31,7 @@ const (
 	JobSuccess   JobStatus = "SUCCESS"
 	JobFailed    JobStatus = "FAILED"
 	JobUncertain JobStatus = "UNCERTAIN" // SQL may have run but the outcome was not recorded
+	JobPartial   JobStatus = "PARTIAL"   // a batch run stopped with some batches committed
 )
 
 // ErrJobActive means the migration already has an unfinished job.
@@ -62,7 +65,13 @@ type Job struct {
 
 // Done reports whether the job reached a final state.
 func (j *Job) Done() bool {
-	return j.Status == JobSuccess || j.Status == JobFailed
+	return j.Status == JobSuccess || j.Status == JobFailed || j.Status == JobPartial
+}
+
+// changesMigrationStatus reports job types that move their migration through QUEUED and
+// RUNNING. Direct rollback/forward jobs leave the executed migration's status alone.
+func (t JobType) changesMigrationStatus() bool {
+	return t == JobExecute || t == JobResume || t == JobAbort
 }
 
 // EnqueueInput describes a job to add to the queue.
@@ -112,7 +121,11 @@ func (r *Repository) EnqueueJob(ctx context.Context, in EnqueueInput) (*Job, err
 		if from == string(StatusQueued) || from == string(StatusRunning) {
 			return nil, ErrJobActive
 		}
-		if from != string(StatusDraft) && from != string(StatusApproved) {
+		resumable := in.Type == JobResume || in.Type == JobAbort
+		switch {
+		case resumable && from != string(StatusPartial):
+			return nil, ErrNotPartial
+		case !resumable && from != string(StatusDraft) && from != string(StatusApproved):
 			return nil, ErrNotDraft
 		}
 		if _, err := tx.ExecContext(ctx,
@@ -139,6 +152,17 @@ func (r *Repository) EnqueueJob(ctx context.Context, in EnqueueInput) (*Job, err
 	return r.GetJob(ctx, id)
 }
 
+// heldByBatch is true when job alias belongs to a database with another batch migration in the
+// middle of its run: PARTIAL, or queued/running again after it ran (resume or abort). Running
+// anything else then would build on a half-applied change.
+func heldByBatch(alias string) string {
+	return `EXISTS (
+		SELECT 1 FROM migrations p
+		WHERE p.database_id = ` + alias + `.database_id AND p.id <> ` + alias + `.migration_id
+		  AND (p.status = 'PARTIAL'
+		       OR (p.execution_mode = 'BATCH' AND p.executed_at IS NOT NULL AND p.status IN ('QUEUED', 'RUNNING'))))`
+}
+
 // ClaimNextJob moves a due QUEUED job to RUNNING for workerID and returns it. Only the oldest
 // queued job of each database is eligible, and a database with a RUNNING or UNCERTAIN job is skipped, so jobs on one database run one at a
 // time while jobs on different databases run in parallel. It returns nil, nil when nothing is due.
@@ -154,11 +178,16 @@ func (r *Repository) ClaimNextJob(ctx context.Context, workerID string, lease ti
 		SELECT j.id, j.database_id
 		FROM migration_jobs j
 		WHERE j.status = 'QUEUED' AND j.next_run_at <= NOW()
+		  -- a batch migration that stopped half-way holds every other migration of its database
+		  -- until it is finished or aborted; its own resume/abort job may run
+		  AND NOT `+heldByBatch("j")+`
 		  -- FIFO per database: only the oldest queued job of a database may start, so
-		  -- migrations get their versions in the order they were queued.
+		  -- migrations get their versions in the order they were queued. A held job does not
+		  -- block the jobs behind it (otherwise a resume queued after it could never run).
 		  AND NOT EXISTS (
 		      SELECT 1 FROM migration_jobs e
-		      WHERE e.database_id = j.database_id AND e.status = 'QUEUED' AND e.created_at < j.created_at)
+		      WHERE e.database_id = j.database_id AND e.status = 'QUEUED' AND e.created_at < j.created_at
+		        AND NOT `+heldByBatch("e")+`)
 		  -- one job at a time per database; UNCERTAIN holds the database until it is resolved
 		  AND NOT EXISTS (
 		      SELECT 1 FROM migration_jobs o
@@ -208,7 +237,7 @@ func (r *Repository) ClaimNextJob(ctx context.Context, workerID string, lease ti
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE migrations m SET status = 'RUNNING', updated_at = NOW()
 		FROM migration_jobs j
-		WHERE j.id = $1 AND j.job_type = 'EXECUTE' AND m.id = j.migration_id AND m.status = 'QUEUED'`,
+		WHERE j.id = $1 AND j.job_type IN ('EXECUTE', 'RESUME', 'ABORT') AND m.id = j.migration_id AND m.status = 'QUEUED'`,
 		jobID); err != nil {
 		return nil, err
 	}
@@ -248,7 +277,7 @@ func (r *Repository) FinishJob(ctx context.Context, jobID string, status JobStat
 			last_error       = $3,
 			locked_by        = '',
 			lease_expires_at = NULL,
-			finished_at      = CASE WHEN $2::varchar IN ('SUCCESS', 'FAILED') THEN NOW() END,
+			finished_at      = CASE WHEN $2::varchar IN ('SUCCESS', 'FAILED', 'PARTIAL') THEN NOW() END,
 			updated_at       = NOW()
 		WHERE id = $1 AND status = 'RUNNING'`, jobID, string(status), errMsg)
 	return err
@@ -282,17 +311,17 @@ func (r *Repository) RequeueJob(ctx context.Context, jobID, errMsg string, delay
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE migrations m SET status = 'QUEUED', updated_at = NOW()
 		FROM migration_jobs j
-		WHERE j.id = $1 AND j.job_type = 'EXECUTE' AND m.id = j.migration_id AND m.status = 'RUNNING'`,
+		WHERE j.id = $1 AND j.job_type IN ('EXECUTE', 'RESUME', 'ABORT') AND m.id = j.migration_id AND m.status = 'RUNNING'`,
 		jobID); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-// RestoreMigrationStatus moves the migration of an EXECUTE job back to the status it had before
+// RestoreMigrationStatus moves the migration of an EXECUTE, RESUME or ABORT job back to the status it had before
 // it was enqueued. Used when the job fails before any SQL ran, so the user can try again.
 func (r *Repository) RestoreMigrationStatus(ctx context.Context, j *Job) error {
-	if j.Type != JobExecute || j.FromStatus == "" {
+	if !j.Type.changesMigrationStatus() || j.FromStatus == "" {
 		return nil
 	}
 	_, err := r.db.ExecContext(ctx, `
@@ -332,7 +361,7 @@ func (r *Repository) RecordJobAttempt(ctx context.Context, j *Job, status ExecSt
 // forward request runs a rollback or forward.
 func jobKind(j *Job, m *Migration) ExecKind {
 	switch {
-	case j.Type == JobRollback, m.ExecutionType == "ROLLBACK" && m.RollbackTargetID != "":
+	case j.Type == JobRollback, j.Type == JobAbort, m.ExecutionType == "ROLLBACK" && m.RollbackTargetID != "":
 		return ExecRollback
 	case j.Type == JobForward, m.SourceMigrationID != "":
 		return ExecForward
@@ -353,6 +382,8 @@ func jobScript(j *Job, m *Migration) string {
 		if m.SQLUp != "" {
 			script = m.SQLUp
 		}
+	case JobAbort:
+		script = m.SQLDown
 	}
 	if script == "" {
 		script = "-- (script tidak diketahui)"
@@ -446,4 +477,34 @@ func scanJob(row rowScanner) (*Job, error) {
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// StopBatchJob ends a batch job that ran out of attempts after its worker died mid-run. With
+// committed batches the migration becomes PARTIAL (resume or abort it) and the job PARTIAL;
+// without any it goes back to its status before the job, and the job is FAILED.
+func (r *Repository) StopBatchJob(ctx context.Context, j *Job) (JobStatus, error) {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE migrations m SET status = 'PARTIAL', executed_at = COALESCE(m.executed_at, NOW()), updated_at = NOW()
+		WHERE m.id = $1 AND m.status IN ('QUEUED', 'RUNNING')
+		  AND EXISTS (SELECT 1 FROM migration_batches b WHERE b.migration_id = m.id AND b.direction = 'UP')`, j.MigrationID)
+	if err != nil {
+		return "", err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return JobPartial, nil
+	}
+	return JobFailed, r.RestoreMigrationStatus(ctx, j)
+}
+
+// MarkAborted ends a PARTIAL batch migration without undoing its committed batches.
+func (r *Repository) MarkAborted(ctx context.Context, migrationID string) error {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE migrations SET status = 'ABORTED', updated_at = NOW() WHERE id = $1 AND status = 'PARTIAL'`, migrationID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotPartial
+	}
+	return nil
 }
