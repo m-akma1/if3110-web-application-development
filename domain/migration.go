@@ -90,6 +90,9 @@ type MigrationBatchView struct {
 	CursorTo    int64     `json:"cursor_to"`
 	Rows        int64     `json:"rows"`
 	CommittedAt time.Time `json:"committed_at"`
+	// RecoveryRows is how many before-images an UP batch stored for an abort; null when none
+	// were kept (irreversible, DOWN, or committed before recovery data existed).
+	RecoveryRows *int64 `json:"recovery_rows"`
 }
 
 // VersionLabel is "v3" for executed migrations and "-" otherwise.
