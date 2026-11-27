@@ -127,6 +127,13 @@ The worker pool itself uses fixed settings: 4 workers, a 30 s lease renewed ever
 |---|---|---|
 | `LOG_LEVEL` | `info` | (Optional) Minimum log level: `debug`, `info`, `warn` or `error` |
 
+#### Tracing
+
+| Variable | Default Value | Description |
+|---|---|---|
+| `OTEL_TRACES_EXPORTER` | `console` | (Optional) `console` writes every finished span as one JSON line on stdout, next to the logs. `none` still creates spans (so logs keep their `trace_id`/`span_id`) but exports nothing |
+| `OTEL_SERVICE_NAME` | `dbplatform` | (Optional) `service.name` on every span |
+
 #### Session Handling
 
 | Variable | Default Value | Description |
@@ -210,7 +217,8 @@ When enabled, the app creates the demo users and groups that do not exist yet, r
 | Styling | Tailwind CSS 3.4 (PostCSS + Autoprefixer) |
 | Databases | PostgreSQL 16, driver `jackc/pgx/v5` |
 | Password hashing | Argon2id (`golang.org/x/crypto`) |
-| Logging | `log/slog` structured JSON logs on stdout (one logger, request correlation ID, redaction) |
+| Logging | `log/slog` structured JSON logs on stdout (one logger, request correlation ID, trace/span IDs, redaction) |
+| Tracing | OpenTelemetry Go SDK, `otelhttp`, W3C Trace Context carried through the job queue, console exporter |
 | Background jobs | Job queue in a PostgreSQL table (`FOR UPDATE SKIP LOCKED`), worker pool inside the app process |
 | History and audit | Append-only `migration_executions` table (enforced by a trigger) and `audit.*` log events |
 | Reverse proxy and TLS | Caddy 2 |
@@ -230,15 +238,17 @@ flowchart LR
 
         subgraph app["Go app (:8080)"]
             static["SPA host<br/>frontend/dist + index.html fallback"]
-            http["internal/http<br/>REST /api/*, CSRF guard, sanitized logger"]
+            http["internal/http<br/>REST /api/*, CSRF guard,<br/>access log, request spans"]
+            worker["migration worker pool<br/>claim, lease, retry"]
+
             authn["authn<br/>users, sessions"]
             rbac["rbac<br/>access decisions"]
-            admin["admin<br/>console services"]
             groups["groups<br/>groups, leaders, invite codes"]
-            viewer["dbmanager<br/>pools, read-only viewer"]
-            migr["migration<br/>drafts, dry run, approvals,<br/>engine, rollback/forward,<br/>execution history"]
-            worker["migration worker pool<br/>queue, lease, retry"]
-            audit["audit<br/>audit.* events"]
+            admin["admin<br/>console services"]
+            migr["migration<br/>drafts, dry run, approvals,<br/>job queue, engine,<br/>rollback/forward, history"]
+            obs["logging · audit · tracing<br/>used by every component:<br/>JSON logs, audit.* events,<br/>OTel spans on stdout"]
+
+            viewer["dbmanager<br/>target pools, read-only viewer"]
         end
 
         platform[("postgres<br/>platform DB")]
@@ -247,18 +257,19 @@ flowchart LR
 
     other[("Other registered<br/>PostgreSQL targets")]
 
-    spa -- "HTTPS (HTML/JS assets)" --> caddy
-    spa -- "HTTPS JSON /api/*" --> caddy
+    spa -- HTTPS --> caddy
     caddy -- HTTP --> static
     caddy -- HTTP --> http
-    http --> authn & rbac & admin & groups & viewer & migr
-    http -- "enqueue job (202)" --> platform
-    worker -- "claim job" --> platform
-    worker --> migr
-    http & migr & worker --> audit
-    authn & rbac & admin & groups & migr --> platform
-    viewer & migr --> target
-    viewer & migr --> other
+    http --> authn & rbac & groups & admin & migr & viewer
+    worker -- "claims and runs jobs" --> migr
+    authn & rbac & groups & admin & migr --> platform
+    admin -- "register targets" --> viewer
+    migr -- "target pools" --> viewer
+    viewer -- SQL --> target & other
+
+    %% layout only: keep the databases in their own column right of the app
+    worker ~~~ obs
+    viewer ~~~ platform
 ```
 
 - The browser loads the SPA once (`index.html` + `/assets/*`). Every page change after that is handled by React Router on the client, and data comes from the JSON API under `/api/*`.
@@ -266,6 +277,7 @@ flowchart LR
 - Execute, rollback and forward requests only **enqueue a job** and answer `202 Accepted`. A worker in the same process runs the job later; the SPA polls until it is done.
 - **Target databases** are only reached through the connection registry, which holds one small pool (up to 5 connections) per connected target. The Data Viewer, the target manager and the migration engine share it.
 - Every request that touches a target first identifies the user (`authn`), then asks `rbac.Authorizer` whether the action is allowed. Handlers never compare access levels themselves.
+- Logging, audit events and tracing are used by every component, so the diagram shows them as one box instead of an arrow from each component. See [Activity Logging](#activity-logging) and [Tracing](#tracing).
 
 ### Repository Structure
 
@@ -286,7 +298,8 @@ flowchart LR
 │   ├── audit/                   # audit.<action> events: who did what, with which outcome
 │   ├── bootstrap/               # Bootstrap admins and demo data seeding
 │   ├── http/                    # REST API handlers, SPA host, middleware, cookies
-│   ├── logging/                 # Structured JSON logger (slog), correlation ID and actor in context, SQL log helpers
+│   ├── logging/                 # Structured JSON logger (slog), correlation ID and actor in context, SQL log + span helper
+│   ├── tracing/                 # OpenTelemetry setup, traceparent inject/extract for the job queue
 │   ├── ids/                     # UUID helpers
 │   ├── accesstest/, testutil/   # Test fixtures and test database helpers
 ├── frontend/                    # React + TypeScript SPA (Vite)
@@ -547,10 +560,15 @@ ORDER BY e.finished_at;
 
 Every log record is one JSON object on stdout, written by one `log/slog` logger (`internal/logging`).
 
-- **Common fields**: `time`, `level`, `event` (a stable name such as `sql.result`), `component` (`http`, `dbmanager`, `migration`, `worker`), `correlation_id`, `actor` (user ID), and `database_id` and `status` where they apply.
+- **Common fields**: `time`, `level`, `event` (a stable name such as `sql.result`), `component` (`http`, `dbmanager`, `migration`, `worker`), `correlation_id`, `actor` (user ID), `trace_id` and `span_id` (see [Tracing](#tracing)), and `database_id` and `status` where they apply.
 - **Correlation ID**: every request gets an ID, returned in the `X-Request-ID` response header. A well-formed `X-Request-ID` from the client (`[A-Za-z0-9._-]`, at most 64 characters) is reused. Every record written while handling the request carries it.
-- **Every SQL execution is logged** as a `sql.start` and `sql.result` pair: Query Explorer queries (`sql_kind: read_only`), table browsing (`table_browse`), schema lookups (`catalog`) and migration scripts (`migration`). `sql.result` has `duration_ms`, `status`, `rows` when known, and on failure `error` and the PostgreSQL `sqlstate`.
-- **Transactions that change data** also log `tx.commit` or `tx.rollback`. A run of a migration, rollback or forward ends with one `migration.attempt` record (`execution_type`, `execution_id`, `version`, `status`).
+- **Every SQL execution on a target is logged** as a `sql.start` and `sql.result` pair, with `sql_kind`:
+  - Query Explorer queries (`read_only`), table browsing (`table_browse`), schema lookups (`catalog`);
+  - migration scripts (`migration`) and dry-run statements (`dry_run`, one pair per statement);
+  - in batch mode: the key range of the next batch (`batch_bounds`), the batch statement itself (`migration_batch`), the estimate of the batches left (`batch_estimate`), and checkpoint reads and writes (`checkpoint`), each with `batch_no` when it belongs to a batch.
+
+  `sql.result` has `duration_ms`, `status`, `rows` when known, and on failure `error` and the PostgreSQL `sqlstate`. Bind parameters are listed by type only (`params`), never by value.
+- **Transactions on a target** log `tx.commit` or `tx.rollback`: once per migration run, once per batch in batch mode, and a `tx.rollback` with `reason: dry_run` at the end of every dry run. A run of a migration, rollback or forward ends with one `migration.attempt` record (`execution_type`, `execution_id`, `version`, `status`).
 - **Jobs** log `job.claimed`, `job.finished`, `job.retry_scheduled` (with `delay_ms` and `counts_as_attempt`), `job.uncertain` and `worker.reaped`. A job keeps the `correlation_id` and `actor` of the request that queued it, so the worker's records join the HTTP request's.
 - **Batches** log `migration.batch` (direction, `batch_no`, `cursor_from`, `cursor_to`, `rows`, `duration_ms`), `migration.batch_failed`, and `migration.batch_recovered` when checkpoints are copied from the target after a crash.
 - **Audit** events are `audit.*` (see **Execution History and Audit**).
@@ -640,6 +658,89 @@ The target is down: every attempt is recorded with `sql_sent: false` and retried
 {"level":"WARN","event":"job.retry_scheduled","component":"worker","job_id":"9bf8298a-…","migration_id":"4110053e-…","database_id":"37491ac9-…","job_type":"EXECUTE","attempt":2,"worker_id":"w1","delay_ms":20,"counts_as_attempt":true,"error":"koneksi ke database target tidak tersedia","correlation_id":"69a08b0e-…","actor":"492d74cb-…"}
 {"level":"WARN","event":"audit.execute","component":"worker","action":"execute","outcome":"failure","execution_id":"99982564-…","migration_id":"4110053e-…","database_id":"37491ac9-…","attempt":3,"sql_sent":false,"job_id":"9bf8298a-…","error":"koneksi ke database target tidak tersedia","correlation_id":"69a08b0e-…","actor":"492d74cb-…"}
 {"level":"WARN","event":"job.finished","component":"worker","job_id":"9bf8298a-…","migration_id":"4110053e-…","database_id":"37491ac9-…","job_type":"EXECUTE","attempt":3,"worker_id":"w1","status":"FAILED","error":"koneksi ke database target tidak tersedia","correlation_id":"69a08b0e-…","actor":"492d74cb-…"}
+```
+
+### Tracing
+
+Every API request and every migration job is traced with **OpenTelemetry** (`internal/tracing`). One trace follows a migration from the request that queues it, through the queue and the worker, to the lock, every batch, and every SQL statement on the target.
+
+```text
+POST /api/migration/{id}/execute     server span (otelhttp), named by route
+└─ job.enqueue                       producer: INSERT into migration_jobs; its traceparent is stored on the job
+   └─ job.process                    consumer: the worker's attempt (one span per attempt, retries included)
+      ├─ migration.lock_wait         wait for the database's advisory lock (lock.tries, lock.acquired)
+      ├─ migration.run               the script's transaction (events tx.commit / tx.rollback)
+      │  └─ sql migration            the statement on the target
+      └─ migration.batch × N         batch mode: one span per batch (batch_no, cursor_from/to, rows, tx.commit)
+         ├─ sql batch_bounds
+         ├─ sql migration_batch
+         └─ sql checkpoint
+```
+
+- **Through the queue**: the job row keeps the W3C `traceparent` of its `job.enqueue` span (`migration_jobs.trace_parent`). The worker that claims the job, possibly much later and after a restart, starts `job.process` as its child. A retry is another `job.process` span in the same trace, and a job recovered after its lease expired gets a `job.recover` span there too.
+- **Other spans**: dry runs (`migration.dry_run` with one `sql dry_run` per statement), viewer queries (`sql read_only`, `sql table_browse`, `sql catalog`) under their HTTP span.
+- **Attributes**: route, status and `correlation_id` on the server span; `job_id`, `job_type`, `migration_id`, `database_id`, `attempt`, `worker_id`, `job.queue_wait_ms` and `job.status` on `job.process`; `db.system`, `db.operation`, `db.statement` (cut at 2000 characters, no parameter values), `sql_kind`, rows and `db.response.status_code` (SQLSTATE) on SQL spans.
+- **Errors**: a failing statement marks its SQL span, `migration.run` and `job.process` as `Error`, with the message and an `exception` event.
+- **Logs**: every record written inside a span carries its `trace_id` and `span_id`, so `sql.start`/`sql.result` share the SQL span's ID and `job.claimed`/`job.finished` the `job.process` span's.
+- Only `/api/*` requests are traced. The API is public, so a `traceparent` header sent by a client is recorded as a link, not trusted as the parent. Every trace is sampled.
+- **Output**: with `OTEL_TRACES_EXPORTER=console` (the default) each finished span is one JSON line on stdout, next to the logs. Spans are written in batches every few seconds, and the rest are flushed on shutdown.
+
+Reading a trace:
+
+```sh
+# trace ID of one request (X-Request-ID from the browser's DevTools)
+docker compose logs --no-log-prefix app | jq -R -r 'fromjson? | select(.correlation_id=="<id>" and .event=="http.request") | .trace_id'
+# every log record of that trace
+docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.trace_id=="<trace id>")'
+# its spans as a list: name, span, parent
+docker compose logs --no-log-prefix app | jq -R -c 'fromjson? | select(.SpanContext.TraceID=="<trace id>") | [.Name, .SpanContext.SpanID, .Parent.SpanID, .Status.Code]'
+```
+
+Example: a migration approved by both group leaders, then executed (`X-Request-ID: readme-trace-2`). The spans of the trace (name, span ID, parent span ID, status):
+
+```json
+["POST /api/migration/{id}/execute","dd0a201e800a2260","0000000000000000","Unset"]
+["job.enqueue","f1b426a30e579215","dd0a201e800a2260","Unset"]
+["job.process","6733661cfcf76d95","f1b426a30e579215","Unset"]
+["migration.lock_wait","3c6d2770cfe3a832","6733661cfcf76d95","Unset"]
+["migration.run","c0ad35b2b3b2d411","6733661cfcf76d95","Unset"]
+["sql migration","cb073128265e78cd","c0ad35b2b3b2d411","Unset"]
+```
+
+The `job.process` span as the console exporter writes it (`Resource` and scope fields left out, attributes flattened for reading). `Parent.Remote: true` is the context read back from the job row:
+
+```json
+{"Name":"job.process","SpanContext":{"TraceID":"1f5d052389932c3d11896055d2763300","SpanID":"6733661cfcf76d95"},"Parent":{"TraceID":"1f5d052389932c3d11896055d2763300","SpanID":"f1b426a30e579215","Remote":true},"SpanKind":5,"StartTime":"2026-11-27T09:30:03.157861455+07:00","EndTime":"2026-11-27T09:30:03.168851125+07:00","Attributes":{"job_id":"6b55242d-16cb-40f7-97aa-279fa5494be1","job_type":"EXECUTE","migration_id":"7f96e713-8b88-498e-879e-b7ba980d41bc","database_id":"15a8a362-0dae-4299-8bc3-0770df206823","attempt":1,"worker_id":"worker-3-bbd17602","job.queue_wait_ms":376,"job.status":"SUCCESS"},"Status":{"Code":"Unset","Description":""}}
+```
+
+The log records of the same trace (`time` left out, long IDs shortened). The HTTP records share the request span, the worker records share `job.process`, and the SQL records share the SQL span:
+
+```json
+{"level":"INFO","event":"audit.enqueue","component":"http","action":"enqueue","outcome":"success","migration_id":"7f96e713-…","database_id":"15a8a362-…","status":"QUEUED","request":"execute","job_id":"6b55242d-…","requires_approval":false,"trace_id":"1f5d052389932c3d11896055d2763300","span_id":"dd0a201e800a2260","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
+{"level":"INFO","event":"http.request","component":"http","method":"POST","path":"/api/migration/7f96e713-8b88-498e-879e-b7ba980d41bc/execute","status":202,"duration_ms":4,"trace_id":"1f5d052389932c3d11896055d2763300","span_id":"dd0a201e800a2260","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
+{"level":"INFO","event":"job.claimed","component":"worker","job_id":"6b55242d-…","migration_id":"7f96e713-…","database_id":"15a8a362-…","job_type":"EXECUTE","attempt":1,"worker_id":"worker-3-bbd17602","trace_id":"1f5d052389932c3d11896055d2763300","span_id":"6733661cfcf76d95","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
+{"level":"INFO","event":"sql.start","component":"migration","database_id":"15a8a362-…","sql_kind":"migration","query":"CREATE TABLE shipments (id bigint PRIMARY KEY, status text NOT NULL);\nINSERT INTO shipments SELECT g, 'NEW' FROM generate_series(1, 3) g;","migration_id":"7f96e713-…","execution_type":"UP","trace_id":"1f5d052389932c3d11896055d2763300","span_id":"cb073128265e78cd","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
+{"level":"INFO","event":"sql.result","component":"migration","database_id":"15a8a362-…","sql_kind":"migration","query":"CREATE TABLE shipments (id bigint PRIMARY KEY, status text NOT NULL);\nINSERT INTO shipments SELECT g, 'NEW' FROM generate_series(1, 3) g;","migration_id":"7f96e713-…","execution_type":"UP","duration_ms":4,"status":"SUCCESS","trace_id":"1f5d052389932c3d11896055d2763300","span_id":"cb073128265e78cd","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
+{"level":"INFO","event":"tx.commit","component":"migration","database_id":"15a8a362-…","migration_id":"7f96e713-…","execution_type":"UP","trace_id":"1f5d052389932c3d11896055d2763300","span_id":"c0ad35b2b3b2d411","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
+{"level":"INFO","event":"migration.attempt","component":"migration","execution_type":"UP","migration_id":"7f96e713-…","execution_id":"541a76dc-…","database_id":"15a8a362-…","version":1,"status":"SUCCESS","duration_ms":5,"query":"CREATE TABLE shipments (id bigint PRIMARY KEY, status text NOT NULL);\nINSERT INTO shipments SELECT g, 'NEW' FROM generate_series(1, 3) g;","trace_id":"1f5d052389932c3d11896055d2763300","span_id":"6733661cfcf76d95","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
+{"level":"INFO","event":"audit.execute","component":"migration","action":"execute","outcome":"success","execution_id":"541a76dc-…","migration_id":"7f96e713-…","database_id":"15a8a362-…","attempt":1,"sql_sent":true,"job_id":"6b55242d-…","trace_id":"1f5d052389932c3d11896055d2763300","span_id":"6733661cfcf76d95","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
+{"level":"INFO","event":"job.finished","component":"worker","job_id":"6b55242d-…","migration_id":"7f96e713-…","database_id":"15a8a362-…","job_type":"EXECUTE","attempt":1,"worker_id":"worker-3-bbd17602","status":"SUCCESS","trace_id":"1f5d052389932c3d11896055d2763300","span_id":"6733661cfcf76d95","correlation_id":"readme-trace-2","actor":"06f2c024-…"}
+```
+
+A script that fails (`CREATE TABLE orders` when `orders` already exists) gives the same tree, with the error from the SQL span up to the job:
+
+```json
+["sql migration","Error","ERROR: relation \"orders\" already exists (SQLSTATE 42P07)",["exception"]]
+["migration.run","Error","ERROR: relation \"orders\" already exists (SQLSTATE 42P07)",["tx.rollback","exception"]]
+["job.process","Error","ERROR 42P07: relation \"orders\" already exists",[]]
+```
+
+A batch migration (`UPDATE shipments SET status = 'SHIPPED'`, cursor `id`, batch size 2, 3 rows): every batch is a child of `job.process` with its own statements and commit. The last batch finds no keys left and ends the run (name, attributes, events):
+
+```json
+["migration.batch","batch_no=1 rows=2 cursor_to=2",["tx.commit"]]
+["migration.batch","batch_no=2 rows=1 cursor_to=3",["tx.commit"]]
+["migration.batch","batch_no=3 rows=0",[]]
 ```
 
 ### Testing and CI
