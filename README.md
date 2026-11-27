@@ -61,6 +61,7 @@ The `Makefile` holds the developer shortcuts. Run them from the repository root.
 | `make test` | Run unit tests (integration tests are skipped without `TEST_DATABASE_URL`) |
 | `make test-integration` | Start the disposable test PostgreSQL and run every test against it |
 | `make test-db-down` | Stop the test PostgreSQL |
+| `make seed-large` | Create the 2,000,000-row `events` table on the demo target (for trying batch mode, see [Per-Batch Execution](#per-batch-execution)); needs the Compose stack running |
 
 Run `npm --prefix frontend install` once before using the frontend targets. The Go server serves the built SPA from `frontend/dist`, so run `make frontend-build` at least once before `make dev`.
 
@@ -308,8 +309,7 @@ flowchart LR
 │   ├── src/pages/               # Login, signup, dashboard (viewer), migration, reviews, admin
 │   ├── src/components/          # Layout, sidebar, data grid, dry-run report, migration and admin parts
 │   ├── src/types/, src/utils/   # Shared TypeScript types and helpers
-│   └── public/static/           # Images copied into the build
-├── static/                      # Images served under /static
+│   └── public/static/           # Images; copied into frontend/dist/static, served under /static
 ├── docs/                        # Extra documentation (CodeQL SAST report)
 ├── docker/target-init/          # Init scripts for the demo target database
 ├── docker/seed/                 # Optional large dataset for batch mode (make seed-large)
@@ -461,6 +461,7 @@ A migration is a named SQL script (SQL Up, and SQL Down for rollback) for one ta
 `DRAFT → PENDING_REVIEW → APPROVED → QUEUED → RUNNING → SUCCESS | FAILED`, plus `PARTIAL` and `ABORTED` for batch migrations. Once it is `SUCCESS`, `FAILED` or `ABORTED` the row never changes again; `ROLLED_BACK` and `PARTIALLY_REVERTED` are not stored but derived from the history (see below).
 
 - **Drafts** (View & Edit): create, edit, delete, and duplicate. Names are up to 200 characters and scripts are up to 1 MiB. Duplicating copies any migration into a new draft.
+- **SQL Down, or irreversible with a reason**: a draft can be saved without SQL Down, but it can only be **submitted for review or executed** when it has a SQL Down, or is marked irreversible with a written reason. The editor shows what is missing under the field and keeps both buttons disabled until then; the server checks again (`422`). Rollback and forward requests are exempt, since their scripts are copied from the executed migration. In batch mode a `DELETE` must be irreversible: deleted rows cannot be brought back by an `UPDATE`/`DELETE` SQL Down.
 - **Script checks**: the platform wraps every script in one transaction, so statements that cannot run inside it are rejected before anything runs: transaction control (`BEGIN`, `COMMIT`, `ROLLBACK`, ...), `VACUUM`, `DISCARD`, `CREATE`/`DROP DATABASE` or `TABLESPACE`, `ALTER SYSTEM`, the `CONCURRENTLY` forms of index commands, and `COPY ... FROM STDIN / TO STDOUT`. `SAVEPOINT`, `RELEASE` and `ROLLBACK TO SAVEPOINT` are allowed.
 - **Execute**:
   - The whole script runs in one transaction: **COMMIT** when every statement succeeds, **ROLLBACK** otherwise.
@@ -481,6 +482,14 @@ Every change to a database must be approved by the **leader of every group that 
 - **Rollback and forward** create a request (a rollback or forward draft with the original, unchangeable scripts) that goes through the same review.
 - **Batch actions**: resume, abort with rollback, and mark as stopped of a `PARTIAL` batch migration each open a **batch action request** with one approval per group. The monitor on the detail page shows the request and its approvals; leaders approve it there or on **Persetujuan Migrasi** (`/migration/reviews`). Once it is approved, an editor runs it with the same button. One request per migration can be open at a time; a rejected request is final and a new one can be made. An approved request that was not run is cancelled when a request for another action replaces it.
 - **Fail closed**: if the groups with access cannot be read (for example, the platform database is unavailable), nothing is executed.
+- **Grants that change during a review**: when an admin gives a group access, takes it away, or deletes a group, open reviews follow at once (the same sync also runs at startup):
+  - a group that **lost** access no longer blocks: its pending approval is dropped, and a review that has nothing pending left becomes `APPROVED`;
+  - a group that **got** access must approve too: it gets a pending approval, and an `APPROVED` migration or batch request that has not run yet goes back to review.
+- **Revalidation under the lock**: a job can wait in the queue while grants change, so the worker checks again right after it takes the database lock, before any SQL is sent:
+  - the executor must still have View & Edit on the database;
+  - every group that has access **now** must have approved this run: the migration's own review, or for a resume/abort the batch request the job runs. A direct rollback/forward was queued without approval because no group had access then, so it is refused if one has now.
+
+  If a check fails, nothing reaches the target: the attempt is recorded with `sql_sent = false`, the job is `FAILED` with the reason, and the log has `migration.revalidation_failed`. A migration that a new group has to review goes back to `PENDING_REVIEW` with a pending approval for that group (the approvals already given are kept). Otherwise it returns to the status it had before it was queued (`APPROVED`, `PARTIAL`), so an editor who still has access can run it, or a new request can be made.
 - Platform Admins see every pending review but approve only for groups they lead.
 
 #### Asynchronous Execution
@@ -494,12 +503,16 @@ Every change to a database must be approved by the **leader of every group that 
 - **Retry** only happens for errors before any SQL reaches the target (target unavailable, broken connection), up to 3 attempts with exponential backoff. A failing script is a final `FAILED` result and is never retried. A busy database puts the job back without using an attempt.
 - **No double commit**: before running, the worker checks whether an execution of the same job already sent SQL and finished. A job is never run twice, even when it is delivered again after a crash.
 - On `SIGINT`/`SIGTERM` (Ctrl+C, `docker stop`) the server stops taking requests and jobs, waits for running jobs to finish, then exits.
+- **Lock recovery**: the lock of a database is a PostgreSQL **session** advisory lock (`pg_try_advisory_lock`), taken on a connection to the platform database that the run keeps for its whole duration. It is not a row in a table, so it cannot be left behind: PostgreSQL releases it when that session ends.
+  - The worker process exits or crashes: the OS closes its sockets, the session ends and the lock is free at once.
+  - The worker's host disappears without closing the connection (power loss, network partition): the server only notices through TCP keepalive. The Compose file sets `tcp_keepalives_idle=60`, `tcp_keepalives_interval=10` and `tcp_keepalives_count=6` on both databases, so that takes about 2 minutes instead of the Linux default of about 2 h 11 min. The same settings make the target roll back the dead worker's open transaction and release its row locks.
+  - Meanwhile the lease (30 s) has already expired and the reaper has settled the job as described above. A job of that database that runs before the lock is free cannot get it within `MIGRATION_QUEUE_TIMEOUT_MS`; it goes back to the queue without using an attempt and is tried again until the lock is released. Nothing runs on the database while the old session could still be alive.
 
 #### Per-Batch Execution
 
 A migration can run in **batch mode** (*Mode Eksekusi → Per-batch* in the editor) with a cursor column (`batch_attribute`, an integer key such as `id`) and a batch size (1–100,000 rows, default 1,000). This is for changes to large tables: one transaction per batch keeps every transaction and its locks short, and a run that stops can continue where it stopped.
 
-- **Script**: exactly one `UPDATE` or `DELETE` on one table, written as for a normal run (no `WITH`, `RETURNING`, `ORDER BY`, `LIMIT`). SQL Down, if any, follows the same rule. Both are checked when the draft is saved.
+- **Script**: exactly one `UPDATE` or `DELETE` on one table, written as for a normal run (no `WITH`, `RETURNING`, `ORDER BY`, `LIMIT`). SQL Down, if any, follows the same rule. Both are checked when the draft is saved. A `DELETE` must be marked irreversible (see [Migrations](#migrations)).
 - **How a batch runs**: the platform adds the key range to the statement itself. For `UPDATE orders SET status = 'ARCHIVED' WHERE status = 'CANCELLED'` with cursor `id`, every batch runs
   ```sql
   UPDATE orders SET status = 'ARCHIVED' WHERE (status = 'CANCELLED')
@@ -513,18 +526,34 @@ A migration can run in **batch mode** (*Mode Eksekusi → Per-batch* in the edit
   - **Resume** (*Lanjutkan dari Checkpoint*) runs the remaining batches, starting after the last checkpoint;
   - **Abort with rollback** (*Batalkan & Rollback Batch*) runs SQL Down over the same key ranges, **newest batch first**. When every batch is undone the migration is `ABORTED`; if it stops early it reads as **`PARTIALLY_REVERTED`** and can only be aborted again;
   - **Mark as stopped** (*Tandai Dihentikan*) sets `ABORTED` and leaves the committed batches in place.
+- **Recovery data**: before an UP batch of an `UPDATE` changes its rows, it copies them into `_dbplatform_batch_rows` on the target, as `to_jsonb` of the whole row (the *before-image*), and locks them with `FOR UPDATE`, in the batch's own transaction. How many it stored is kept with the checkpoint (`recovery_rows`).
+  - The copy uses the statement's `WHERE`; with `UPDATE ... FROM`, whose `WHERE` joins other tables, it takes every row of the key range.
+  - The statement then reports the keys it changed (`RETURNING`). If it changed a row that was not copied (another transaction made it match in between), the batch is rolled back with "baris pada rentang batch berubah ..." and the run stops; running it again is safe.
+  - Irreversible migrations store nothing, since they cannot be aborted with rollback.
+- **The abort safety rule**: an abort with rollback is refused before it starts when a committed batch has no recovery data (it was committed by an older version of the platform); *Tandai Dihentikan* still works. Each DOWN batch runs SQL Down over the batch's key range, then, **in the same transaction**, compares the stored before-images with the rows now in the range. It commits only when
+  1. every stored row is back exactly as it was before the migration, and
+  2. SQL Down changed no more rows than the batch had changed.
+
+  Otherwise that batch is rolled back and the abort stops as **unsafe** (still `PARTIAL`, or `PARTIALLY_REVERTED` when later batches were already undone), with the batch number, key range and row counts in the error. The usual causes are a row changed again after the migration, or a SQL Down that does not exactly undo SQL Up, for example `UPDATE ... SET status = 'NEW' WHERE status = 'ARCHIVED'` when some rows were already `ARCHIVED` before. A batch is never left half-reverted.
+- **Cleanup**: a DOWN batch deletes its own recovery rows when it commits; the rest are purged when the migration becomes final (`SUCCESS` or `ABORTED`). `_dbplatform_batch_rows` is hidden from the Database Viewer like the checkpoint table.
 - **Restarts are safe**: on `SIGTERM` a batch run stops at the next batch boundary and its job goes back to the queue without using an attempt; when a worker dies mid-run, the job is put back in the queue instead of becoming `UNCERTAIN`. In both cases the next run continues after the last checkpoint.
 - Every run (first run, resume, abort) is one execution in the history (`PARTIAL` when it stopped with committed batches); the batches it committed point at that execution.
 
-**Large dataset.** `make seed-large` creates `events` (2,000,000 rows, 173 MB) on the demo target, owned by the app role. Measured once on a laptop against the Docker test database (data on tmpfs), so treat the numbers as rough:
+**Large dataset.** `make seed-large` creates `events` (2,000,000 rows, 173 MB) on the demo target, owned by the app role. Measured on 2026-11-27 on one laptop against the Docker test database (PostgreSQL 16, data on tmpfs), each run on a freshly seeded table, so treat the numbers as rough and compare them with each other rather than with another machine:
 
-| Run | Total | Longest single transaction |
+| Run of `UPDATE events SET status = 'ARCHIVED'` | Total | Longest single transaction (average) |
 |---|---|---|
-| `UPDATE events SET status = 'ARCHIVED'` in one statement | 30–49 s | the whole statement (30–49 s) |
-| Batch mode, `batch_size` 10,000 (200 batches) | 40.0 s | 621 ms (average 146 ms) |
-| Batch mode, `batch_size` 50,000 (40 batches) | 25.9 s | 1.6 s (average 583 ms) |
+| One statement (standard mode) | 6.9 s | the whole statement, 6.9 s, with row locks on all 2,000,000 rows |
+| Batch mode, `batch_size` 10,000 (200 batches), with recovery data | 20.5 s | 145 ms (97 ms) |
+| Batch mode, `batch_size` 10,000, irreversible (no recovery data) | 7.7 s | 46 ms (33 ms) |
+| Batch mode, `batch_size` 50,000 (40 batches), with recovery data | 20.6 s | 512 ms (462 ms) |
+| Batch mode, `batch_size` 50,000, irreversible (no recovery data) | 7.6 s | 237 ms (175 ms) |
+| Abort with rollback of 199 batches of 10,000 (SQL Down + check per batch) | 19.7 s | 125 ms (94 ms) |
 
-The single statement is already close to the default `MIGRATION_STATEMENT_TIMEOUT_MS` (60 s), and it holds row locks on all 2,000,000 rows until it commits. In batch mode the total time is similar, but no transaction lasts more than a couple of seconds, and progress is never lost.
+- Batch mode alone costs little next to the single statement. Storing the before-images makes each batch about three times slower, because every changed row is also written as JSON; the longest transaction still stays well under a second.
+- The recovery data of the whole table took **459 MB** (the table itself is 173 MB). It is deleted when the migration is final, but PostgreSQL keeps the space for reuse by the table (autovacuum) instead of returning it to the disk; `VACUUM FULL _dbplatform_batch_rows` gives it back.
+- Marking a batch migration irreversible skips the recovery data (and the abort with rollback) when that cost is not worth it.
+- An earlier measurement on a slower laptop, before recovery data existed, gave 30–49 s for the single statement and 40.0 s / 25.9 s for batch sizes 10,000 / 50,000.
 
 #### Execution History and Audit
 
@@ -569,7 +598,9 @@ ORDER BY e.finished_at;
 - If the app process dies after a migration commits on the target but before its history is saved, the job becomes `UNCERTAIN` and holds that database. There is no UI to resolve it yet: check the target, then update the job (and, for a run that did commit, the migration) in the platform database.
 - Worker settings (number of workers, lease, attempts, backoff) are fixed in code and cannot be set through environment variables yet.
 - Batch mode supports one `UPDATE` or `DELETE` with an integer cursor column. Rows inserted beyond the last key while a run is in progress are included; keys below the checkpoint that appear later are not. Rolling back a **completed** batch migration (`SUCCESS`) runs SQL Down in one transaction, like a standard migration.
-- Batch mode creates `_dbplatform_batch_checkpoints` in the target's default schema; the platform's database role must be allowed to create tables there.
+- Batch mode creates `_dbplatform_batch_checkpoints` and `_dbplatform_batch_rows` in the target's default schema; the platform's database role must be allowed to create tables there.
+- The recovery data takes about as much space as the rows the batches changed (as JSON), until the migration is final; see the measurements under [Per-Batch Execution](#per-batch-execution).
+- The abort check compares whole rows. A column that the application changes on its own (an `updated_at` set by a trigger, a counter) after the migration makes that batch unsafe to undo, even if SQL Down is correct; such a migration can only be marked as stopped.
 
 ### Activity Logging
 
@@ -580,15 +611,16 @@ Every log record is one JSON object on stdout, written by one `log/slog` logger 
 - **Every SQL execution on a target is logged** as a `sql.start` and `sql.result` pair, with `sql_kind`:
   - Query Explorer queries (`read_only`), table browsing (`table_browse`), schema lookups (`catalog`);
   - migration scripts (`migration`) and dry-run statements (`dry_run`, one pair per statement);
-  - in batch mode: the key range of the next batch (`batch_bounds`), the batch statement itself (`migration_batch`), the estimate of the batches left (`batch_estimate`), and checkpoint reads and writes (`checkpoint`), each with `batch_no` when it belongs to a batch.
+  - in batch mode: the key range of the next batch (`batch_bounds`), the batch statement itself (`migration_batch`), the estimate of the batches left (`batch_estimate`), checkpoint reads and writes (`checkpoint`), and the recovery data: storing the before-images (`recovery_capture`), the check after SQL Down (`recovery_verify`), and deleting them (`recovery_release` per batch, `recovery_purge` when the migration is final). Each has `batch_no` when it belongs to a batch.
 
   `sql.result` has `duration_ms`, `status`, `rows` when known, and on failure `error` and the PostgreSQL `sqlstate`. Bind parameters are listed by type only (`params`), never by value.
 - **Transactions on a target** log `tx.commit` or `tx.rollback`: once per migration run, once per batch in batch mode, and a `tx.rollback` with `reason: dry_run` at the end of every dry run. A run of a migration, rollback or forward ends with one `migration.attempt` record (`execution_type`, `execution_id`, `version`, `status`).
-- **Jobs** log `job.claimed`, `job.finished`, `job.retry_scheduled` (with `delay_ms` and `counts_as_attempt`), `job.uncertain` and `worker.reaped`. A job keeps the `correlation_id` and `actor` of the request that queued it, so the worker's records join the HTTP request's.
+- **Jobs** log `job.claimed`, `job.finished`, `job.retry_scheduled` (with `delay_ms` and `counts_as_attempt`), `job.uncertain`, `worker.reaped`, and `migration.revalidation_failed` when a run is refused under the lock (see [Review and Approval](#review-and-approval)). A job keeps the `correlation_id` and `actor` of the request that queued it, so the worker's records join the HTTP request's.
 - **Batches** log `migration.batch` (direction, `batch_no`, `cursor_from`, `cursor_to`, `rows`, `duration_ms`), `migration.batch_failed`, and `migration.batch_recovered` when checkpoints are copied from the target after a crash.
 - **Audit** events are `audit.*` (see **Execution History and Audit**).
 - **Other events**: `http.request` (access log; `WARN` for 4xx, `ERROR` for 5xx), `authz.denied`, `authz.error`, `viewer.error`, `migration.error`, and startup events such as `server.started`.
 - **Redaction**: attributes whose name contains `password`, `secret`, `token`, `session`, `cookie`, `authorization`, `dsn` or `credential` are written as `[REDACTED]`. Bind parameter values are never logged, only their types. Query text is cut at 2000 characters.
+- **Why parameter values are masked** (a decision, not an omission): the SQL that changes a target never uses bind parameters. Migration scripts are sent as text, logged in full in `sql.start` and stored in the execution history, so a run can always be reproduced. Bind parameters carry two other kinds of value: the platform's own (IDs, batch bounds, the batch size), which already appear as separate fields (`migration_id`, `batch_no`, `cursor_from`, `cursor_to`) in the same records, and user input from the Database Viewer, which can be personal data or something secret typed into a query. Logging only the types keeps the second kind out of the logs and loses nothing needed to debug the first.
 
 Reading the logs:
 
