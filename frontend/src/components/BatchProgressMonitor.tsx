@@ -24,7 +24,9 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
   const percent = total > 0 ? Math.min(100, Math.max(0, Math.round((committed / total) * 100))) : 0
 
   const isRunning = migration.status === 'RUNNING' || migration.status === 'QUEUED'
-  const isPartial = migration.status === 'PARTIAL'
+  // PARTIALLY_REVERTED: an abort undid some batches and stopped; it can only be aborted again.
+  const isReverting = migration.status === 'PARTIALLY_REVERTED'
+  const isPartial = migration.status === 'PARTIAL' || isReverting
   const isSuccess = migration.status === 'SUCCESS'
   const isFailed = migration.status === 'FAILED'
   const isAborted = migration.status === 'ABORTED'
@@ -91,7 +93,7 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
           )}
           {isPartial && (
             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sem-warning/15 text-sem-warning border border-sem-warning/30">
-              STATUS PARTIAL
+              {isReverting ? 'PARTIALLY REVERTED' : 'STATUS PARTIAL'}
             </span>
           )}
           {isSuccess && (
@@ -218,7 +220,9 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
                 Eksekusi Terhenti Sebagian (Status PARTIAL)
               </h4>
               <p className="text-xs text-zinc-300 mt-1">
-                Batch 1 sampai {committed} telah berhasil di-commit ke database. Eksekusi terhenti sebelum mencapai batch akhir.
+                {isReverting
+                  ? `${migration.batch_reverted_count ?? 0} batch sudah di-rollback; ${committed} batch masih tersimpan. Lanjutkan pembatalan untuk me-rollback sisanya.`
+                  : `Batch 1 sampai ${committed} telah berhasil di-commit ke database. Eksekusi terhenti sebelum mencapai batch akhir.`}
               </p>
             </div>
           </div>
@@ -246,14 +250,16 @@ export const BatchProgressMonitor: React.FC<BatchProgressMonitorProps> = ({
 
           {canEdit && features.batchActions && (
             <div className="flex flex-wrap items-center gap-2 pt-1">
-              <button
-                type="button"
-                disabled={actionLoading}
-                onClick={handleResume}
-                className="px-4 py-2 rounded-lg text-xs font-bold bg-brand-primary text-app-bg hover:bg-brand-primary-hover transition cursor-pointer disabled:opacity-50 shadow-md"
-              >
-                {actionLoading ? 'Memproses...' : 'Lanjutkan dari Checkpoint'}
-              </button>
+              {!isReverting && (
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={handleResume}
+                  className="px-4 py-2 rounded-lg text-xs font-bold bg-brand-primary text-app-bg hover:bg-brand-primary-hover transition cursor-pointer disabled:opacity-50 shadow-md"
+                >
+                  {actionLoading ? 'Memproses...' : 'Lanjutkan dari Checkpoint'}
+                </button>
+              )}
 
               <button
                 type="button"

@@ -18,6 +18,8 @@ export function jobFeedback(job: MigrationJobView, label: string): { success: bo
   switch (job.status) {
     case 'SUCCESS':
       return { success: true, message: `${label} berhasil dijalankan.` }
+    case 'PARTIAL':
+      return { success: false, message: `${label} berhenti sebagian (PARTIAL): ${job.last_error || 'lihat monitor batch'}. Lanjutkan atau batalkan dari halaman detail.` }
     case 'UNCERTAIN':
       return { success: false, message: `${label}: hasil di database target belum pasti. Migration berikutnya ditahan sampai Platform Admin memeriksanya.` }
     default:

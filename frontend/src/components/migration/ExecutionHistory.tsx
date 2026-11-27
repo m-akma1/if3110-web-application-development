@@ -7,6 +7,7 @@ const statusClass: Record<string, string> = {
   SUCCESS: 'text-sem-success',
   FAILED: 'text-sem-danger',
   UNCERTAIN: 'text-sem-warning',
+  PARTIAL: 'text-sem-warning',
 }
 
 // ExecutionHistory lists every attempt to run one migration (append-only history), including

@@ -348,7 +348,7 @@ export const MigrationPage: React.FC = () => {
     setFeedback(null)
     try {
       await api.resumeMigration(m.id)
-      setFeedback({ success: true, message: `Eksekusi migrasi "${m.name}" berhasil dilanjutkan.` })
+      setFeedback({ success: true, message: `Migrasi "${m.name}" masuk antrean untuk dilanjutkan dari checkpoint.` })
       await fetchOverview(activeDBID, draftParam, false)
     } catch (err: any) {
       setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal melanjutkan migrasi dari checkpoint' })
@@ -369,7 +369,7 @@ export const MigrationPage: React.FC = () => {
     setFeedback(null)
     try {
       await api.abortPartialMigration(m.id, { rollback: true })
-      setFeedback({ success: true, message: `Migrasi "${m.name}" berhasil dibatalkan dan di-rollback.` })
+      setFeedback({ success: true, message: `Pembatalan migrasi "${m.name}" masuk antrean: batch tersimpan di-rollback dari yang terakhir.` })
       await fetchOverview(activeDBID, draftParam, false)
     } catch (err: any) {
       setFeedback({ success: false, message: err.data?.error || err.message || 'Gagal membatalkan migrasi' })
